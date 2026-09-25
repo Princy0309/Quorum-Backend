@@ -1,11 +1,14 @@
 const express = require('express');
+const { loginLimiter, refreshLimiter } = require('../middlewares/rateLimiter');
+const { register, login, refreshToken, logout, getMe } = require('../controllers/authController');
+const { authMiddleware } = require('../middlewares/authMiddleware');
+
 const router = express.Router();
 
-
-// POST /api/auth/register
-// POST /api/auth/login
-// POST /api/auth/refresh-token
-// POST /api/auth/logout
-// GET  /api/auth/me
+router.post('/register', loginLimiter, register);
+router.post('/login', loginLimiter, login);
+router.post('/refresh-token', refreshLimiter, refreshToken);
+router.post('/logout', logout);
+router.get('/me', authMiddleware, getMe);
 
 module.exports = router;
