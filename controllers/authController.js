@@ -4,6 +4,8 @@ const { registerSchema, loginSchema } = require('../validators/authValidators');
 const { sendSuccess, sendError } = require('../utils/apiResponse');
 const { issueTokens, rotateRefreshToken } = require('../services/tokenService');
 const redis = require('../config/redis');
+const { hashToken } = require('../utils/hashToken');
+const { refreshCookieOptions } = require('../utils/cookieOptions');
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000;
@@ -22,12 +24,7 @@ const register = async (req, res) => {
     
     const { accessToken, refreshToken } = await issueTokens(user, req);
     
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
     
     return sendSuccess(res, 201, 'User registered successfully', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   } catch (err) {
@@ -80,12 +77,7 @@ const login = async (req, res) => {
 
     const { accessToken, refreshToken } = await issueTokens(user, req);
 
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
 
     return sendSuccess(res, 200, 'Login successful', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   } catch (err) {
@@ -101,12 +93,7 @@ const refreshToken = async (req, res) => {
   try {
     const { accessToken, refreshToken: newRefreshToken } = await rotateRefreshToken(token, req);
 
-    res.cookie('refreshToken', newRefreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
 
     return sendSuccess(res, 200, 'Token refreshed successfully', { accessToken });
   } catch (err) {
@@ -120,7 +107,6 @@ const logout = async (req, res) => {
   if (!token) return sendSuccess(res, 200, 'Logged out successfully');
 
   try {
-    const { hashToken } = require('../utils/hashToken');
     const tokenHash = hashToken(token);
     
     const raw = await redis.get(`refresh:${tokenHash}`);
