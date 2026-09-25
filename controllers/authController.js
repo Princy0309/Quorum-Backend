@@ -97,6 +97,10 @@ const refreshToken = async (req, res) => {
 
     return sendSuccess(res, 200, 'Token refreshed successfully', { accessToken });
   } catch (err) {
+    if (err.status === 500) {
+      console.error(err);
+      return sendError(res, 500, 'Internal Server Error');
+    }
     res.clearCookie('refreshToken');
     return sendError(res, 401, err.message);
   }
