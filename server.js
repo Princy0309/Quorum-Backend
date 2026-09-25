@@ -4,7 +4,7 @@ const cookieParser = require('cookie-parser');
 require('dotenv').config();
 
 const authRoutes = require('./routes/authRoutes');
-const userRoutes = require('./routes/userRoutes');
+const otpRoutes = require('./routes/otpRoutes');
 const errorHandler = require('./middlewares/errorHandler');
 
 const app = express();
@@ -19,7 +19,7 @@ app.use(cookieParser());
 
 
 app.use('/api/auth', authRoutes);
-app.use('/api/user', userRoutes);
+app.use('/api/user', otpRoutes);
 
 
 app.get('/health', (req, res) => {
