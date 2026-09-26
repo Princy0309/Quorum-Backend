@@ -11,10 +11,10 @@ const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000;
 
 const register = async (req, res) => {
-  const { error } = registerSchema.validate(req.body);
+  const { error, value } = registerSchema.validate(req.body);
   if (error) return sendError(res, 400, error.details[0].message);
 
-  const { name, email, password } = req.body;
+  const { name, email, password } = value;
   
   try {
     const passwordHash = await bcrypt.hash(password, 10);
@@ -37,10 +37,10 @@ const register = async (req, res) => {
 };
 
 const login = async (req, res) => {
-  const { error } = loginSchema.validate(req.body);
+  const { error, value } = loginSchema.validate(req.body);
   if (error) return sendError(res, 400, error.details[0].message);
 
-  const { email, password } = req.body;
+  const { email, password } = value;
 
   try {
     const user = await prisma.user.findUnique({ where: { email } });
