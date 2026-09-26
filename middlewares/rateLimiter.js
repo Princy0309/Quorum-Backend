@@ -1,19 +1,28 @@
 const rateLimit = require('express-rate-limit');
 
-const authLimiter = rateLimit({
+const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
-  message: { success: false, message: 'Too many attempts, try again after 15 minutes.' },
+  skipSuccessfulRequests: true, // Only failed logins count
+  message: { success: false, message: 'Too many failed login attempts, try again after 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-const passwordResetLimiter = rateLimit({
+const refreshLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
-  message: { success: false, message: 'Too many password reset requests, try again later.' },
+  max: 15,
+  message: { success: false, message: 'Too many refresh token requests, try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-module.exports = { authLimiter, passwordResetLimiter };
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // Max 10 successful/failed registrations per IP per hour to stop bots
+  message: { success: false, message: 'Too many registration attempts, try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+module.exports = { loginLimiter, refreshLimiter, registerLimiter };
