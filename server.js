@@ -26,6 +26,10 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+app.get('/', (req, res) => {
+  res.status(200).send('API is running');
+});
+
 
 app.use(errorHandler);
 
