@@ -19,11 +19,11 @@ app.use(cookieParser());
 
 
 app.use('/api/auth', authRoutes);
-app.use('/api/user', otpRoutes);
+app.use('/api/otp', otpRoutes);
 
 
 app.get('/health', (req, res) => {
-  res.json({message: 'Server is running'});
+  res.json({ status: 'ok' });
 });
 
 
