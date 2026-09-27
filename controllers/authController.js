@@ -46,33 +46,15 @@ const login = async (req, res) => {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return sendError(res, 401, 'Invalid credentials');
 
-    if (user.lockedUntil && user.lockedUntil > new Date()) {
-      const minutesLeft = Math.ceil((user.lockedUntil - Date.now()) / 60000);
-      return sendError(res, 423, `Account locked. Try again in ${minutesLeft} minute(s).`);
-    }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isMatch) {
-      const newAttempts = user.failedLoginAttempts + 1;
-      const shouldLock = newAttempts >= MAX_FAILED_ATTEMPTS;
-
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          failedLoginAttempts: newAttempts,
-          lockedUntil: shouldLock ? new Date(Date.now() + LOCK_DURATION_MS) : null,
-        },
-      });
-
-      const message = shouldLock
-        ? 'Too many failed attempts. Account locked for 15 minutes.'
-        : 'Invalid credentials';
-      return sendError(res, 401, message);
+      return sendError(res, 401, "Invalid credentials");
     }
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { failedLoginAttempts: 0, lockedUntil: null, lastLogin: new Date() },
+      data: { lastLogin: new Date() },
     });
 
     const { accessToken, refreshToken } = await issueTokens(user, req);
