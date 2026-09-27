@@ -1,7 +1,7 @@
 # Quorum API Documentation
 
-**Base URL (Local)**: `http://localhost:5000`
-
+**Base URL (Production/AWS)**: `http://quorum-backend-env.eba-2vd8rmzr.ap-south-1.elasticbeanstalk.com`
+**Base URL (Local Development)**: `http://localhost:5000`
 ---
 
 ## 📱 Important Headers
