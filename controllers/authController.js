@@ -11,10 +11,10 @@ const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000;
 
 const register = async (req, res) => {
-  const { error } = registerSchema.validate(req.body);
+  const { error, value } = registerSchema.validate(req.body);
   if (error) return sendError(res, 400, error.details[0].message);
 
-  const { name, email, password } = req.body;
+  const { name, email, password } = value;
   
   try {
     const passwordHash = await bcrypt.hash(password, 10);
@@ -23,10 +23,14 @@ const register = async (req, res) => {
     });
     
     const { accessToken, refreshToken } = await issueTokens(user, req);
+    const isMobile = req.headers['x-client-platform'] === 'mobile';
     
-    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-    
-    return sendSuccess(res, 201, 'User registered successfully', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    if (isMobile) {
+      return sendSuccess(res, 201, 'User registered successfully', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    } else {
+      res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+      return sendSuccess(res, 201, 'User registered successfully', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    }
   } catch (err) {
     if (err.code === 'P2002') {
       return sendError(res, 409, 'Email already registered');
@@ -37,10 +41,10 @@ const register = async (req, res) => {
 };
 
 const login = async (req, res) => {
-  const { error } = loginSchema.validate(req.body);
+  const { error, value } = loginSchema.validate(req.body);
   if (error) return sendError(res, 400, error.details[0].message);
 
-  const { email, password } = req.body;
+  const { email, password } = value;
 
   try {
     const user = await prisma.user.findUnique({ where: { email } });
@@ -58,10 +62,14 @@ const login = async (req, res) => {
     });
 
     const { accessToken, refreshToken } = await issueTokens(user, req);
+    const isMobile = req.headers['x-client-platform'] === 'mobile';
 
-    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-
-    return sendSuccess(res, 200, 'Login successful', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    if (isMobile) {
+      return sendSuccess(res, 200, 'Login successful', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    } else {
+      res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+      return sendSuccess(res, 200, 'Login successful', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    }
   } catch (err) {
     console.error(err);
     return sendError(res, 500, 'Internal Server Error');
@@ -69,15 +77,19 @@ const login = async (req, res) => {
 };
 
 const refreshToken = async (req, res) => {
-  const token = req.cookies.refreshToken;
+  const token = req.cookies?.refreshToken || req.body?.refreshToken;
   if (!token) return sendError(res, 401, 'No refresh token provided');
 
   try {
     const { accessToken, refreshToken: newRefreshToken } = await rotateRefreshToken(token, req);
+    const isMobile = req.headers['x-client-platform'] === 'mobile';
 
-    res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
-
-    return sendSuccess(res, 200, 'Token refreshed successfully', { accessToken });
+    if (isMobile) {
+      return sendSuccess(res, 200, 'Token refreshed successfully', { accessToken, refreshToken: newRefreshToken });
+    } else {
+      res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
+      return sendSuccess(res, 200, 'Token refreshed successfully', { accessToken });
+    }
   } catch (err) {
     if (err.status === 500) {
       console.error(err);
@@ -89,7 +101,7 @@ const refreshToken = async (req, res) => {
 };
 
 const logout = async (req, res) => {
-  const token = req.cookies.refreshToken;
+  const token = req.cookies?.refreshToken || req.body?.refreshToken;
   if (!token) return sendSuccess(res, 200, 'Logged out successfully');
 
   try {
