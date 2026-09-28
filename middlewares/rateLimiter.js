@@ -25,12 +25,16 @@ const registerRateLimiter = new RateLimiterRedis({
   blockDuration: 60 * 60,
 });
 
-const loginLimiter = (req, res, next) => {
-  loginRateLimiter.consume(req.ip)
-    .then(() => next())
-    .catch(() => {
-      res.status(429).json({ success: false, message: 'Too many failed login attempts, try again after 15 minutes.' });
-    });
+const loginLimiter = async (req, res, next) => {
+  try {
+    const status = await loginRateLimiter.get(req.ip);
+    if (status && status.remainingPoints <= 0) {
+      return res.status(429).json({ success: false, message: 'Too many failed login attempts, try again after 15 minutes.' });
+    }
+    next();
+  } catch (err) {
+    next();
+  }
 };
 
 const refreshLimiter = (req, res, next) => {
@@ -49,4 +53,4 @@ const registerLimiter = (req, res, next) => {
     });
 };
 
-module.exports = { loginLimiter, refreshLimiter, registerLimiter };
+module.exports = { loginLimiter, refreshLimiter, registerLimiter, loginRateLimiter };
