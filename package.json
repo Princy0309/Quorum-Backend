@@ -38,6 +38,7 @@
     "ioredis": "^6.0.0",
     "joi": "^18.2.9",
     "jsonwebtoken": "^9.0.3",
-    "nodemailer": "^10.0.10"
+    "nodemailer": "^10.0.10",
+    "rate-limiter-flexible": "^11.2.1"
   }
 }
