@@ -40,7 +40,10 @@ const loginLimiter = async (req, res, next) => {
 const refreshLimiter = (req, res, next) => {
   refreshRateLimiter.consume(req.ip)
     .then(() => next())
-    .catch(() => {
+    .catch((err) => {
+      if (err instanceof Error) {
+        return next();
+      }
       res.status(429).json({ success: false, message: 'Too many refresh token requests, try again later.' });
     });
 };
@@ -48,9 +51,13 @@ const refreshLimiter = (req, res, next) => {
 const registerLimiter = (req, res, next) => {
   registerRateLimiter.consume(req.ip)
     .then(() => next())
-    .catch(() => {
+    .catch((err) => {
+      if (err instanceof Error) {
+        return next();
+      }
       res.status(429).json({ success: false, message: 'Too many registration attempts, try again later.' });
     });
 };
 
 module.exports = { loginLimiter, refreshLimiter, registerLimiter, loginRateLimiter };
+
