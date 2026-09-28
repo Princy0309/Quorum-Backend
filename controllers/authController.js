@@ -6,7 +6,7 @@ const { issueTokens, rotateRefreshToken } = require('../services/tokenService');
 const redis = require('../config/redis');
 const { hashToken } = require('../utils/hashToken');
 const { refreshCookieOptions } = require('../utils/cookieOptions');
-
+const { loginRateLimiter } = require('../middlewares/rateLimiter');
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000;
 
@@ -15,16 +15,16 @@ const register = async (req, res) => {
   if (error) return sendError(res, 400, error.details[0].message);
 
   const { name, email, password } = value;
-  
+
   try {
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await prisma.user.create({
       data: { name, email, passwordHash }
     });
-    
+
     const { accessToken, refreshToken } = await issueTokens(user, req);
     const isMobile = req.headers['x-client-platform'] === 'mobile';
-    
+
     if (isMobile) {
       return sendSuccess(res, 201, 'User registered successfully', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
     } else {
@@ -48,11 +48,14 @@ const login = async (req, res) => {
 
   try {
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) return sendError(res, 401, 'Invalid credentials');
-
+    if (!user) {
+      await loginRateLimiter.consume(req.ip).catch(() => {});
+      return sendError(res, 401, 'Invalid credentials');
+    }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isMatch) {
+      await loginRateLimiter.consume(req.ip).catch(() => {});
       return sendError(res, 401, "Invalid credentials");
     }
 
@@ -106,7 +109,7 @@ const logout = async (req, res) => {
 
   try {
     const tokenHash = hashToken(token);
-    
+
     const raw = await redis.get(`refresh:${tokenHash}`);
     if (raw) {
       const { userId } = JSON.parse(raw);

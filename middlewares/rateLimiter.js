@@ -1,28 +1,52 @@
-const rateLimit = require('express-rate-limit');
+const { RateLimiterRedis } = require('rate-limiter-flexible');
+const redisClient = require('../config/redis');
 
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  skipSuccessfulRequests: true, // Only failed logins count
-  message: { success: false, message: 'Too many failed login attempts, try again after 15 minutes.' },
-  standardHeaders: true,
-  legacyHeaders: false,
+const loginRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'login',
+  points: 10,
+  duration: 15 * 60,
+  blockDuration: 15 * 60,
 });
 
-const refreshLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 15,
-  message: { success: false, message: 'Too many refresh token requests, try again later.' },
-  standardHeaders: true,
-  legacyHeaders: false,
+const refreshRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'refresh',
+  points: 15,
+  duration: 15 * 60,
+  blockDuration: 15 * 60,
 });
 
-const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 10, // Max 10 successful/failed registrations per IP per hour to stop bots
-  message: { success: false, message: 'Too many registration attempts, try again later.' },
-  standardHeaders: true,
-  legacyHeaders: false,
+const registerRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'register',
+  points: 10,
+  duration: 60 * 60,
+  blockDuration: 60 * 60,
 });
+
+const loginLimiter = (req, res, next) => {
+  loginRateLimiter.consume(req.ip)
+    .then(() => next())
+    .catch(() => {
+      res.status(429).json({ success: false, message: 'Too many failed login attempts, try again after 15 minutes.' });
+    });
+};
+
+const refreshLimiter = (req, res, next) => {
+  refreshRateLimiter.consume(req.ip)
+    .then(() => next())
+    .catch(() => {
+      res.status(429).json({ success: false, message: 'Too many refresh token requests, try again later.' });
+    });
+};
+
+const registerLimiter = (req, res, next) => {
+  registerRateLimiter.consume(req.ip)
+    .then(() => next())
+    .catch(() => {
+      res.status(429).json({ success: false, message: 'Too many registration attempts, try again later.' });
+    });
+};
 
 module.exports = { loginLimiter, refreshLimiter, registerLimiter };
