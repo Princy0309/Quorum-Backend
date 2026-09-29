@@ -10,14 +10,9 @@ const errorHandler = require('./middlewares/errorHandler').default || require('.
 
 const app = express();
 
-const allowedOrigins = [
-  'http://localhost:3000',
-  'https://newquorum.me',
-  'https://www.newquorum.me',
-  'https://quorum-web-otsg.vercel.app',
-  'https://quorum-web-omega.vercel.app',
-  process.env.CLIENT_URL
-].filter(Boolean);
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
+  : [process.env.CLIENT_URL || 'http://localhost:3000'].filter(Boolean);
 
 app.use(cors({
   origin: function (origin, callback) {
