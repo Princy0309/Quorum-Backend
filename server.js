@@ -15,6 +15,7 @@ const allowedOrigins = [
   'https://newquorum.me',
   'https://www.newquorum.me',
   'https://quorum-web-otsg.vercel.app',
+  'https://quorum-web-omega.vercel.app',
   process.env.CLIENT_URL
 ].filter(Boolean);
 
