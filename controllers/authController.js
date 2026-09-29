@@ -42,7 +42,7 @@ const register = async (req, res) => {
       return sendSuccess(res, 201, 'User registered successfully', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
     } else {
       res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-      return sendSuccess(res, 201, 'User registered successfully', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+      return sendSuccess(res, 201, 'User registered successfully', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
     }
   } catch (err) {
     if (err.code === 'P2002') {
@@ -84,7 +84,7 @@ const login = async (req, res) => {
       return sendSuccess(res, 200, 'Login successful', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
     } else {
       res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-      return sendSuccess(res, 200, 'Login successful', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+      return sendSuccess(res, 200, 'Login successful', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
     }
   } catch (err) {
     console.error(err);
