@@ -113,7 +113,7 @@ const forgotPassword = async (req, res) => {
             return sendSuccess(res, 200, 'Password reset OTP sent to your email');
     }catch(error){
         console.error('Error sending password reset OTP: ', error);
-        return sendError(res, 500, 'Internet Server ErrorS')
+        return sendError(res, 500, 'Internal Server Error')
     }
 }
 
