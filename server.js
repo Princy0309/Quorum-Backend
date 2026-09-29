@@ -37,7 +37,14 @@ app.use('/api/otp', otpRoutes);
 
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+  res.json({ 
+    status: 'ok',
+    hasDbUrl: !!process.env.DATABASE_URL,
+    hasRedisUrl: !!process.env.REDIS_URL,
+    hasJwtSecret: !!process.env.JWT_SECRET,
+    hasSmtpUser: !!process.env.SMTP_USER,
+    hasSmtpPass: !!process.env.SMTP_PASS,
+  });
 });
 
 app.get('/', (req, res) => {
