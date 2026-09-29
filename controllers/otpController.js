@@ -70,6 +70,11 @@ const verifyEmail = async (req, res) => {
         }
         await redis.del(`otp:verify:${user.id}`);
 
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { isEmailVerified: true }
+        });
+
         return sendSuccess(res, 200, 'Email verified successfully');
     }catch(error){
         console.error('Error veryfying email OTP: ', error);
