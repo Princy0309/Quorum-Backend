@@ -28,7 +28,7 @@ const sendVerificationOTP = async (req, res) => {
 
         await sendOTPEmail(user.email, code, 'verification');
 
-        return sendSuccess(res, 200, 'Verification OTP snet to your email');
+        return sendSuccess(res, 200, 'Verification OTP sent to your email');
     } catch (error) {
         console.error('Error sending verification OTP: ', error);
         return sendError(res, 500, 'Internal Server Error');
@@ -54,7 +54,7 @@ const verifyEmail = async (req, res) => {
 
         const { codeHash: storedHash, attempts } = JSON.parse(raw);
 
-        if (attempts > 5) {
+        if (attempts >= 5) {
             await redis.del(`otp:verify:${user.id}`);
             return sendError(res, 400, 'Too many failed attempts.Please request a new OTP.');
         }
