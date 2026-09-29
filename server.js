@@ -3,6 +3,8 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 require('dotenv').config();
 const prisma = require('./config/prisma');
+const setupSwagger = require('./config/swagger');
+
 
 const authRoutes = require('./routes/authRoutes');
 const otpRoutes = require('./routes/otpRoutes');
@@ -36,6 +38,8 @@ app.use(cookieParser());
 
 app.use('/api/auth', authRoutes);
 app.use('/api/otp', otpRoutes);
+setupSwagger(app);
+
 
 
 app.get('/health', (req, res) => {
