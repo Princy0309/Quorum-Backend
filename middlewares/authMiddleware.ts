@@ -1,8 +1,9 @@
+import { Request, Response, NextFunction } from 'express';
 const { verifyAccessToken } = require('../services/tokenService');
 const { sendError } = require('../utils/apiResponse');
 const prisma = require('../config/prisma');
 
-const authMiddleware = async (req, res, next) => {
+export const authMiddleware = async (req: Request | any, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return sendError(res, 401, 'Unauthorized, missing token');
@@ -10,7 +11,7 @@ const authMiddleware = async (req, res, next) => {
 
   const token = authHeader.split(' ')[1];
 
-  let decoded;
+  let decoded: any;
   try {
     decoded = verifyAccessToken(token);
   } catch (err) {
@@ -26,18 +27,15 @@ const authMiddleware = async (req, res, next) => {
     req.user = safeUser;
     next();
   } catch (err) {
-    console.error(err);
     return sendError(res, 500, 'Internal Server Error');
   }
 };
 
-const authorizeRoles = (...roles) => {
-  return (req, res, next) => {
+export const authorizeRoles = (...roles: string[]) => {
+  return (req: Request | any, res: Response, next: NextFunction) => {
     if (!req.user || !roles.includes(req.user.role)) {
       return sendError(res, 403, 'Forbidden, insufficient permissions');
     }
     next();
   };
 };
-
-module.exports = { authMiddleware, authorizeRoles };

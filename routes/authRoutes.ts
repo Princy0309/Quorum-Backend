@@ -1,9 +1,9 @@
-const express = require('express');
+import { Router } from 'express';
 const { registerLimiter, loginLimiter, refreshLimiter } = require('../middlewares/rateLimiter');
 const { register, login, refreshToken, logout, getMe } = require('../controllers/authController');
 const { authMiddleware } = require('../middlewares/authMiddleware');
 
-const router = express.Router();
+const router = Router();
 
 router.post('/register', registerLimiter, register);
 router.post('/login', loginLimiter, login);

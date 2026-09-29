@@ -1,3 +1,4 @@
+import { Request, Response } from 'express';
 const bcrypt = require('bcryptjs');
 const prisma = require('../config/prisma');
 const { registerSchema, loginSchema } = require('../validators/authValidators');
@@ -7,14 +8,8 @@ const redis = require('../config/redis');
 const { hashToken } = require('../utils/hashToken');
 const { refreshCookieOptions } = require('../utils/cookieOptions');
 const { loginRateLimiter } = require('../middlewares/rateLimiter');
-const { generateOTP } = require('../utils/generateOTP');
-const { sendOTPEmail } = require('../services/emailService');
 
-const MAX_FAILED_ATTEMPTS = 5;
-const LOCK_DURATION_MS = 15 * 60 * 1000;
-const OTP_TTL_SECONDS = 10 * 60;
-
-const register = async (req, res) => {
+export const register = async (req: Request, res: Response) => {
   const { error, value } = registerSchema.validate(req.body);
   if (error) return sendError(res, 400, error.details[0].message);
 
@@ -25,7 +20,6 @@ const register = async (req, res) => {
     const user = await prisma.user.create({
       data: { name, email, passwordHash }
     });
-
     
     const { accessToken, refreshToken } = await issueTokens(user, req);
     const isMobile = req.headers['x-client-platform'] === 'mobile';
@@ -36,16 +30,15 @@ const register = async (req, res) => {
       res.cookie('refreshToken', refreshToken, refreshCookieOptions);
       return sendSuccess(res, 201, 'User registered successfully', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
     }
-  } catch (err) {
+  } catch (err: any) {
     if (err.code === 'P2002') {
       return sendError(res, 409, 'Email already registered');
     }
-    console.error(err);
     return sendError(res, 500, err.message || 'Internal Server Error');
   }
 };
 
-const login = async (req, res) => {
+export const login = async (req: Request, res: Response) => {
   const { error, value } = loginSchema.validate(req.body);
   if (error) return sendError(res, 400, error.details[0].message);
 
@@ -78,13 +71,12 @@ const login = async (req, res) => {
       res.cookie('refreshToken', refreshToken, refreshCookieOptions);
       return sendSuccess(res, 200, 'Login successful', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
     }
-  } catch (err) {
-    console.error(err);
+  } catch (err: any) {
     return sendError(res, 500, err.message || 'Internal Server Error');
   }
 };
 
-const refreshToken = async (req, res) => {
+export const refreshToken = async (req: Request, res: Response) => {
   const token = req.cookies?.refreshToken || req.body?.refreshToken;
   if (!token) return sendError(res, 401, 'No refresh token provided');
 
@@ -98,9 +90,8 @@ const refreshToken = async (req, res) => {
       res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
       return sendSuccess(res, 200, 'Token refreshed successfully', { accessToken });
     }
-  } catch (err) {
+  } catch (err: any) {
     if (err.status === 500) {
-      console.error(err);
       return sendError(res, 500, 'Internal Server Error');
     }
     res.clearCookie('refreshToken');
@@ -108,7 +99,7 @@ const refreshToken = async (req, res) => {
   }
 };
 
-const logout = async (req, res) => {
+export const logout = async (req: Request, res: Response) => {
   const token = req.cookies?.refreshToken || req.body?.refreshToken;
   if (!token) return sendSuccess(res, 200, 'Logged out successfully');
 
@@ -124,15 +115,12 @@ const logout = async (req, res) => {
 
     res.clearCookie('refreshToken');
     return sendSuccess(res, 200, 'Logged out successfully');
-  } catch (err) {
-    console.error(err);
+  } catch (err: any) {
     return sendError(res, 500, 'Internal Server Error');
   }
 };
 
-const getMe = async (req, res) => {
+export const getMe = async (req: Request | any, res: Response) => {
   const user = { id: req.user.id, name: req.user.name, email: req.user.email, role: req.user.role, isEmailVerified: req.user.isEmailVerified, lastLogin: req.user.lastLogin };
   return sendSuccess(res, 200, 'User profile retrieved', user);
 };
-
-module.exports = { register, login, refreshToken, logout, getMe };
