@@ -26,15 +26,7 @@ const register = async (req, res) => {
       data: { name, email, passwordHash }
     });
 
-    const { code, codeHash } = generateOTP();
-    await redis.set(
-        `otp:verify:${user.id}`,
-        JSON.stringify({ codeHash, attempts: 0 }),
-        'EX',
-        OTP_TTL_SECONDS
-    );
-    await sendOTPEmail(user.email, code, 'verification').catch(err => console.error(err));
-
+    
     const { accessToken, refreshToken } = await issueTokens(user, req);
     const isMobile = req.headers['x-client-platform'] === 'mobile';
 
