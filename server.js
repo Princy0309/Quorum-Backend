@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 require('dotenv').config();
+const prisma = require('./config/prisma');
 
 const authRoutes = require('./routes/authRoutes');
 const otpRoutes = require('./routes/otpRoutes');
@@ -53,6 +54,11 @@ app.get('/', (req, res) => {
 
 
 app.use(errorHandler);
+
+prisma.$executeRawUnsafe('ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "isEmailVerified" BOOLEAN NOT NULL DEFAULT false;')
+  .then(() => console.log('Database synced: isEmailVerified column ready'))
+  .catch(err => console.error('DB migration error:', err));
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
