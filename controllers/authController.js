@@ -7,8 +7,12 @@ const redis = require('../config/redis');
 const { hashToken } = require('../utils/hashToken');
 const { refreshCookieOptions } = require('../utils/cookieOptions');
 const { loginRateLimiter } = require('../middlewares/rateLimiter');
+const { generateOTP } = require('../utils/generateOTP');
+const { sendOTPEmail } = require('../services/emailService');
+
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000;
+const OTP_TTL_SECONDS = 10 * 60;
 
 const register = async (req, res) => {
   const { error, value } = registerSchema.validate(req.body);
@@ -21,6 +25,15 @@ const register = async (req, res) => {
     const user = await prisma.user.create({
       data: { name, email, passwordHash }
     });
+
+    const { code, codeHash } = generateOTP();
+    await redis.set(
+        `otp:verify:${user.id}`,
+        JSON.stringify({ codeHash, attempts: 0 }),
+        'EX',
+        OTP_TTL_SECONDS
+    );
+    await sendOTPEmail(user.email, code, 'verification').catch(err => console.error(err));
 
     const { accessToken, refreshToken } = await issueTokens(user, req);
     const isMobile = req.headers['x-client-platform'] === 'mobile';
