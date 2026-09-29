@@ -4,7 +4,7 @@ const { hashToken } = require('../utils/hashToken');
 const redis = require('../config/redis');
 const prisma = require('../config/prisma');
 
-const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60;
+const REFRESH_TTL_SECONDS = parseInt(process.env.REFRESH_TOKEN_TTL_SECONDS, 10) || 7 * 24 * 60 * 60;
 
 const generateAccessToken = (userId) =>
   jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '15m' });
