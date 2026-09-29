@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-const { verifyAccessToken } = require('../services/tokenService');
-const { sendError } = require('../utils/apiResponse');
-const prisma = require('../config/prisma');
+import { verifyAccessToken } from '../services/tokenService';
+import { sendError } from '../utils/apiResponse';
+import prisma from '../config/prisma';
 
 export const authMiddleware = async (req: Request | any, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;

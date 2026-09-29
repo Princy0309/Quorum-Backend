@@ -1,13 +1,13 @@
 import { Request, Response } from 'express';
-const bcrypt = require('bcryptjs');
-const prisma = require('../config/prisma');
-const { registerSchema, loginSchema } = require('../validators/authValidators');
-const { sendSuccess, sendError } = require('../utils/apiResponse');
-const { issueTokens, rotateRefreshToken } = require('../services/tokenService');
-const redis = require('../config/redis');
-const { hashToken } = require('../utils/hashToken');
-const { refreshCookieOptions } = require('../utils/cookieOptions');
-const { loginRateLimiter } = require('../middlewares/rateLimiter');
+import bcrypt from 'bcryptjs';
+import prisma from '../config/prisma';
+import { registerSchema, loginSchema } from '../validators/authValidators';
+import { sendSuccess, sendError } from '../utils/apiResponse';
+import { issueTokens, rotateRefreshToken } from '../services/tokenService';
+import redis from '../config/redis';
+import { hashToken } from '../utils/hashToken';
+import { refreshCookieOptions } from '../utils/cookieOptions';
+import { loginRateLimiter } from '../middlewares/rateLimiter';
 
 export const register = async (req: Request, res: Response) => {
   const { error, value } = registerSchema.validate(req.body);

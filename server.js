@@ -6,9 +6,9 @@ const prisma = require('./config/prisma');
 const setupSwagger = require('./config/swagger');
 
 
-const authRoutes = require('./routes/authRoutes');
+const authRoutes = require('./routes/authRoutes').default || require('./routes/authRoutes');
 const otpRoutes = require('./routes/otpRoutes');
-const errorHandler = require('./middlewares/errorHandler');
+const errorHandler = require('./middlewares/errorHandler').default || require('./middlewares/errorHandler');
 
 const app = express();
 

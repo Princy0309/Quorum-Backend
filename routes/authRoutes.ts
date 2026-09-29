@@ -1,7 +1,7 @@
 import { Router } from 'express';
-const { registerLimiter, loginLimiter, refreshLimiter } = require('../middlewares/rateLimiter');
-const { register, login, refreshToken, logout, getMe } = require('../controllers/authController');
-const { authMiddleware } = require('../middlewares/authMiddleware');
+import { registerLimiter, loginLimiter, refreshLimiter } from '../middlewares/rateLimiter';
+import { register, login, refreshToken, logout, getMe } from '../controllers/authController';
+import { authMiddleware } from '../middlewares/authMiddleware';
 
 const router = Router();
 
@@ -11,4 +11,4 @@ router.post('/refresh-token', refreshLimiter, refreshToken);
 router.post('/logout', logout);
 router.get('/me', authMiddleware, getMe);
 
-module.exports = router;
+export default router;
