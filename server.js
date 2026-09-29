@@ -14,6 +14,7 @@ const allowedOrigins = [
   'http://localhost:3000',
   'https://newquorum.me',
   'https://www.newquorum.me',
+  'https://quorum-web-otsg.vercel.app',
   process.env.CLIENT_URL
 ].filter(Boolean);
 
@@ -48,5 +49,5 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 Quorum server running on port ${PORT}`);
+  console.log(`Quorum server running on port ${PORT}`);
 });
