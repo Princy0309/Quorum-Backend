@@ -39,7 +39,7 @@ const register = async (req, res) => {
     const isMobile = req.headers['x-client-platform'] === 'mobile';
 
     if (isMobile) {
-      return sendSuccess(res, 201, 'User registered successfully', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+      return sendSuccess(res, 201, 'User registered successfully', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
     } else {
       res.cookie('refreshToken', refreshToken, refreshCookieOptions);
       return sendSuccess(res, 201, 'User registered successfully', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
@@ -49,7 +49,7 @@ const register = async (req, res) => {
       return sendError(res, 409, 'Email already registered');
     }
     console.error(err);
-    return sendError(res, 500, 'Internal Server Error');
+    return sendError(res, 500, err.message || 'Internal Server Error');
   }
 };
 
@@ -81,14 +81,14 @@ const login = async (req, res) => {
     const isMobile = req.headers['x-client-platform'] === 'mobile';
 
     if (isMobile) {
-      return sendSuccess(res, 200, 'Login successful', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+      return sendSuccess(res, 200, 'Login successful', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
     } else {
       res.cookie('refreshToken', refreshToken, refreshCookieOptions);
       return sendSuccess(res, 200, 'Login successful', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
     }
   } catch (err) {
     console.error(err);
-    return sendError(res, 500, 'Internal Server Error');
+    return sendError(res, 500, err.message || 'Internal Server Error');
   }
 };
 
