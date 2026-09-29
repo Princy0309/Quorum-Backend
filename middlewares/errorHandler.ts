@@ -8,6 +8,7 @@ const errorHandler = (err: any, req: Request, res: Response, next: NextFunction)
 
   res.status(statusCode).json({
     success: false,
+    statusCode,
     message: isOperational || statusCode < 500
       ? err.message
       : 'Internal Server Error',
