@@ -29,7 +29,6 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
-    "prisma": "^6.19.3",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
@@ -40,6 +39,8 @@
     "joi": "^18.2.9",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^10.0.10",
-    "rate-limiter-flexible": "^11.2.1"
+    "prisma": "^6.19.3",
+    "rate-limiter-flexible": "^11.2.1",
+    "swagger-ui-express": "^5.0.1"
   }
 }
