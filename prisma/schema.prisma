@@ -12,9 +12,12 @@ model User {
   id                  String               @id @default(uuid())
   name                String
   email               String               @unique
-  passwordHash        String
+  passwordHash        String?
   role                String               @default("member")
   avatar              String?
+  googleId            String?              @unique
+  is2FAEnabled        Boolean              @default(false)
+  twoFactorSecret     String?
   lastLogin           DateTime?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
