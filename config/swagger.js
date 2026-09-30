@@ -9,8 +9,8 @@ const swaggerDocument = {
   },
   servers: [
     {
-      url: 'http://quorum-backend-env.eba-2vd8rmzr.ap-south-1.elasticbeanstalk.com',
-      description: 'AWS Elastic Beanstalk (Live Production)',
+      url: 'https://api.newquorum.me',
+      description: 'AWS EC2 (Live Production)',
     },
     {
       url: 'http://localhost:5000',
