@@ -39,3 +39,11 @@ export const authorizeRoles = (...roles: string[]) => {
     next();
   };
 };
+
+export const requireEmailVerified = (req: Request | any, res: Response, next: NextFunction) => {
+
+  if(!req.user || !req.user.isEmailVerified){
+    return next(new ApiError(403, 'Please verify your email address before accessing this resource'));
+  }
+  next();
+}
