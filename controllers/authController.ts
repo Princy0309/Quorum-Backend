@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { OAuth2Client } from 'google-auth-library';
 import prisma from '../config/prisma';
 import { registerSchema, loginSchema } from '../validators/authValidators';
 import { sendSuccess } from '../utils/apiResponse';
@@ -10,6 +12,8 @@ import { hashToken } from '../utils/hashToken';
 import { refreshCookieOptions } from '../utils/cookieOptions';
 import { loginRateLimiter } from '../middlewares/rateLimiter';
 import { asyncHandler } from '../utils/asyncHandler';
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 export const register = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const { error, value } = registerSchema.validate(req.body);
@@ -71,6 +75,60 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
   } else {
     res.cookie('refreshToken', refreshToken, refreshCookieOptions);
     return sendSuccess(res, 200, 'Login successful', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
+  }
+});
+
+export const googleAuth = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  const { idToken } = req.body;
+  if (!idToken) throw new ApiError(400, 'Google ID token is required');
+
+  const ticket = await googleClient.verifyIdToken({
+    idToken,
+    audience: process.env.GOOGLE_CLIENT_ID,
+  });
+
+  const payload = ticket.getPayload();
+  if (!payload || !payload.email) throw new ApiError(400, 'Invalid Google token');
+
+  const { sub: googleId, email, name, picture } = payload;
+
+  let user = await prisma.user.findUnique({ where: { email } });
+
+  if (!user) {
+    user = await prisma.user.create({
+      data: {
+        name: name || 'Google User',
+        email,
+        googleId,
+        avatar: picture,
+        isEmailVerified: true,
+      },
+    });
+  } else if (!user.googleId) {
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { googleId, avatar: user.avatar || picture, isEmailVerified: true },
+    });
+  }
+
+  if (user.is2FAEnabled) {
+    const mfaToken = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '5m' });
+    return sendSuccess(res, 200, '2FA verification required', { requires2FA: true, mfaToken });
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { lastLogin: new Date() },
+  });
+
+  const { accessToken, refreshToken } = await issueTokens(user, req);
+  const isMobile = req.headers['x-client-platform'] === 'mobile';
+
+  if (isMobile) {
+    return sendSuccess(res, 200, 'Google login successful', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
+  } else {
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+    return sendSuccess(res, 200, 'Google login successful', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
   }
 });
 
