@@ -19,26 +19,58 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
 
   const { name, email, password } = value;
 
-  try {
-    const passwordHash = await bcrypt.hash(password, 10);
-    const user = await prisma.user.create({
-      data: { name, email, passwordHash }
+  const passwordHash = await bcrypt.hash(password, 10);
+  const isMobile = req.headers['x-client-platform'] === 'mobile';
+
+  const existingUser = await prisma.user.findUnique({ where: { email } });
+
+  if (existingUser) {
+    if (existingUser.isEmailVerified) {
+      throw new ApiError(409, 'Email already registered. Please log in.');
+    }
+
+    const user = await prisma.user.update({
+      where: { id: existingUser.id },
+      data: { name, passwordHash },
     });
-    
+
+    await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
     const { accessToken, refreshToken } = await issueTokens(user, req);
-    const isMobile = req.headers['x-client-platform'] === 'mobile';
 
     if (isMobile) {
-      return sendSuccess(res, 201, 'User registered successfully', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
+      return sendSuccess(res, 200, 'Account exists but unverified. A fresh verification code has been sent.', {
+        accessToken,
+        refreshToken,
+        user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
+      });
     } else {
       res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-      return sendSuccess(res, 201, 'User registered successfully', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
+      return sendSuccess(res, 200, 'Account exists but unverified. A fresh verification code has been sent.', {
+        accessToken,
+        user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
+      });
     }
-  } catch (err: any) {
-    if (err.code === 'P2002') {
-      throw new ApiError(409, 'Email already registered');
-    }
-    throw err;
+  }
+
+  const user = await prisma.user.create({
+    data: { name, email, passwordHash },
+  });
+
+  await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
+  const { accessToken, refreshToken } = await issueTokens(user, req);
+
+  if (isMobile) {
+    return sendSuccess(res, 201, 'User registered successfully', {
+      accessToken,
+      refreshToken,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
+    });
+  } else {
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+    return sendSuccess(res, 201, 'User registered successfully', {
+      accessToken,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
+    });
   }
 });
 
