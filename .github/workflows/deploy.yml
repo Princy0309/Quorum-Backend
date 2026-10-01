@@ -21,8 +21,9 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            cd ~/Quorum-Backend
-            git remote set-url origin https://github.com/Princy0309/Quorum-Backend.git
-            git fetch origin dev
-            git reset --hard origin/dev
-            sudo docker compose up -d --build app
+             cd ~/Quorum-Backend
+             git remote set-url origin https://github.com/Princy0309/Quorum-Backend.git
+             git fetch origin dev
+             git reset --hard origin/dev
+             sudo docker system prune -af
+             sudo docker compose up -d --build app
