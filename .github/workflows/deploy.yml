@@ -21,9 +21,12 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+             sudo journalctl --vacuum-size=50M
+             sudo apt-get clean
+             sudo docker builder prune -af
+             sudo docker image prune -af
              cd ~/Quorum-Backend
              git remote set-url origin https://github.com/Princy0309/Quorum-Backend.git
              git fetch origin dev
              git reset --hard origin/dev
-             sudo docker system prune -af
              sudo docker compose up -d --build app
