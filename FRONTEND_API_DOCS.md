@@ -33,16 +33,10 @@ Interactive Swagger Docs: `https://api.newquorum.me/api-docs`
 {
   "success": true,
   "statusCode": 201,
-  "message": "User registered successfully",
+  "message": "User registered successfully. Please verify your email address with the OTP sent to your inbox.",
   "data": {
-    "accessToken": "eyJhbG...",
-    "user": {
-      "id": "uuid",
-      "name": "John Doe",
-      "email": "john@example.com",
-      "role": "member",
-      "isEmailVerified": false
-    }
+    "requiresEmailVerification": true,
+    "email": "john@example.com"
   }
 }
 ```
@@ -59,6 +53,15 @@ Interactive Swagger Docs: `https://api.newquorum.me/api-docs`
   "password": "Password123!"
 }
 ```
+- **Error Response if Email Unverified (403 Forbidden):**
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "message": "Please verify your email address before logging in"
+}
+```
+
 - **Response - 2FA Not Enabled (200 OK):**
 ```json
 {

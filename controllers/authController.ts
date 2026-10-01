@@ -34,15 +34,7 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
     await redis.set(`otp:verify:${user.id}`, JSON.stringify({ codeHash, attempts: 0, createdAt: Date.now() }), 'EX', 10 * 60);
     sendOTPEmail(user.email, code, 'verification').catch((err: any) => console.error(err));
     
-    const { accessToken, refreshToken } = await issueTokens(user, req);
-    const isMobile = req.headers['x-client-platform'] === 'mobile';
-
-    if (isMobile) {
-      return sendSuccess(res, 201, 'User registered successfully', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
-    } else {
-      res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-      return sendSuccess(res, 201, 'User registered successfully', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
-    }
+    return sendSuccess(res, 201, 'User registered successfully. Please verify your email address with the OTP sent to your inbox.', { requiresEmailVerification: true, email: user.email });
   } catch (err: any) {
     if (err.code === 'P2002') {
       throw new ApiError(409, 'Email already registered');
@@ -72,6 +64,10 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
   if (!isMatch) {
     await loginRateLimiter.consume(req.ip).catch(() => {});
     throw new ApiError(401, 'Invalid credentials');
+  }
+
+  if (!user.isEmailVerified) {
+    throw new ApiError(403, 'Please verify your email address before logging in');
   }
 
   if (user.is2FAEnabled) {
