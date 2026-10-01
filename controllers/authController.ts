@@ -1,17 +1,17 @@
 import { Request, Response, NextFunction } from 'express';
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import prisma from '../config/prisma';
-import { registerSchema, loginSchema } from '../validators/authValidators';
-import { sendSuccess } from '../utils/apiResponse';
-import { ApiError } from '../utils/ApiError';
-import { issueTokens, rotateRefreshToken } from '../services/tokenService';
 import redis from '../config/redis';
+import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from '../validators/authValidators';
+import { ApiError } from '../utils/apiError';
+import { sendSuccess } from '../utils/apiResponse';
+import { issueTokens } from '../utils/token';
 import { hashToken } from '../utils/hashToken';
 import { refreshCookieOptions } from '../utils/cookieOptions';
 import { loginRateLimiter } from '../middlewares/rateLimiter';
 import { asyncHandler } from '../utils/asyncHandler';
 import { storeAndSendOTP } from '../services/otpService';
-
 
 export const register = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const { error, value } = registerSchema.validate(req.body);
@@ -86,6 +86,11 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
     throw new ApiError(401, 'Invalid credentials');
   }
 
+  if (!user.passwordHash) {
+    await loginRateLimiter.consume(req.ip || '127.0.0.1').catch(() => {});
+    throw new ApiError(401, 'Invalid credentials');
+  }
+
   const isMatch = await bcrypt.compare(password, user.passwordHash);
   if (!isMatch) {
     await loginRateLimiter.consume(req.ip || '127.0.0.1').catch(() => {});
@@ -97,64 +102,155 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
     throw new ApiError(403, 'Email not verified. A fresh verification code has been sent to your email.');
   }
 
+  if (user.is2FAEnabled) {
+    const mfaToken = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '5m' });
+    return sendSuccess(res, 200, '2FA verification required', { requires2FA: true, mfaToken });
+  }
 
   await prisma.user.update({
     where: { id: user.id },
-    data: { lastLogin: new Date() },
+    data: { lastLoginAt: new Date() },
   });
 
   const { accessToken, refreshToken } = await issueTokens(user, req);
   const isMobile = req.headers['x-client-platform'] === 'mobile';
 
   if (isMobile) {
-    return sendSuccess(res, 200, 'Login successful', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
+    return sendSuccess(res, 200, 'Login successful', {
+      accessToken,
+      refreshToken,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
+    });
   } else {
     res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-    return sendSuccess(res, 200, 'Login successful', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
+    return sendSuccess(res, 200, 'Login successful', {
+      accessToken,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
+    });
   }
 });
 
 export const refreshToken = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const token = req.cookies?.refreshToken || req.body?.refreshToken;
-  if (!token) throw new ApiError(401, 'No refresh token provided');
+  const isMobile = req.headers['x-client-platform'] === 'mobile';
+  const incomingToken = isMobile ? req.body.refreshToken : req.cookies.refreshToken;
 
+  if (!incomingToken) throw new ApiError(401, 'Refresh token required');
+
+  let decoded: any;
   try {
-    const { accessToken, refreshToken: newRefreshToken } = await rotateRefreshToken(token, req);
-    const isMobile = req.headers['x-client-platform'] === 'mobile';
+    decoded = jwt.verify(incomingToken, process.env.JWT_REFRESH_SECRET || 'fallback_refresh_secret');
+  } catch (err) {
+    throw new ApiError(401, 'Invalid or expired refresh token');
+  }
 
-    if (isMobile) {
-      return sendSuccess(res, 200, 'Token refreshed successfully', { accessToken, refreshToken: newRefreshToken });
-    } else {
-      res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
-      return sendSuccess(res, 200, 'Token refreshed successfully', { accessToken });
+  const storedToken = await prisma.refreshToken.findUnique({
+    where: { tokenHash: hashToken(incomingToken) },
+    include: { user: true },
+  });
+
+  if (!storedToken || storedToken.revokedAt || storedToken.expiresAt < new Date()) {
+    if (storedToken && storedToken.revokedAt) {
+      await prisma.refreshToken.updateMany({
+        where: { userId: storedToken.userId },
+        data: { revokedAt: new Date() },
+      });
     }
-  } catch (err: any) {
-    if (err.status === 500) {
-      throw err;
-    }
-    res.clearCookie('refreshToken');
-    throw new ApiError(401, err.message);
+    throw new ApiError(401, 'Invalid or expired refresh token');
+  }
+
+  await prisma.refreshToken.update({
+    where: { id: storedToken.id },
+    data: { revokedAt: new Date() },
+  });
+
+  const { accessToken, refreshToken: newRefreshToken } = await issueTokens(storedToken.user, req);
+
+  if (isMobile) {
+    return sendSuccess(res, 200, 'Tokens refreshed successfully', { accessToken, refreshToken: newRefreshToken });
+  } else {
+    res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
+    return sendSuccess(res, 200, 'Tokens refreshed successfully', { accessToken });
   }
 });
 
 export const logout = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const token = req.cookies?.refreshToken || req.body?.refreshToken;
-  if (!token) return sendSuccess(res, 200, 'Logged out successfully');
+  const isMobile = req.headers['x-client-platform'] === 'mobile';
+  const incomingToken = isMobile ? req.body.refreshToken : req.cookies.refreshToken;
 
-  const tokenHash = hashToken(token);
-
-  const raw = await redis.get(`refresh:${tokenHash}`);
-  if (raw) {
-    const { userId } = JSON.parse(raw);
-    await redis.del(`refresh:${tokenHash}`);
-    await redis.srem(`user_sessions:${userId}`, tokenHash);
+  if (incomingToken) {
+    await prisma.refreshToken.updateMany({
+      where: { tokenHash: hashToken(incomingToken) },
+      data: { revokedAt: new Date() },
+    });
   }
 
-  res.clearCookie('refreshToken');
+  if (!isMobile) {
+    res.clearCookie('refreshToken', refreshCookieOptions);
+  }
+
   return sendSuccess(res, 200, 'Logged out successfully');
 });
 
-export const getMe = asyncHandler(async (req: Request | any, res: Response, next: NextFunction) => {
-  const user = { id: req.user.id, name: req.user.name, email: req.user.email, role: req.user.role, isEmailVerified: req.user.isEmailVerified, lastLogin: req.user.lastLogin };
-  return sendSuccess(res, 200, 'User profile retrieved', user);
+export const forgotPassword = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  const { error, value } = forgotPasswordSchema.validate(req.body);
+  if (error) throw new ApiError(400, error.details[0].message);
+
+  const { email } = value;
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  if (user) {
+    await storeAndSendOTP(user.id, user.email, `otp:reset:${user.id}`, 'reset');
+  }
+
+  return sendSuccess(res, 200, 'If that email exists, an OTP has been sent');
+});
+
+export const resetPassword = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  const { error, value } = resetPasswordSchema.validate(req.body);
+  if (error) throw new ApiError(400, error.details[0].message);
+
+  const { resetToken, newPassword } = value;
+
+  const key = `reset-token:${resetToken}`;
+  const userId = await redis.get(key);
+
+  if (!userId) {
+    throw new ApiError(400, 'Invalid or expired reset token');
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash },
+  });
+
+  await prisma.refreshToken.updateMany({
+    where: { userId },
+    data: { revokedAt: new Date() },
+  });
+
+  await redis.del(key);
+
+  return sendSuccess(res, 200, 'Password reset successfully. Please log in with your new password.');
+});
+
+export const getMe = asyncHandler(async (req: any, res: Response, next: NextFunction) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      isEmailVerified: true,
+      is2FAEnabled: true,
+      createdAt: true,
+      lastLoginAt: true,
+    },
+  });
+
+  if (!user) throw new ApiError(404, 'User not found');
+
+  return sendSuccess(res, 200, 'Profile fetched successfully', { user });
 });

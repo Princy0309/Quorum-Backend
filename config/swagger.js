@@ -244,6 +244,71 @@ const swaggerDocument = {
         },
       },
     },
+    '/api/auth/2fa/generate': {
+      post: {
+        tags: ['Two-Factor Auth (2FA)'],
+        summary: 'Generate 2FA secret and QR Code',
+        description: 'Generates a TOTP secret key and QR code data URL for Google Authenticator / Authy.',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          200: { description: '2FA QR Code generated successfully' },
+          401: { description: 'Unauthorized' },
+        },
+      },
+    },
+    '/api/auth/2fa/enable': {
+      post: {
+        tags: ['Two-Factor Auth (2FA)'],
+        summary: 'Enable 2FA for account',
+        description: 'Verifies the first 6-digit TOTP code and enables 2FA for the user account.',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['code'],
+                properties: {
+                  code: { type: 'string', example: '123456' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: '2FA enabled successfully' },
+          400: { description: 'Invalid 2FA code or setup not initiated' },
+        },
+      },
+    },
+    '/api/auth/2fa/verify-login': {
+      post: {
+        tags: ['Two-Factor Auth (2FA)'],
+        summary: 'Verify 2FA code during login',
+        description: 'Verifies 6-digit TOTP code using the temporary mfaToken returned from /api/auth/login.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['mfaToken', 'code'],
+                properties: {
+                  mfaToken: { type: 'string', example: 'eyJhbGciOiJIUzI1Ni...' },
+                  code: { type: 'string', example: '123456' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: '2FA authentication successful' },
+          400: { description: 'Missing required parameters or 2FA not configured' },
+          401: { description: 'MFA session expired or invalid 2FA code' },
+        },
+      },
+    },
   },
 };
 
@@ -252,3 +317,4 @@ const setupSwagger = (app) => {
 };
 
 module.exports = setupSwagger;
+

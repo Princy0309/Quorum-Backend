@@ -29,7 +29,7 @@ const loginLimiter = async (req, res, next) => {
   try {
     const status = await loginRateLimiter.get(req.ip);
     if (status && status.remainingPoints <= 0) {
-      return res.status(429).json({ success: false, message: 'Too many failed login attempts, try again after 15 minutes.' });
+      return res.status(429).json({ success: false, statusCode: 429, message: 'Too many failed login attempts, try again after 15 minutes.' });
     }
     next();
   } catch (err) {
@@ -44,7 +44,7 @@ const refreshLimiter = (req, res, next) => {
       if (err instanceof Error) {
         return next();
       }
-      res.status(429).json({ success: false, message: 'Too many refresh token requests, try again later.' });
+      res.status(429).json({ success: false, statusCode: 429, message: 'Too many refresh token requests, try again later.' });
     });
 };
 
@@ -55,9 +55,28 @@ const registerLimiter = (req, res, next) => {
       if (err instanceof Error) {
         return next();
       }
-      res.status(429).json({ success: false, message: 'Too many registration attempts, try again later.' });
+      res.status(429).json({ success: false, statusCode: 429, message: 'Too many registration attempts, try again later.' });
     });
 };
 
-module.exports = { loginLimiter, refreshLimiter, registerLimiter, loginRateLimiter };
+const otpRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'otp',
+  points: 5,
+  duration: 15 * 60,
+  blockDuration: 15 * 60,
+});
+
+const otpLimiter = (req, res, next) => {
+  otpRateLimiter.consume(req.ip)
+    .then(() => next())
+    .catch((err) => {
+      if (err instanceof Error) {
+        return next();
+      }
+      res.status(429).json({ success: false, statusCode: 429, message: 'Too many OTP requests, try again after 15 minutes.' });
+    });
+};
+
+module.exports = { loginLimiter, refreshLimiter, registerLimiter, loginRateLimiter, otpLimiter };
 
