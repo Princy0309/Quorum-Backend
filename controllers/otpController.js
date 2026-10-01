@@ -108,31 +108,32 @@ const forgotPassword = async (req, res) => {
         return sendError(res, 400, error.details[0].message);
     }
 
-    const {email} = req.body;
+    const { email } = req.body;
+    const cleanEmail = String(email || '').trim().toLowerCase();
 
-    try{
-        const user = await prisma.user.findUnique({where: {email}});
+    try {
+        const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
         if(!user){
             return sendError(res, 404, 'User not found with this email address');
-
         }
-         const {code, codeHash} = generateOTP();
 
-            await redis.set(
-                `otp:reset:${user.id}`,
-                JSON.stringify({codeHash, attempts: 0}),
-                'EX',
-                OTP_TTL_SECONDS
-            );
+        const { code, codeHash } = generateOTP();
 
-            await sendOTPEmail(user.email, code, 'reset');
+        await redis.set(
+            `otp:reset:${user.id}`,
+            JSON.stringify({ codeHash, attempts: 0 }),
+            'EX',
+            OTP_TTL_SECONDS
+        );
 
-            return sendSuccess(res, 200, 'Password reset OTP sent to your email');
-    }catch(error){
+        await sendOTPEmail(user.email, code, 'reset');
+
+        return sendSuccess(res, 200, 'Password reset OTP sent to your email');
+    } catch(error){
         console.error('Error sending password reset OTP: ', error);
-        return sendError(res, 500, 'Internal Server Error')
+        return sendError(res, 500, 'Internal Server Error');
     }
-}
+};
 
 const resetPassword = async (req, res) => {
     const result = resetPasswordSchema.validate(req.body);
@@ -142,10 +143,11 @@ const resetPassword = async (req, res) => {
     }
 
     const { email, otp, newPassword } = req.body;
+    const cleanEmail = String(email || '').trim().toLowerCase();
     const cleanOtp = String(otp || '').trim();
 
     try {
-        const user = await prisma.user.findUnique({ where: { email } });
+        const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
         if (!user) {
             return sendError(res, 404, 'User not found with this email address');
         }
