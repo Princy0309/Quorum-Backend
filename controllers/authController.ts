@@ -1,12 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/prisma';
 import redis from '../config/redis';
 import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from '../validators/authValidators';
-import { ApiError } from '../utils/apiError';
+import { ApiError } from '../utils/ApiError';
 import { sendSuccess } from '../utils/apiResponse';
-import { issueTokens } from '../utils/token';
+import { issueTokens } from '../services/tokenService';
 import { hashToken } from '../utils/hashToken';
 import { refreshCookieOptions } from '../utils/cookieOptions';
 import { loginRateLimiter } from '../middlewares/rateLimiter';
@@ -254,3 +254,4 @@ export const getMe = asyncHandler(async (req: any, res: Response, next: NextFunc
 
   return sendSuccess(res, 200, 'Profile fetched successfully', { user });
 });
+
