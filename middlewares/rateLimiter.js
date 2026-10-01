@@ -29,7 +29,7 @@ const loginLimiter = async (req, res, next) => {
   try {
     const status = await loginRateLimiter.get(req.ip);
     if (status && status.remainingPoints <= 0) {
-      return res.status(429).json({ success: false, message: 'Too many failed login attempts, try again after 15 minutes.' });
+      return res.status(429).json({ success: false, statusCode: 429, message: 'Too many failed login attempts, try again after 15 minutes.' });
     }
     next();
   } catch (err) {
@@ -44,7 +44,7 @@ const refreshLimiter = (req, res, next) => {
       if (err instanceof Error) {
         return next();
       }
-      res.status(429).json({ success: false, message: 'Too many refresh token requests, try again later.' });
+      res.status(429).json({ success: false, statusCode: 429, message: 'Too many refresh token requests, try again later.' });
     });
 };
 
@@ -55,7 +55,7 @@ const registerLimiter = (req, res, next) => {
       if (err instanceof Error) {
         return next();
       }
-      res.status(429).json({ success: false, message: 'Too many registration attempts, try again later.' });
+      res.status(429).json({ success: false, statusCode: 429, message: 'Too many registration attempts, try again later.' });
     });
 };
 
@@ -74,7 +74,7 @@ const otpLimiter = (req, res, next) => {
       if (err instanceof Error) {
         return next();
       }
-      res.status(429).json({ success: false, message: 'Too many OTP requests, try again after 15 minutes.' });
+      res.status(429).json({ success: false, statusCode: 429, message: 'Too many OTP requests, try again after 15 minutes.' });
     });
 };
 
