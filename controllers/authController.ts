@@ -56,10 +56,20 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
     throw new ApiError(401, 'Invalid credentials');
   }
 
+  if (!user.passwordHash) {
+    await loginRateLimiter.consume(req.ip).catch(() => {});
+    throw new ApiError(401, 'Invalid credentials');
+  }
+
   const isMatch = await bcrypt.compare(password, user.passwordHash);
   if (!isMatch) {
     await loginRateLimiter.consume(req.ip).catch(() => {});
     throw new ApiError(401, 'Invalid credentials');
+  }
+
+  if (user.is2FAEnabled) {
+    const mfaToken = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '5m' });
+    return sendSuccess(res, 200, '2FA verification required', { requires2FA: true, mfaToken });
   }
 
   await prisma.user.update({
