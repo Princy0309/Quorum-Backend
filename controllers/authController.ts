@@ -13,6 +13,9 @@ import { refreshCookieOptions } from '../utils/cookieOptions';
 import { loginRateLimiter } from '../middlewares/rateLimiter';
 import { asyncHandler } from '../utils/asyncHandler';
 
+import { generateOTP } from '../utils/generateOTP';
+const { sendOTPEmail } = require('../services/emailService');
+
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 export const register = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
@@ -26,6 +29,10 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
     const user = await prisma.user.create({
       data: { name, email, passwordHash }
     });
+
+    const { code, codeHash } = generateOTP();
+    await redis.set(`otp:verify:${user.id}`, JSON.stringify({ codeHash, attempts: 0 }), 'EX', 10 * 60);
+    sendOTPEmail(user.email, code, 'verification').catch((err: any) => console.error(err));
     
     const { accessToken, refreshToken } = await issueTokens(user, req);
     const isMobile = req.headers['x-client-platform'] === 'mobile';
