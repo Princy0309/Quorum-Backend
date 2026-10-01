@@ -23,5 +23,6 @@ jobs:
           script: |
             cd ~/Quorum-Backend
             git remote set-url origin https://github.com/Princy0309/Quorum-Backend.git
-            git pull origin dev
+            git fetch origin dev
+            git reset --hard origin/dev
             sudo docker compose up -d --build app
