@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { authenticator } from 'otplib';
+import { generateSecret, generateURI, verifySync } from 'otplib';
 import qrcode from 'qrcode';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/prisma';
@@ -14,8 +14,8 @@ export const generate2FASecret = asyncHandler(async (req: Request | any, res: Re
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new ApiError(404, 'User not found');
 
-  const secret = authenticator.generateSecret();
-  const otpauth = authenticator.keyuri(user.email, 'Quorum', secret);
+  const secret = generateSecret();
+  const otpauth = generateURI({ secret, label: user.email, issuer: 'Quorum' });
   const qrCodeUrl = await qrcode.toDataURL(otpauth);
 
   await prisma.user.update({
@@ -34,8 +34,8 @@ export const enable2FA = asyncHandler(async (req: Request | any, res: Response, 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user || !user.twoFactorSecret) throw new ApiError(400, '2FA setup not initiated');
 
-  const isValid = authenticator.verify({ token: code, secret: user.twoFactorSecret });
-  if (!isValid) throw new ApiError(400, 'Invalid 2FA code');
+  const verification = verifySync({ token: String(code).trim(), secret: user.twoFactorSecret });
+  if (!verification.valid) throw new ApiError(400, 'Invalid 2FA code');
 
   await prisma.user.update({
     where: { id: userId },
@@ -59,8 +59,8 @@ export const verify2FALogin = asyncHandler(async (req: Request, res: Response, n
   const user = await prisma.user.findUnique({ where: { id: payload.userId } });
   if (!user || !user.twoFactorSecret) throw new ApiError(400, 'User 2FA not configured');
 
-  const isValid = authenticator.verify({ token: code, secret: user.twoFactorSecret });
-  if (!isValid) throw new ApiError(401, 'Invalid 2FA code');
+  const verification = verifySync({ token: String(code).trim(), secret: user.twoFactorSecret });
+  if (!verification.valid) throw new ApiError(401, 'Invalid 2FA code');
 
   await prisma.user.update({
     where: { id: user.id },
@@ -77,3 +77,4 @@ export const verify2FALogin = asyncHandler(async (req: Request, res: Response, n
     return sendSuccess(res, 200, '2FA authentication successful', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
   }
 });
+
