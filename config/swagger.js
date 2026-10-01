@@ -330,6 +330,8 @@ const swaggerDocument = {
         responses: {
           200: { description: '2FA authentication successful' },
           400: { description: 'Missing required parameters or 2FA not configured' },
+          401: { description: 'MFA session expired or invalid 2FA code' },
+        },
       },
     },
   },
