@@ -17,11 +17,20 @@ const OTP_TTL_SECONDS = 10 * 60;
 const sendVerificationOTP = async (req, res) => {
     try {
         const user = req.user;
+        const existing = await redis.get(`otp:verify:${user.id}`);
+        
+        if (existing) {
+            const { createdAt } = JSON.parse(existing);
+            if (createdAt && Date.now() - createdAt < 60 * 1000) {
+                return sendSuccess(res, 200, 'Verification OTP already sent to your email');
+            }
+        }
+
         const { code, codeHash } = generateOTP();
 
         await redis.set(
             `otp:verify:${user.id}`,
-            JSON.stringify({ codeHash, attempts: 0 }),
+            JSON.stringify({ codeHash, attempts: 0, createdAt: Date.now() }),
             'EX',
             OTP_TTL_SECONDS
         );

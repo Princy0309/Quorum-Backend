@@ -31,7 +31,7 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
     });
 
     const { code, codeHash } = generateOTP();
-    await redis.set(`otp:verify:${user.id}`, JSON.stringify({ codeHash, attempts: 0 }), 'EX', 10 * 60);
+    await redis.set(`otp:verify:${user.id}`, JSON.stringify({ codeHash, attempts: 0, createdAt: Date.now() }), 'EX', 10 * 60);
     sendOTPEmail(user.email, code, 'verification').catch((err: any) => console.error(err));
     
     const { accessToken, refreshToken } = await issueTokens(user, req);
