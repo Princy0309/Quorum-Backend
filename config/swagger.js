@@ -244,31 +244,6 @@ const swaggerDocument = {
         },
       },
     },
-    '/api/auth/google': {
-      post: {
-        tags: ['Authentication'],
-        summary: 'Google OAuth 2.0 authentication',
-        description: 'Verifies Google ID Token and logs in or creates user account.',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['idToken'],
-                properties: {
-                  idToken: { type: 'string', example: 'eyJhbGciOiJSUzI1NiIs...' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: { description: 'Authentication successful' },
-          400: { description: 'Invalid or missing ID token' },
-        },
-      },
-    },
     '/api/auth/2fa/generate': {
       post: {
         tags: ['Two-Factor Auth (2FA)'],

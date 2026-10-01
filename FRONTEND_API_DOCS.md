@@ -102,20 +102,7 @@ Interactive Swagger Docs: `https://api.newquorum.me/api-docs`
 
 ---
 
-### 1.3 Google OAuth Authentication
-- **Endpoint:** `POST /api/auth/google`
-- **Auth Required:** No
-- **Request Body:**
-```json
-{
-  "idToken": "GOOGLE_ID_TOKEN_FROM_GIS_OR_REACT_OAUTH"
-}
-```
-- **Response (200 OK):** Same structure as Login (returns tokens or `requires2FA: true`).
-
----
-
-### 1.4 Generate 2FA Secret & QR Code
+### 1.3 Generate 2FA Secret & QR Code
 - **Endpoint:** `POST /api/auth/2fa/generate`
 - **Auth Required:** Yes (`Bearer <accessToken>`)
 - **Request Body:** None
