@@ -2,6 +2,7 @@ const Joi = require('joi')
 
 const verifyEmailSchema = Joi.object({
     otp : Joi.string().length(6).pattern(/^[\x21-\x7E]+$/, 'no spaces or emojis allowed').required(),
+    email: Joi.string().email().optional()
 });
 
 const sendResetSchema = Joi.object({

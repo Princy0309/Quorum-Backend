@@ -45,19 +45,27 @@ const sendVerificationOTP = async (req, res) => {
 };
 
 const verifyEmail = async (req, res) => {
-
     const result = verifyEmailSchema.validate(req.body);
     const error = result.error;
     if (error) {
         return sendError(res, 400, error.details[0].message);
     }
 
-    const { otp } = req.body;
-    const user = req.user;
+    const { otp, email } = req.body;
     const cleanOtp = String(otp || '').trim();
 
     try {
-        const raw = await redis.get(`otp:verify:${user.id}`);
+        let targetUser = req.user;
+        if (email) {
+            const found = await prisma.user.findUnique({ where: { email } });
+            if (found) targetUser = found;
+        }
+
+        if (!targetUser) {
+            return sendError(res, 400, 'User not found or missing authentication');
+        }
+
+        const raw = await redis.get(`otp:verify:${targetUser.id}`);
         if (!raw) {
             return sendError(res, 400, 'Invalid or expired verification code');
         }
@@ -65,32 +73,31 @@ const verifyEmail = async (req, res) => {
         const { codeHash: storedHash, attempts } = JSON.parse(raw);
 
         if (attempts >= 5) {
-            await redis.del(`otp:verify:${user.id}`);
+            await redis.del(`otp:verify:${targetUser.id}`);
             return sendError(res, 400, 'Too many failed attempts. Please request a new OTP.');
         }
 
         if (hashToken(cleanOtp) !== storedHash) {
             await redis.set(
-                `otp:verify:${user.id}`,
+                `otp:verify:${targetUser.id}`,
                 JSON.stringify({ codeHash: storedHash, attempts: attempts + 1 }),
                 'EX',
                 OTP_TTL_SECONDS
-            )
-            return sendError(res, 400, `Incorrect OTP. You have ${4 - attempts} attempts remaining`)
+            );
+            return sendError(res, 400, `Incorrect OTP. You have ${4 - attempts} attempts remaining`);
         }
-        await redis.del(`otp:verify:${user.id}`);
+        await redis.del(`otp:verify:${targetUser.id}`);
 
         await prisma.user.update({
-            where: { id: user.id },
+            where: { id: targetUser.id },
             data: { isEmailVerified: true }
         });
 
         return sendSuccess(res, 200, 'Email verified successfully');
-    }catch(error){
-        console.error('Error veryfying email OTP: ', error);
+    } catch(error){
+        console.error('Error verifying email OTP: ', error);
         return sendError(res, 500, 'Internal Server Error');
     }
-
 };
 
 
