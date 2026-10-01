@@ -3,7 +3,7 @@ import { generateOTP } from '../utils/generateOTP';
 import { hashToken } from '../utils/hashToken';
 
 
-const { sendOTPEmail } = require('./emailService');
+import { addEmailToQueue } from '../queues/emailQueue';
 
 const OTP_TTL_SECONDS = parseInt(process.env.OTP_TTL_SECONDS || '600', 10);
 
@@ -22,7 +22,8 @@ export const storeAndSendOTP = async (
     OTP_TTL_SECONDS
   );
 
-  await sendOTPEmail(email, code, emailType);
+  await addEmailToQueue(email, code, emailType);
+
 };
 
 export const verifyOTPFromRedis = async (
