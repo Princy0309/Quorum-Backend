@@ -33,10 +33,16 @@ Interactive Swagger Docs: `https://api.newquorum.me/api-docs`
 {
   "success": true,
   "statusCode": 201,
-  "message": "User registered successfully. Please verify your email address with the OTP sent to your inbox.",
+  "message": "User registered successfully. Please verify your email address.",
   "data": {
-    "requiresEmailVerification": true,
-    "email": "john@example.com"
+    "accessToken": "eyJhbG...",
+    "user": {
+      "id": "uuid",
+      "name": "John Doe",
+      "email": "john@example.com",
+      "role": "member",
+      "isEmailVerified": false
+    }
   }
 }
 ```
