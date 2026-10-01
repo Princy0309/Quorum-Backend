@@ -45,21 +45,22 @@ const verifyEmail = async (req, res) => {
 
     const { otp } = req.body;
     const user = req.user;
+    const cleanOtp = String(otp || '').trim();
 
     try {
         const raw = await redis.get(`otp:verify:${user.id}`);
         if (!raw) {
-            return sendError(res, 400, 'OTP expired or not found. Please request a new one.');
+            return sendError(res, 400, 'Invalid or expired verification code');
         }
 
         const { codeHash: storedHash, attempts } = JSON.parse(raw);
 
         if (attempts >= 5) {
             await redis.del(`otp:verify:${user.id}`);
-            return sendError(res, 400, 'Too many failed attempts.Please request a new OTP.');
+            return sendError(res, 400, 'Too many failed attempts. Please request a new OTP.');
         }
 
-        if (hashToken(otp) !== storedHash) {
+        if (hashToken(cleanOtp) !== storedHash) {
             await redis.set(
                 `otp:verify:${user.id}`,
                 JSON.stringify({ codeHash: storedHash, attempts: attempts + 1 }),
@@ -125,6 +126,7 @@ const resetPassword = async (req, res) => {
     }
 
     const { email, otp, newPassword } = req.body;
+    const cleanOtp = String(otp || '').trim();
 
     try {
         const user = await prisma.user.findUnique({ where: { email } });
@@ -144,7 +146,7 @@ const resetPassword = async (req, res) => {
             return sendError(res, 400, 'Too many failed attempts. Please request a new code.');
         }
 
-        if (hashToken(otp) !== storedHash) {
+        if (hashToken(cleanOtp) !== storedHash) {
             await redis.set(
                 `otp:reset:${user.id}`,
                 JSON.stringify({ codeHash: storedHash, attempts: attempts + 1 }),
