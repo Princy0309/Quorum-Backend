@@ -3,6 +3,7 @@ import { generateSecret, generateURI, verifySync } from 'otplib';
 import qrcode from 'qrcode';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/prisma';
+import redis from '../config/redis';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ApiError } from '../utils/ApiError';
 import { sendSuccess } from '../utils/apiResponse';
@@ -18,10 +19,7 @@ export const generate2FASecret = asyncHandler(async (req: Request | any, res: Re
   const otpauth = generateURI({ secret, label: user.email, issuer: 'Quorum' });
   const qrCodeUrl = await qrcode.toDataURL(otpauth);
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: { twoFactorSecret: secret },
-  });
+  await redis.set(`pending_2fa:${userId}`, secret, 'EX', 10 * 60);
 
   return sendSuccess(res, 200, '2FA QR Code generated successfully', { secret, qrCodeUrl });
 });
@@ -32,15 +30,22 @@ export const enable2FA = asyncHandler(async (req: Request | any, res: Response, 
   if (!code) throw new ApiError(400, '2FA verification code is required');
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user || !user.twoFactorSecret) throw new ApiError(400, '2FA setup not initiated');
+  if (!user) throw new ApiError(404, 'User not found');
 
-  const verification = verifySync({ token: String(code).trim(), secret: user.twoFactorSecret });
+  const pendingSecret = await redis.get(`pending_2fa:${userId}`);
+  const targetSecret = pendingSecret || user.twoFactorSecret;
+
+  if (!targetSecret) throw new ApiError(400, '2FA setup not initiated');
+
+  const verification = verifySync({ token: String(code).trim(), secret: targetSecret });
   if (!verification.valid) throw new ApiError(400, 'Invalid 2FA code');
 
   await prisma.user.update({
     where: { id: userId },
-    data: { is2FAEnabled: true },
+    data: { twoFactorSecret: targetSecret, is2FAEnabled: true },
   });
+
+  await redis.del(`pending_2fa:${userId}`);
 
   return sendSuccess(res, 200, '2FA enabled successfully');
 });
