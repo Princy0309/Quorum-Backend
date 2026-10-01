@@ -9,7 +9,12 @@ import { storeAndSendOTP, verifyOTPFromRedis } from '../services/otpService';
 const { verifyEmailSchema, sendResetSchema, resetPasswordSchema } = require('../validators/otpValidators');
 
 export const sendVerificationOTP = asyncHandler(async (req: Request | any, res: Response, next: NextFunction) => {
-  const user = req.user;
+ const email = req.user?.email || req.body?.email;
+  if (!email) throw new ApiError(400, 'Email address is required');
+
+  const user = req.user || await prisma.user.findUnique({ where: { email } });
+  if (!user) throw new ApiError(404, 'User not found');
+
 
   await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
 
@@ -21,8 +26,13 @@ export const verifyEmail = asyncHandler(async (req: Request | any, res: Response
   const { error } = verifyEmailSchema.validate(req.body);
   if (error) throw new ApiError(400, error.details[0].message);
 
-  const { otp } = req.body;
-  const user = req.user;
+   const { otp, email } = req.body;
+  const user = req.user || (email ? await prisma.user.findUnique({ where: { email } }) : null);
+
+  if (!user) {
+    throw new ApiError(400, 'User not found or authorization missing. Please provide your email.');
+  }
+
 
   const result = await verifyOTPFromRedis(`otp:verify:${user.id}`, otp);
 

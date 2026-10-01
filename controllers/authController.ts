@@ -10,6 +10,8 @@ import { hashToken } from '../utils/hashToken';
 import { refreshCookieOptions } from '../utils/cookieOptions';
 import { loginRateLimiter } from '../middlewares/rateLimiter';
 import { asyncHandler } from '../utils/asyncHandler';
+import { storeAndSendOTP } from '../services/otpService';
+
 
 export const register = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const { error, value } = registerSchema.validate(req.body);
@@ -48,15 +50,21 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
 
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
-    await loginRateLimiter.consume(req.ip).catch(() => {});
+    await loginRateLimiter.consume(req.ip || '127.0.0.1').catch(() => {});
     throw new ApiError(401, 'Invalid credentials');
   }
 
   const isMatch = await bcrypt.compare(password, user.passwordHash);
   if (!isMatch) {
-    await loginRateLimiter.consume(req.ip).catch(() => {});
+    await loginRateLimiter.consume(req.ip || '127.0.0.1').catch(() => {});
     throw new ApiError(401, 'Invalid credentials');
   }
+
+  if (!user.isEmailVerified) {
+    await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
+    throw new ApiError(403, 'Email not verified. A fresh verification code has been sent to your email.');
+  }
+
 
   await prisma.user.update({
     where: { id: user.id },

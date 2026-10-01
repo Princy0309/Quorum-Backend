@@ -47,3 +47,22 @@ export const requireEmailVerified = (req: Request | any, res: Response, next: Ne
   }
   next();
 }
+export const optionalAuth = async (req: Request | any, res: Response, next: NextFunction) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded: any = verifyAccessToken(token);
+    const user = await prisma.user.findUnique({ where: { id: decoded.id } });
+    if (user) {
+      const { passwordHash, ...safeUser } = user;
+      req.user = safeUser;
+    }
+  } catch (err) {
+    
+  }
+  next();
+};
