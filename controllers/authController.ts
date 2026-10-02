@@ -34,7 +34,7 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
       data: { name, passwordHash },
     });
 
-    await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
+    await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
     const { accessToken, refreshToken } = await issueTokens(user, req);
 
     res.setHeader('x-refresh-token', refreshToken);
@@ -51,7 +51,7 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
     data: { name, email: cleanEmail, passwordHash },
   });
 
-  await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
+  await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
   const { accessToken, refreshToken } = await issueTokens(user, req);
 
   res.setHeader('x-refresh-token', refreshToken);
@@ -89,7 +89,7 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
   }
 
   if (!user.isEmailVerified) {
-    await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
+    await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
     throw new ApiError(403, 'Email not verified. A fresh verification code has been sent to your email.');
   }
 

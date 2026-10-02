@@ -8,23 +8,20 @@ import { addEmailToQueue } from '../queues/emailQueue';
 const OTP_TTL_SECONDS = parseInt(process.env.OTP_TTL_SECONDS || '600', 10);
 
 export const storeAndSendOTP = async (
-  userId: string,
   email: string,
   redisKey: string,
   emailType: 'verification' | 'reset'
 ): Promise<void> => {
   const { code, codeHash } = generateOTP();
 
-    await redis.set(
+  await redis.set(
     redisKey,
     JSON.stringify({ codeHash, attempts: 0, createdAt: Date.now() }),
     'EX',
     OTP_TTL_SECONDS
   );
 
-
   await addEmailToQueue(email, code, emailType);
-
 };
 
 export const verifyOTPFromRedis = async (

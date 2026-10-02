@@ -29,7 +29,7 @@ export const sendVerificationOTP = asyncHandler(async (req: Request | any, res: 
     } catch (e) {}
   }
 
-  await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
+  await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
   return sendSuccess(res, 200, 'Verification OTP sent to your email');
 });
 
@@ -95,7 +95,7 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response, n
     return sendSuccess(res, 200, 'If an account with that email exists, a reset code has been sent');
   }
 
-  await storeAndSendOTP(user.id, user.email, `otp:reset:${user.id}`, 'reset');
+  await storeAndSendOTP(user.email, `otp:reset:${user.id}`, 'reset');
   return sendSuccess(res, 200, 'Password reset OTP sent to your email');
 });
 
