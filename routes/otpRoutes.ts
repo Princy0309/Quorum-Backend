@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { optionalAuth } from '../middlewares/authMiddleware';
+import { otpLimiter } from '../middlewares/rateLimiter';
 import {
   sendVerificationOTP,
   verifyEmail,
@@ -9,9 +10,9 @@ import {
 
 const router = Router();
 
-router.post('/send-verification', optionalAuth, sendVerificationOTP);
-router.post('/verify-email', optionalAuth, verifyEmail);
-router.post('/forgot-password', forgotPassword);
-router.post('/reset-password', resetPassword);
+router.post('/send-verification', otpLimiter, optionalAuth, sendVerificationOTP);
+router.post('/verify-email', otpLimiter, optionalAuth, verifyEmail);
+router.post('/forgot-password', otpLimiter, forgotPassword);
+router.post('/reset-password', otpLimiter,resetPassword);
 
 export default router;
