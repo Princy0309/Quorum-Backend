@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/prisma';
 import redis from '../config/redis';
-import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from '../validators/authValidators';
+import { registerSchema, loginSchema } from '../validators/authValidators';
 import { ApiError } from '../utils/ApiError';
 import { sendSuccess } from '../utils/apiResponse';
 import { issueTokens } from '../services/tokenService';
@@ -18,11 +18,12 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
   if (error) throw new ApiError(400, error.details[0].message);
 
   const { name, email, password } = value;
+  const cleanEmail = email.trim().toLowerCase();
 
   const passwordHash = await bcrypt.hash(password, 10);
   const isMobile = req.headers['x-client-platform'] === 'mobile';
 
-  const existingUser = await prisma.user.findUnique({ where: { email } });
+  const existingUser = await prisma.user.findUnique({ where: { email: cleanEmail } });
 
   if (existingUser) {
     if (existingUser.isEmailVerified) {
@@ -45,7 +46,7 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
       });
     } else {
       res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-      return sendSuccess(res, 200, 'Account exists but unverified. A fresh verification code has been sent.', {
+      return sendSuccess(res, 201, 'Account exists but unverified. A fresh verification code has been sent.', {
         accessToken,
         user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
       });
@@ -53,7 +54,7 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
   }
 
   const user = await prisma.user.create({
-    data: { name, email, passwordHash },
+    data: { name, email: cleanEmail, passwordHash },
   });
 
   await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
@@ -79,8 +80,9 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
   if (error) throw new ApiError(400, error.details[0].message);
 
   const { email, password } = value;
+  const cleanEmail = email.trim().toLowerCase();
 
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
   if (!user) {
     await loginRateLimiter.consume(req.ip || '127.0.0.1').catch(() => {});
     throw new ApiError(401, 'Invalid credentials');
@@ -102,7 +104,7 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
     throw new ApiError(403, 'Email not verified. A fresh verification code has been sent to your email.');
   }
 
-  if (user.is2FAEnabled) {
+  if ((user as any).is2FAEnabled) {
     const mfaToken = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '5m' });
     return sendSuccess(res, 200, '2FA verification required', { requires2FA: true, mfaToken });
   }
@@ -191,50 +193,6 @@ export const logout = asyncHandler(async (req: Request, res: Response, next: Nex
   return sendSuccess(res, 200, 'Logged out successfully');
 });
 
-export const forgotPassword = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const { error, value } = forgotPasswordSchema.validate(req.body);
-  if (error) throw new ApiError(400, error.details[0].message);
-
-  const { email } = value;
-  const user = await prisma.user.findUnique({ where: { email } });
-
-  if (user) {
-    await storeAndSendOTP(user.id, user.email, `otp:reset:${user.id}`, 'reset');
-  }
-
-  return sendSuccess(res, 200, 'If that email exists, an OTP has been sent');
-});
-
-export const resetPassword = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const { error, value } = resetPasswordSchema.validate(req.body);
-  if (error) throw new ApiError(400, error.details[0].message);
-
-  const { resetToken, newPassword } = value;
-
-  const key = `reset-token:${resetToken}`;
-  const userId = await redis.get(key);
-
-  if (!userId) {
-    throw new ApiError(400, 'Invalid or expired reset token');
-  }
-
-  const passwordHash = await bcrypt.hash(newPassword, 10);
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: { passwordHash },
-  });
-
-  await prisma.refreshToken.updateMany({
-    where: { userId },
-    data: { revokedAt: new Date() },
-  });
-
-  await redis.del(key);
-
-  return sendSuccess(res, 200, 'Password reset successfully. Please log in with your new password.');
-});
-
 export const getMe = asyncHandler(async (req: any, res: Response, next: NextFunction) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user.id },
@@ -254,4 +212,3 @@ export const getMe = asyncHandler(async (req: any, res: Response, next: NextFunc
 
   return sendSuccess(res, 200, 'Profile fetched successfully', { user });
 });
-
