@@ -1,12 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import prisma from '../config/prisma';
 import { registerSchema, loginSchema } from '../validators/authValidators';
 import { ApiError } from '../utils/ApiError';
 import { sendSuccess } from '../utils/apiResponse';
-import { issueTokens } from '../services/tokenService';
-import { hashToken } from '../utils/hashToken';
+import { issueTokens, generateMFAToken, rotateRefreshToken, revokeRefreshToken } from '../services/tokenService';
 import { refreshCookieOptions } from '../utils/cookieOptions';
 import { loginRateLimiter } from '../middlewares/rateLimiter';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -81,7 +79,7 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
   }
 
   if ((user as any).is2FAEnabled) {
-    const mfaToken = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '5m' });
+    const mfaToken = generateMFAToken(user.id);
     return sendSuccess(res, 200, '2FA verification required', { requires2FA: true, mfaToken });
   }
 
@@ -112,37 +110,15 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
   if (!incomingToken) throw new ApiError(401, 'Refresh token required');
 
   try {
-    jwt.verify(incomingToken, process.env.JWT_REFRESH_SECRET || 'fallback_refresh_secret');
-  } catch (err) {
-    throw new ApiError(401, 'Invalid or expired refresh token');
+    const { accessToken, refreshToken: newRefreshToken } = await rotateRefreshToken(incomingToken, req);
+
+    res.setHeader('x-refresh-token', newRefreshToken);
+    res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
+
+    return sendSuccess(res, 200, 'Tokens refreshed successfully', { accessToken, refreshToken: newRefreshToken });
+  } catch (err: any) {
+    throw new ApiError(401, err.message || 'Invalid or expired refresh token');
   }
-
-  const storedToken = await prisma.refreshToken.findUnique({
-    where: { tokenHash: hashToken(incomingToken) },
-    include: { user: true },
-  });
-
-  if (!storedToken || storedToken.revokedAt || storedToken.expiresAt < new Date()) {
-    if (storedToken && storedToken.revokedAt) {
-      await prisma.refreshToken.updateMany({
-        where: { userId: storedToken.userId },
-        data: { revokedAt: new Date() },
-      });
-    }
-    throw new ApiError(401, 'Invalid or expired refresh token');
-  }
-
-  await prisma.refreshToken.update({
-    where: { id: storedToken.id },
-    data: { revokedAt: new Date() },
-  });
-
-  const { accessToken, refreshToken: newRefreshToken } = await issueTokens(storedToken.user, req);
-
-  res.setHeader('x-refresh-token', newRefreshToken);
-  res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
-
-  return sendSuccess(res, 200, 'Tokens refreshed successfully', { accessToken, refreshToken: newRefreshToken });
 });
 
 export const logout = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
@@ -153,10 +129,7 @@ export const logout = asyncHandler(async (req: Request, res: Response, next: Nex
     req.body?.refreshToken;
 
   if (incomingToken) {
-    await prisma.refreshToken.updateMany({
-      where: { tokenHash: hashToken(incomingToken) },
-      data: { revokedAt: new Date() },
-    });
+    await revokeRefreshToken(incomingToken);
   }
 
   res.clearCookie('refreshToken', refreshCookieOptions);
