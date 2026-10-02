@@ -69,7 +69,6 @@ export const verifyEmail = asyncHandler(async (req: Request | any, res: Response
 
     return sendSuccess(res, 200, 'Email verified successfully', {
       accessToken,
-      refreshToken,
       user: {
         id: updatedUser.id,
         name: updatedUser.name,
