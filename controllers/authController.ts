@@ -38,7 +38,7 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
     const { accessToken, refreshToken } = await issueTokens(user, req);
 
     if (isMobile) {
-      return sendSuccess(res, 200, 'Account exists but unverified. A fresh verification code has been sent.', {
+      return sendSuccess(res, 201, 'Account exists but unverified. A fresh verification code has been sent.', {
         accessToken,
         refreshToken,
         user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
