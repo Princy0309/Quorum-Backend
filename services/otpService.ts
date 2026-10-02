@@ -1,8 +1,6 @@
 import redis from '../config/redis';
 import { generateOTP } from '../utils/generateOTP';
 import { hashToken } from '../utils/hashToken';
-
-
 import { addEmailToQueue } from '../queues/emailQueue';
 
 const OTP_TTL_SECONDS = parseInt(process.env.OTP_TTL_SECONDS || '600', 10);
@@ -12,19 +10,32 @@ export const storeAndSendOTP = async (
   email: string,
   redisKey: string,
   emailType: 'verification' | 'reset'
-): Promise<void> => {
+): Promise<boolean> => {
+  // 1. COOLDOWN CHECK: If an OTP was sent in the last 60 seconds, DO NOT SEND ANOTHER EMAIL!
+  const existing = await redis.get(redisKey);
+  if (existing) {
+    try {
+      const parsed = JSON.parse(existing);
+      if (parsed.createdAt && Date.now() - parsed.createdAt < 60 * 1000) {
+        
+        return false;
+      }
+    } catch (e) {}
+  }
+
+  
   const { code, codeHash } = generateOTP();
 
-    await redis.set(
+  await redis.set(
     redisKey,
     JSON.stringify({ codeHash, attempts: 0, createdAt: Date.now() }),
     'EX',
     OTP_TTL_SECONDS
   );
 
-
+ 
   await addEmailToQueue(email, code, emailType);
-
+  return true;
 };
 
 export const verifyOTPFromRedis = async (
