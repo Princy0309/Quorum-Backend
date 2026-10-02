@@ -14,17 +14,24 @@ app.set('trust proxy', 1);
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
-  : ['http://localhost:3000', 'http://localhost:5173'];
+  : [
+      'https://quorum-web-omega.vercel.app',
+      'https://newquorum.me',
+      'https://www.newquorum.me',
+      'http://localhost:3000',
+      'http://localhost:5173',
+    ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (
-      !origin || 
-      allowedOrigins.includes(origin) || 
-      origin.endsWith('.vercel.app') || 
-      origin.startsWith('http://localhost:') || 
-      origin.startsWith('http://127.0.0.1:')
-    ) {
+    if (!origin) return callback(null, true);
+
+    const isAllowedDomain = allowedOrigins.includes(origin);
+    const isLocalDev = process.env.NODE_ENV !== 'production' && (
+      origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')
+    );
+
+    if (isAllowedDomain || isLocalDev) {
       callback(null, true);
     } else {
       callback(null, false);
