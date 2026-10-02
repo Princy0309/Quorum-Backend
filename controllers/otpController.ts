@@ -19,7 +19,6 @@ export const sendVerificationOTP = asyncHandler(async (req: Request | any, res: 
   const user = (await prisma.user.findUnique({ where: { email } })) || req.user;
   if (!user) throw new ApiError(404, 'User not found');
 
-  // Cooldown check: prevent generating duplicate OTP if one was sent in the last 60 seconds
   const existing = await redis.get(`otp:verify:${user.id}`);
   if (existing) {
     try {
@@ -64,34 +63,21 @@ export const verifyEmail = asyncHandler(async (req: Request | any, res: Response
     });
 
     const { accessToken, refreshToken } = await issueTokens(updatedUser, req);
-    const isMobile = req.headers['x-client-platform'] === 'mobile';
 
-    if (isMobile) {
-      return sendSuccess(res, 200, 'Email verified successfully', {
-        accessToken,
-        refreshToken,
-        user: {
-          id: updatedUser.id,
-          name: updatedUser.name,
-          email: updatedUser.email,
-          role: updatedUser.role,
-          isEmailVerified: true,
-        },
-      });
-    } else {
-      res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-      return sendSuccess(res, 200, 'Email verified successfully', {
-        accessToken,
-        refreshToken,
-        user: {
-          id: updatedUser.id,
-          name: updatedUser.name,
-          email: updatedUser.email,
-          role: updatedUser.role,
-          isEmailVerified: true,
-        },
-      });
-    }
+    res.setHeader('x-refresh-token', refreshToken);
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+
+    return sendSuccess(res, 200, 'Email verified successfully', {
+      accessToken,
+      refreshToken,
+      user: {
+        id: updatedUser.id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        isEmailVerified: true,
+      },
+    });
   } catch (err: any) {
     console.error('Error during post-verification:', err);
     throw new ApiError(500, `Verification completion failed: ${err.message}`);

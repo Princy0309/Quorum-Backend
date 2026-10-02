@@ -73,13 +73,14 @@ export const verify2FALogin = asyncHandler(async (req: Request, res: Response, n
   });
 
   const { accessToken, refreshToken } = await issueTokens(user, req);
-  const isMobile = req.headers['x-client-platform'] === 'mobile';
 
-  if (isMobile) {
-    return sendSuccess(res, 200, '2FA authentication successful', { accessToken, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
-  } else {
-    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-    return sendSuccess(res, 200, '2FA authentication successful', { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified } });
-  }
+  res.setHeader('x-refresh-token', refreshToken);
+  res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+
+  return sendSuccess(res, 200, '2FA authentication successful', {
+    accessToken,
+    refreshToken,
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
+  });
 });
 

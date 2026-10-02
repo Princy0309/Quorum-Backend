@@ -31,6 +31,7 @@ app.use(cors({
     }
   },
   credentials: true,
+  exposedHeaders: ['x-refresh-token', 'X-Refresh-Token', 'x-access-token', 'authorization'],
 }));
 
 app.use(express.json());
