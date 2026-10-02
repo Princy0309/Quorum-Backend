@@ -1,13 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import qrcode from 'qrcode';
-import jwt from 'jsonwebtoken';
 import prisma from '../config/prisma';
 import redis from '../config/redis';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ApiError } from '../utils/ApiError';
 import { sendSuccess } from '../utils/apiResponse';
-import { issueTokens } from '../services/tokenService';
+import { issueTokens, verifyMFAToken } from '../services/tokenService';
 import { refreshCookieOptions } from '../utils/cookieOptions';
 
 export const generate2FASecret = asyncHandler(async (req: Request | any, res: Response, next: NextFunction) => {
@@ -56,7 +55,7 @@ export const verify2FALogin = asyncHandler(async (req: Request, res: Response, n
 
   let payload: any;
   try {
-    payload = jwt.verify(mfaToken, process.env.JWT_SECRET || 'secret');
+    payload = verifyMFAToken(mfaToken);
   } catch (err) {
     throw new ApiError(401, 'MFA session expired or invalid');
   }

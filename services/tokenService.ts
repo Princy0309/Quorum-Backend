@@ -3,19 +3,64 @@ import prisma from '../config/prisma';
 import redis from '../config/redis';
 import { hashToken } from '../utils/hashToken';
 
+const JWT_ISSUER = process.env.JWT_ISSUER || 'quorum-api';
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE || 'quorum-app';
 const REFRESH_TTL_SECONDS = parseInt(process.env.REFRESH_TOKEN_TTL_SECONDS || '', 10) || 7 * 24 * 60 * 60;
 
 export const generateAccessToken = (userId: string): string => {
   const secret = process.env.JWT_SECRET || 'default_jwt_secret';
   return jwt.sign({ id: userId }, secret, {
+    algorithm: 'HS256',
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
     expiresIn: (process.env.JWT_EXPIRES_IN as any) || '15m',
+  });
+};
+
+export const verifyAccessToken = (token: string): any => {
+  const secret = process.env.JWT_SECRET || 'default_jwt_secret';
+  return jwt.verify(token, secret, {
+    algorithms: ['HS256'],
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
   });
 };
 
 export const generateRefreshToken = (userId: string): string => {
   const secret = process.env.JWT_REFRESH_SECRET || 'fallback_refresh_secret';
-  return jwt.sign({ id: userId }, secret, {
+  return jwt.sign({ id: userId, type: 'refresh' }, secret, {
+    algorithm: 'HS256',
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
     expiresIn: (process.env.REFRESH_TOKEN_EXPIRES_IN as any) || '7d',
+  });
+};
+
+export const verifyRefreshToken = (token: string): any => {
+  const secret = process.env.JWT_REFRESH_SECRET || 'fallback_refresh_secret';
+  return jwt.verify(token, secret, {
+    algorithms: ['HS256'],
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+  });
+};
+
+export const generateMFAToken = (userId: string): string => {
+  const secret = process.env.JWT_SECRET || 'default_jwt_secret';
+  return jwt.sign({ userId, type: 'mfa' }, secret, {
+    algorithm: 'HS256',
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+    expiresIn: '5m',
+  });
+};
+
+export const verifyMFAToken = (token: string): any => {
+  const secret = process.env.JWT_SECRET || 'default_jwt_secret';
+  return jwt.verify(token, secret, {
+    algorithms: ['HS256'],
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
   });
 };
 
@@ -37,7 +82,8 @@ export const issueTokens = async (user: { id: string }, req?: any): Promise<{ ac
       },
     });
   } catch (err) {
-    console.error('Error creating RefreshToken in Prisma:', err);
+    // Log message without exposing token or user sensitive info
+    console.error('Failed to save RefreshToken session to database');
   }
 
   try {
@@ -50,17 +96,15 @@ export const issueTokens = async (user: { id: string }, req?: any): Promise<{ ac
     await redis.sadd(`user_sessions:${user.id}`, tokenHash);
     await redis.expire(`user_sessions:${user.id}`, REFRESH_TTL_SECONDS);
   } catch (err) {
-    console.error('Error storing refresh session in Redis:', err);
+    console.error('Failed to save RefreshToken session to Redis');
   }
 
   return { accessToken, refreshToken };
 };
 
 export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{ accessToken: string; refreshToken: string }> => {
-  const secret = process.env.JWT_REFRESH_SECRET || 'fallback_refresh_secret';
-  
   try {
-    jwt.verify(rawToken, secret);
+    verifyRefreshToken(rawToken);
   } catch (err) {
     const error: any = new Error('Invalid or expired refresh token');
     error.status = 401;
@@ -75,6 +119,10 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
   });
 
   if (!storedToken || storedToken.revokedAt || storedToken.expiresAt < new Date()) {
+    if (storedToken && storedToken.revokedAt) {
+      // Reuse detection: revoke all sessions if a revoked token is reused
+      await revokeAllSessions(storedToken.userId);
+    }
     const error: any = new Error('Invalid or expired refresh token');
     error.status = 401;
     throw error;
@@ -89,11 +137,35 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
     await redis.del(`refresh:${tokenHash}`);
     await redis.srem(`user_sessions:${storedToken.userId}`, tokenHash);
   } catch (err) {
-    
+    // Redis cleanup failure ignored safely
   }
 
   const device = req?.headers?.['user-agent']?.slice(0, 200) || storedToken.device;
   return issueTokens(storedToken.user, { headers: { 'user-agent': device } });
+};
+
+export const revokeRefreshToken = async (rawToken: string): Promise<void> => {
+  const tokenHash = hashToken(rawToken);
+
+  try {
+    await prisma.refreshToken.updateMany({
+      where: { tokenHash, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  } catch (err) {
+    // Database revocation error ignored safely
+  }
+
+  try {
+    const raw = await redis.get(`refresh:${tokenHash}`);
+    if (raw) {
+      const { userId } = JSON.parse(raw);
+      await redis.del(`refresh:${tokenHash}`);
+      await redis.srem(`user_sessions:${userId}`, tokenHash);
+    }
+  } catch (err) {
+    // Redis revocation error ignored safely
+  }
 };
 
 export const revokeAllSessions = async (userId: string): Promise<void> => {
@@ -103,7 +175,7 @@ export const revokeAllSessions = async (userId: string): Promise<void> => {
       data: { revokedAt: new Date() },
     });
   } catch (err) {
-
+    // Database revocation error ignored safely
   }
 
   try {
@@ -113,10 +185,6 @@ export const revokeAllSessions = async (userId: string): Promise<void> => {
     }
     await redis.del(`user_sessions:${userId}`);
   } catch (err) {
+    // Redis revocation error ignored safely
   }
-};
-
-export const verifyAccessToken = (token: string): any => {
-  const secret = process.env.JWT_SECRET || 'default_jwt_secret';
-  return jwt.verify(token, secret);
 };
