@@ -111,7 +111,7 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
 
   await prisma.user.update({
     where: { id: user.id },
-    data: { lastLoginAt: new Date() },
+    data: { lastLogin: new Date() },
   });
 
   const { accessToken, refreshToken } = await issueTokens(user, req);
@@ -127,6 +127,7 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
     res.cookie('refreshToken', refreshToken, refreshCookieOptions);
     return sendSuccess(res, 200, 'Login successful', {
       accessToken,
+      refreshToken,
       user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
     });
   }
@@ -204,7 +205,7 @@ export const getMe = asyncHandler(async (req: any, res: Response, next: NextFunc
       isEmailVerified: true,
       is2FAEnabled: true,
       createdAt: true,
-      lastLoginAt: true,
+      lastLogin: true,
     },
   });
 
