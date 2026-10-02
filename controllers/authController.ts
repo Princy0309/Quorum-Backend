@@ -20,7 +20,6 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
   const cleanEmail = email.trim().toLowerCase();
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const isMobile = req.headers['x-client-platform'] === 'mobile';
 
   const existingUser = await prisma.user.findUnique({ where: { email: cleanEmail } });
 
@@ -35,15 +34,9 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
     });
 
     await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
-    const { accessToken, refreshToken } = await issueTokens(user, req);
 
-    res.setHeader('x-refresh-token', refreshToken);
-    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-
-    return sendSuccess(res, 201, 'Account exists but unverified. A fresh verification code has been sent.', {
-      accessToken,
-      refreshToken,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
+    return sendSuccess(res, 201, 'Account exists but unverified. A fresh verification code has been sent to your email.', {
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: false },
     });
   }
 
@@ -52,15 +45,9 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
   });
 
   await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
-  const { accessToken, refreshToken } = await issueTokens(user, req);
 
-  res.setHeader('x-refresh-token', refreshToken);
-  res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-
-  return sendSuccess(res, 201, 'User registered successfully', {
-    accessToken,
-    refreshToken,
-    user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
+  return sendSuccess(res, 201, 'User registered successfully. Please verify your email with the OTP sent to your inbox.', {
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: false },
   });
 });
 

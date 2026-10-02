@@ -38,7 +38,7 @@ const swaggerDocument = {
       post: {
         tags: ['Authentication'],
         summary: 'Register a new user',
-        description: 'Creates a new user account, sends verification OTP, and returns access token & x-refresh-token header.',
+        description: 'Creates a new user account and sends verification OTP to email. Tokens are issued after OTP verification via /api/otp/verify-email.',
         requestBody: {
           required: true,
           content: {
@@ -57,13 +57,7 @@ const swaggerDocument = {
         },
         responses: {
           201: {
-            description: 'User registered successfully',
-            headers: {
-              'x-refresh-token': {
-                schema: { type: 'string' },
-                description: 'Signed JWT Refresh Token',
-              },
-            },
+            description: 'User registered successfully. OTP sent to email.',
           },
           400: { description: 'Validation error' },
           409: { description: 'Email already registered' },
