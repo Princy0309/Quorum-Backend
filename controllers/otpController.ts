@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import prisma from '../config/prisma';
+import redis from '../config/redis';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ApiError } from '../utils/ApiError';
 import { sendSuccess } from '../utils/apiResponse';
@@ -18,8 +19,18 @@ export const sendVerificationOTP = asyncHandler(async (req: Request | any, res: 
   const user = (await prisma.user.findUnique({ where: { email } })) || req.user;
   if (!user) throw new ApiError(404, 'User not found');
 
-  await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
+  // Cooldown check: prevent generating duplicate OTP if one was sent in the last 60 seconds
+  const existing = await redis.get(`otp:verify:${user.id}`);
+  if (existing) {
+    try {
+      const parsed = JSON.parse(existing);
+      if (parsed.createdAt && Date.now() - parsed.createdAt < 60 * 1000) {
+        return sendSuccess(res, 200, 'Verification code already sent. Please check your inbox.');
+      }
+    } catch (e) {}
+  }
 
+  await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
   return sendSuccess(res, 200, 'Verification OTP sent to your email');
 });
 
@@ -31,7 +42,6 @@ export const verifyEmail = asyncHandler(async (req: Request | any, res: Response
   const cleanEmail = rawEmail ? rawEmail.trim().toLowerCase() : null;
   const cleanOtp = String(req.body?.otp || '').trim();
 
-  // Prioritize body email over stale header token to prevent cookie hijack
   let user = null;
   if (cleanEmail) {
     user = await prisma.user.findUnique({ where: { email: cleanEmail } });
@@ -41,45 +51,49 @@ export const verifyEmail = asyncHandler(async (req: Request | any, res: Response
   }
 
   if (!user) {
-    throw new ApiError(400, 'User not found. Please provide the registered email address.');
+    throw new ApiError(400, 'User not found. Please provide your registered email address.');
   }
 
   const result = await verifyOTPFromRedis(`otp:verify:${user.id}`, cleanOtp);
   if (!result.success) throw new ApiError(400, result.message);
 
-  const updatedUser = await prisma.user.update({
-    where: { id: user.id },
-    data: { isEmailVerified: true },
-  });
-
-  // Issue fresh tokens so mobile & web can immediately transition to the home screen
-  const { accessToken, refreshToken } = await issueTokens(updatedUser, req);
-  const isMobile = req.headers['x-client-platform'] === 'mobile';
-
-  if (isMobile) {
-    return sendSuccess(res, 200, 'Email verified successfully', {
-      accessToken,
-      refreshToken,
-      user: {
-        id: updatedUser.id,
-        name: updatedUser.name,
-        email: updatedUser.email,
-        role: updatedUser.role,
-        isEmailVerified: true,
-      },
+  try {
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: { isEmailVerified: true },
     });
-  } else {
-    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-    return sendSuccess(res, 200, 'Email verified successfully', {
-      accessToken,
-      user: {
-        id: updatedUser.id,
-        name: updatedUser.name,
-        email: updatedUser.email,
-        role: updatedUser.role,
-        isEmailVerified: true,
-      },
-    });
+
+    const { accessToken, refreshToken } = await issueTokens(updatedUser, req);
+    const isMobile = req.headers['x-client-platform'] === 'mobile';
+
+    if (isMobile) {
+      return sendSuccess(res, 200, 'Email verified successfully', {
+        accessToken,
+        refreshToken,
+        user: {
+          id: updatedUser.id,
+          name: updatedUser.name,
+          email: updatedUser.email,
+          role: updatedUser.role,
+          isEmailVerified: true,
+        },
+      });
+    } else {
+      res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+      return sendSuccess(res, 200, 'Email verified successfully', {
+        accessToken,
+        user: {
+          id: updatedUser.id,
+          name: updatedUser.name,
+          email: updatedUser.email,
+          role: updatedUser.role,
+          isEmailVerified: true,
+        },
+      });
+    }
+  } catch (err: any) {
+    console.error('Error during post-verification:', err);
+    throw new ApiError(500, `Verification completion failed: ${err.message}`);
   }
 });
 
@@ -95,7 +109,6 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response, n
   }
 
   await storeAndSendOTP(user.id, user.email, `otp:reset:${user.id}`, 'reset');
-
   return sendSuccess(res, 200, 'Password reset OTP sent to your email');
 });
 

@@ -15,12 +15,13 @@ export const storeAndSendOTP = async (
 ): Promise<void> => {
   const { code, codeHash } = generateOTP();
 
-  await redis.set(
+    await redis.set(
     redisKey,
-    JSON.stringify({ codeHash, attempts: 0 }),
+    JSON.stringify({ codeHash, attempts: 0, createdAt: Date.now() }),
     'EX',
     OTP_TTL_SECONDS
   );
+
 
   await addEmailToQueue(email, code, emailType);
 

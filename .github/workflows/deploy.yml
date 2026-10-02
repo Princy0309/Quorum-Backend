@@ -43,3 +43,6 @@ jobs:
 
              # 5. Automatically sync Prisma schema to Postgres
              sudo docker compose exec -T app npx prisma db push
+
+             # 6. Print recent app container logs to GitHub Actions
+             sudo docker compose logs --tail=50 app
