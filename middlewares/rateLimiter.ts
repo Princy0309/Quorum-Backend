@@ -1,7 +1,8 @@
-const { RateLimiterRedis } = require('rate-limiter-flexible');
-const redisClient = require('../config/redis');
+import { Request, Response, NextFunction } from 'express';
+import { RateLimiterRedis } from 'rate-limiter-flexible';
+import redisClient from '../config/redis';
 
-const loginRateLimiter = new RateLimiterRedis({
+export const loginRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
   keyPrefix: 'login_v2',
   points: 50,
@@ -9,7 +10,7 @@ const loginRateLimiter = new RateLimiterRedis({
   blockDuration: 15 * 60,
 });
 
-const refreshRateLimiter = new RateLimiterRedis({
+export const refreshRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
   keyPrefix: 'refresh_v2',
   points: 50,
@@ -17,17 +18,17 @@ const refreshRateLimiter = new RateLimiterRedis({
   blockDuration: 15 * 60,
 });
 
-const registerRateLimiter = new RateLimiterRedis({
+export const registerRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
-  keyPrefix: 'register_v2', // Resets everyone's points to 0!
-  points: 50,               // High limit for easy testing
+  keyPrefix: 'register_v2',
+  points: 50,
   duration: 60 * 60,
   blockDuration: 15 * 60,
 });
 
-const loginLimiter = async (req, res, next) => {
+export const loginLimiter = async (req: Request, res: Response, next: NextFunction): Promise<any> => {
   try {
-    const status = await loginRateLimiter.get(req.ip);
+    const status = await loginRateLimiter.get(req.ip || '127.0.0.1');
     if (status && status.remainingPoints <= 0) {
       return res.status(429).json({ success: false, statusCode: 429, message: 'Too many failed login attempts, try again after 15 minutes.' });
     }
@@ -37,8 +38,8 @@ const loginLimiter = async (req, res, next) => {
   }
 };
 
-const refreshLimiter = (req, res, next) => {
-  refreshRateLimiter.consume(req.ip)
+export const refreshLimiter = (req: Request, res: Response, next: NextFunction): void => {
+  refreshRateLimiter.consume(req.ip || '127.0.0.1')
     .then(() => next())
     .catch((err) => {
       if (err instanceof Error) {
@@ -48,8 +49,8 @@ const refreshLimiter = (req, res, next) => {
     });
 };
 
-const registerLimiter = (req, res, next) => {
-  registerRateLimiter.consume(req.ip)
+export const registerLimiter = (req: Request, res: Response, next: NextFunction): void => {
+  registerRateLimiter.consume(req.ip || '127.0.0.1')
     .then(() => next())
     .catch((err) => {
       if (err instanceof Error) {
@@ -59,16 +60,16 @@ const registerLimiter = (req, res, next) => {
     });
 };
 
-const otpRateLimiter = new RateLimiterRedis({
+export const otpRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
-  keyPrefix: 'otp_v2', // Resets everyone's points to 0!
-  points: 30,          // High limit for easy testing
+  keyPrefix: 'otp_v2',
+  points: 30,
   duration: 15 * 60,
   blockDuration: 5 * 60,
 });
 
-const otpLimiter = (req, res, next) => {
-  otpRateLimiter.consume(req.ip)
+export const otpLimiter = (req: Request, res: Response, next: NextFunction): void => {
+  otpRateLimiter.consume(req.ip || '127.0.0.1')
     .then(() => next())
     .catch((err) => {
       if (err instanceof Error) {
@@ -77,5 +78,3 @@ const otpLimiter = (req, res, next) => {
       res.status(429).json({ success: false, statusCode: 429, message: 'Too many OTP requests, try again after 15 minutes.' });
     });
 };
-
-module.exports = { loginLimiter, refreshLimiter, registerLimiter, loginRateLimiter, otpLimiter };

@@ -1,10 +1,11 @@
-require('dotenv').config();
-const prisma = require('./config/prisma');
-const app = require('./app');
-require('./queues/emailQueue');
+import dotenv from 'dotenv';
+dotenv.config();
 
+import prisma from './config/prisma';
+import app from './app';
+import './queues/emailQueue';
 
-const startServer = async () => {
+const startServer = async (): Promise<void> => {
   try {
     await prisma.$connect();
     console.log('Database connected');

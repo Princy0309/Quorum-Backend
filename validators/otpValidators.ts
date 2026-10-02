@@ -1,6 +1,6 @@
-const Joi = require('joi');
+import Joi from 'joi';
 
-const verifyEmailSchema = Joi.object({
+export const verifyEmailSchema = Joi.object({
   email: Joi.string().email().optional(),
   otp: Joi.alternatives().try(
     Joi.string().length(6),
@@ -8,11 +8,11 @@ const verifyEmailSchema = Joi.object({
   ).required(),
 }).unknown(true);
 
-const sendResetSchema = Joi.object({
+export const sendResetSchema = Joi.object({
   email: Joi.string().email().max(100).required(),
 }).unknown(true);
 
-const resetPasswordSchema = Joi.object({
+export const resetPasswordSchema = Joi.object({
   email: Joi.string().email().max(100).required(),
   otp: Joi.alternatives().try(
     Joi.string().length(6),
@@ -20,9 +20,3 @@ const resetPasswordSchema = Joi.object({
   ).required(),
   newPassword: Joi.string().min(8).max(50).required(),
 }).unknown(true);
-
-module.exports = {
-  verifyEmailSchema,
-  sendResetSchema,
-  resetPasswordSchema,
-};

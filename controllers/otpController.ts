@@ -9,7 +9,7 @@ import { storeAndSendOTP, verifyOTPFromRedis } from '../services/otpService';
 import { issueTokens } from '../services/tokenService';
 import { refreshCookieOptions } from '../utils/cookieOptions';
 
-const { verifyEmailSchema, sendResetSchema, resetPasswordSchema } = require('../validators/otpValidators');
+import { verifyEmailSchema, sendResetSchema, resetPasswordSchema } from '../validators/otpValidators';
 
 export const sendVerificationOTP = asyncHandler(async (req: Request | any, res: Response, next: NextFunction) => {
   const rawEmail = req.body?.email || req.user?.email;

@@ -1,12 +1,14 @@
-const express = require('express');
-const cors = require('cors');
-const cookieParser = require('cookie-parser');
-require('dotenv').config();
+import express, { Request, Response } from 'express';
+import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import dotenv from 'dotenv';
 
-const setupSwagger = require('./config/swagger');
-const authRoutes = require('./routes/authRoutes').default || require('./routes/authRoutes');
-const otpRoutes = require('./routes/otpRoutes').default || require('./routes/otpRoutes');
-const errorHandler = require('./middlewares/errorHandler').default || require('./middlewares/errorHandler');
+dotenv.config();
+
+import setupSwagger from './config/swagger';
+import authRoutes from './routes/authRoutes';
+import otpRoutes from './routes/otpRoutes';
+import errorHandler from './middlewares/errorHandler';
 
 const app = express();
 
@@ -23,7 +25,7 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
     ];
 
 app.use(cors({
-  origin: function (origin, callback) {
+  origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
     if (!origin) return callback(null, true);
 
     const isAllowedDomain = allowedOrigins.includes(origin);
@@ -48,7 +50,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/otp', otpRoutes);
 setupSwagger(app);
 
-app.get('/health', (req, res) => {
+app.get('/health', (req: Request, res: Response) => {
   res.json({ 
     status: 'ok',
     hasDbUrl: !!process.env.DATABASE_URL,
@@ -59,10 +61,10 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.get('/', (req, res) => {
+app.get('/', (req: Request, res: Response) => {
   res.status(200).send('API is running');
 });
 
 app.use(errorHandler);
 
-module.exports = app;
+export default app;
