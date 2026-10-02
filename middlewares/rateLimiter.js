@@ -3,26 +3,26 @@ const redisClient = require('../config/redis');
 
 const loginRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
-  keyPrefix: 'login',
-  points: 10,
+  keyPrefix: 'login_v2',
+  points: 50,
   duration: 15 * 60,
   blockDuration: 15 * 60,
 });
 
 const refreshRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
-  keyPrefix: 'refresh',
-  points: 15,
+  keyPrefix: 'refresh_v2',
+  points: 50,
   duration: 15 * 60,
   blockDuration: 15 * 60,
 });
 
 const registerRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
-  keyPrefix: 'register',
-  points: 10,
+  keyPrefix: 'register_v2', // Resets everyone's points to 0!
+  points: 50,               // High limit for easy testing
   duration: 60 * 60,
-  blockDuration: 60 * 60,
+  blockDuration: 15 * 60,
 });
 
 const loginLimiter = async (req, res, next) => {
@@ -61,10 +61,10 @@ const registerLimiter = (req, res, next) => {
 
 const otpRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
-  keyPrefix: 'otp',
-  points: 5,
+  keyPrefix: 'otp_v2', // Resets everyone's points to 0!
+  points: 30,          // High limit for easy testing
   duration: 15 * 60,
-  blockDuration: 15 * 60,
+  blockDuration: 5 * 60,
 });
 
 const otpLimiter = (req, res, next) => {
@@ -79,4 +79,3 @@ const otpLimiter = (req, res, next) => {
 };
 
 module.exports = { loginLimiter, refreshLimiter, registerLimiter, loginRateLimiter, otpLimiter };
-
