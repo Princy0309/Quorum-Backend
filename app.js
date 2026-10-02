@@ -5,7 +5,7 @@ require('dotenv').config();
 
 const setupSwagger = require('./config/swagger');
 const authRoutes = require('./routes/authRoutes').default || require('./routes/authRoutes');
-const otpRoutes = require('./routes/otpRoutes');
+const otpRoutes = require('./routes/otpRoutes').default || require('./routes/otpRoutes');
 const errorHandler = require('./middlewares/errorHandler').default || require('./middlewares/errorHandler');
 
 const app = express();
@@ -32,6 +32,7 @@ app.use(cors({
   },
   credentials: true,
 }));
+
 app.use(express.json());
 app.use(cookieParser());
 

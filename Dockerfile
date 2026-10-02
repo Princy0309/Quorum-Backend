@@ -5,8 +5,8 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma/
 
-RUN npm install
-RUN npx prisma generate
+RUN npm install && npm cache clean --force
+RUN npx prisma generate && rm -rf /root/.cache
 
 COPY . .
 

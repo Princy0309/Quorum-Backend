@@ -1,6 +1,8 @@
 require('dotenv').config();
 const prisma = require('./config/prisma');
 const app = require('./app');
+require('./queues/emailQueue');
+
 
 const startServer = async () => {
   try {
