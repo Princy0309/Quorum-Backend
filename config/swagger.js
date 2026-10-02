@@ -5,7 +5,7 @@ const swaggerDocument = {
   info: {
     title: 'Quorum Backend API Documentation',
     version: '1.0.0',
-    description: 'Interactive API documentation for Quorum Authentication, OTP verification, session management, and password reset flows.',
+    description: 'Interactive API documentation for Quorum Authentication, OTP verification, session management, and 2FA flows.',
   },
   servers: [
     {
@@ -25,6 +25,12 @@ const swaggerDocument = {
         bearerFormat: 'JWT',
         description: 'Enter your Bearer Access Token in the format: Bearer <token>',
       },
+      RefreshTokenHeader: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'x-refresh-token',
+        description: 'Pass your signed JWT Refresh Token in the x-refresh-token request header.',
+      },
     },
   },
   paths: {
@@ -32,16 +38,7 @@ const swaggerDocument = {
       post: {
         tags: ['Authentication'],
         summary: 'Register a new user',
-        description: 'Creates a new user account with hashed password and generates authentication tokens.',
-        parameters: [
-          {
-            name: 'x-client-platform',
-            in: 'header',
-            required: false,
-            schema: { type: 'string', example: 'mobile' },
-            description: 'Set to "mobile" for mobile clients to receive tokens in response body.',
-          },
-        ],
+        description: 'Creates a new user account, sends verification OTP, and returns access token & x-refresh-token header.',
         requestBody: {
           required: true,
           content: {
@@ -50,8 +47,8 @@ const swaggerDocument = {
                 type: 'object',
                 required: ['name', 'email', 'password'],
                 properties: {
-                  name: { type: 'string', example: 'yourname' },
-                  email: { type: 'string', example: 'user@example.ac.in' },
+                  name: { type: 'string', example: 'John Doe' },
+                  email: { type: 'string', example: 'user@example.com' },
                   password: { type: 'string', example: 'Password123!' },
                 },
               },
@@ -59,7 +56,15 @@ const swaggerDocument = {
           },
         },
         responses: {
-          201: { description: 'User registered successfully' },
+          201: {
+            description: 'User registered successfully',
+            headers: {
+              'x-refresh-token': {
+                schema: { type: 'string' },
+                description: 'Signed JWT Refresh Token',
+              },
+            },
+          },
           400: { description: 'Validation error' },
           409: { description: 'Email already registered' },
         },
@@ -69,15 +74,7 @@ const swaggerDocument = {
       post: {
         tags: ['Authentication'],
         summary: 'Login user',
-        description: 'Authenticates credentials, updates last login, and returns access token.',
-        parameters: [
-          {
-            name: 'x-client-platform',
-            in: 'header',
-            required: false,
-            schema: { type: 'string', example: 'mobile' },
-          },
-        ],
+        description: 'Authenticates credentials, updates last login, and returns access token & x-refresh-token header.',
         requestBody: {
           required: true,
           content: {
@@ -86,7 +83,7 @@ const swaggerDocument = {
                 type: 'object',
                 required: ['email', 'password'],
                 properties: {
-                  email: { type: 'string', example: 'user@example.ac.in' },
+                  email: { type: 'string', example: 'user@example.com' },
                   password: { type: 'string', example: 'Password123!' },
                 },
               },
@@ -94,8 +91,17 @@ const swaggerDocument = {
           },
         },
         responses: {
-          200: { description: 'Login successful' },
+          200: {
+            description: 'Login successful',
+            headers: {
+              'x-refresh-token': {
+                schema: { type: 'string' },
+                description: 'Signed JWT Refresh Token',
+              },
+            },
+          },
           401: { description: 'Invalid credentials' },
+          403: { description: 'Email not verified' },
           429: { description: 'Too many failed login attempts' },
         },
       },
@@ -104,7 +110,16 @@ const swaggerDocument = {
       post: {
         tags: ['Authentication'],
         summary: 'Rotate refresh token',
-        description: 'Rotates an active refresh token and returns a fresh access token.',
+        description: 'Rotates an active refresh token sent in x-refresh-token header or body and returns a new access token & refreshed x-refresh-token header.',
+        parameters: [
+          {
+            name: 'x-refresh-token',
+            in: 'header',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Active JWT Refresh Token',
+          },
+        ],
         requestBody: {
           required: false,
           content: {
@@ -119,7 +134,15 @@ const swaggerDocument = {
           },
         },
         responses: {
-          200: { description: 'Token refreshed successfully' },
+          200: {
+            description: 'Token refreshed successfully',
+            headers: {
+              'x-refresh-token': {
+                schema: { type: 'string' },
+                description: 'New Signed JWT Refresh Token',
+              },
+            },
+          },
           401: { description: 'Invalid or expired refresh token' },
         },
       },
@@ -128,7 +151,16 @@ const swaggerDocument = {
       post: {
         tags: ['Authentication'],
         summary: 'Logout user',
-        description: 'Revokes the active refresh token and clears the session from Redis.',
+        description: 'Revokes the active refresh token provided in x-refresh-token header or body.',
+        parameters: [
+          {
+            name: 'x-refresh-token',
+            in: 'header',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Active JWT Refresh Token to revoke',
+          },
+        ],
         requestBody: {
           required: false,
           content: {
@@ -153,8 +185,9 @@ const swaggerDocument = {
         summary: 'Get current user profile',
         security: [{ BearerAuth: [] }],
         responses: {
-          200: { description: 'User profile retrieved' },
+          200: { description: 'User profile retrieved successfully' },
           401: { description: 'Unauthorized' },
+          403: { description: 'Email not verified' },
         },
       },
     },
@@ -162,10 +195,23 @@ const swaggerDocument = {
       post: {
         tags: ['OTP & Verification'],
         summary: 'Send email verification OTP',
-        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  email: { type: 'string', example: 'user@example.com' },
+                },
+              },
+            },
+          },
+        },
         responses: {
           200: { description: 'Verification OTP sent to email' },
-          401: { description: 'Unauthorized' },
+          400: { description: 'Email address required' },
+          404: { description: 'User not found' },
         },
       },
     },
@@ -173,7 +219,6 @@ const swaggerDocument = {
       post: {
         tags: ['OTP & Verification'],
         summary: 'Verify email with 6-digit OTP',
-        security: [{ BearerAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -182,6 +227,7 @@ const swaggerDocument = {
                 type: 'object',
                 required: ['otp'],
                 properties: {
+                  email: { type: 'string', example: 'user@example.com' },
                   otp: { type: 'string', example: '123456' },
                 },
               },
@@ -189,7 +235,15 @@ const swaggerDocument = {
           },
         },
         responses: {
-          200: { description: 'Email verified successfully' },
+          200: {
+            description: 'Email verified successfully',
+            headers: {
+              'x-refresh-token': {
+                schema: { type: 'string' },
+                description: 'Signed JWT Refresh Token',
+              },
+            },
+          },
           400: { description: 'Incorrect or expired OTP' },
         },
       },
@@ -206,7 +260,7 @@ const swaggerDocument = {
                 type: 'object',
                 required: ['email'],
                 properties: {
-                  email: { type: 'string', example: 'user@example.ac.in' },
+                  email: { type: 'string', example: 'user@example.com' },
                 },
               },
             },
@@ -214,7 +268,6 @@ const swaggerDocument = {
         },
         responses: {
           200: { description: 'Password reset OTP sent to email' },
-          404: { description: 'User not found' },
         },
       },
     },
@@ -230,7 +283,7 @@ const swaggerDocument = {
                 type: 'object',
                 required: ['email', 'otp', 'newPassword'],
                 properties: {
-                  email: { type: 'string', example: 'user@example.ac.in' },
+                  email: { type: 'string', example: 'user@example.com' },
                   otp: { type: 'string', example: '123456' },
                   newPassword: { type: 'string', example: 'NewSecurePassword123!' },
                 },
@@ -241,6 +294,7 @@ const swaggerDocument = {
         responses: {
           200: { description: 'Password reset successfully' },
           400: { description: 'Incorrect OTP or validation error' },
+          404: { description: 'User not found' },
         },
       },
     },
@@ -260,7 +314,7 @@ const swaggerDocument = {
       post: {
         tags: ['Two-Factor Auth (2FA)'],
         summary: 'Enable 2FA for account',
-        description: 'Verifies the first 6-digit TOTP code and enables 2FA for the user account.',
+        description: 'Verifies the 6-digit TOTP code and enables 2FA for the user account.',
         security: [{ BearerAuth: [] }],
         requestBody: {
           required: true,
@@ -303,7 +357,15 @@ const swaggerDocument = {
           },
         },
         responses: {
-          200: { description: '2FA authentication successful' },
+          200: {
+            description: '2FA authentication successful',
+            headers: {
+              'x-refresh-token': {
+                schema: { type: 'string' },
+                description: 'Signed JWT Refresh Token',
+              },
+            },
+          },
           400: { description: 'Missing required parameters or 2FA not configured' },
           401: { description: 'MFA session expired or invalid 2FA code' },
         },
@@ -317,4 +379,3 @@ const setupSwagger = (app) => {
 };
 
 module.exports = setupSwagger;
-
