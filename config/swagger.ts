@@ -6,7 +6,7 @@ const swaggerDocument = {
   info: {
     title: 'Quorum Backend API Documentation',
     version: '1.0.0',
-    description: 'Interactive API documentation for Quorum Authentication, OTP verification, session management, and 2FA flows.',
+    description: 'Interactive API documentation for Quorum Authentication, OTP verification, and session management.',
   },
   servers: [
     {
@@ -290,79 +290,6 @@ const swaggerDocument = {
           200: { description: 'Password reset successfully' },
           400: { description: 'Incorrect OTP or validation error' },
           404: { description: 'User not found' },
-        },
-      },
-    },
-    '/api/auth/2fa/generate': {
-      post: {
-        tags: ['Two-Factor Auth (2FA)'],
-        summary: 'Generate 2FA secret and QR Code',
-        description: 'Generates a TOTP secret key and QR code data URL for Google Authenticator / Authy.',
-        security: [{ BearerAuth: [] }],
-        responses: {
-          200: { description: '2FA QR Code generated successfully' },
-          401: { description: 'Unauthorized' },
-        },
-      },
-    },
-    '/api/auth/2fa/enable': {
-      post: {
-        tags: ['Two-Factor Auth (2FA)'],
-        summary: 'Enable 2FA for account',
-        description: 'Verifies the 6-digit TOTP code and enables 2FA for the user account.',
-        security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['code'],
-                properties: {
-                  code: { type: 'string', example: '123456' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: { description: '2FA enabled successfully' },
-          400: { description: 'Invalid 2FA code or setup not initiated' },
-        },
-      },
-    },
-    '/api/auth/2fa/verify-login': {
-      post: {
-        tags: ['Two-Factor Auth (2FA)'],
-        summary: 'Verify 2FA code during login',
-        description: 'Verifies 6-digit TOTP code using the temporary mfaToken returned from /api/auth/login.',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['mfaToken', 'code'],
-                properties: {
-                  mfaToken: { type: 'string', example: 'eyJhbGciOiJIUzI1Ni...' },
-                  code: { type: 'string', example: '123456' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: {
-            description: '2FA authentication successful',
-            headers: {
-              'x-refresh-token': {
-                schema: { type: 'string' },
-                description: 'Signed JWT Refresh Token',
-              },
-            },
-          },
-          400: { description: 'Missing required parameters or 2FA not configured' },
-          401: { description: 'MFA session expired or invalid 2FA code' },
         },
       },
     },

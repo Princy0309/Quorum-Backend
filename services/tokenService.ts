@@ -45,24 +45,6 @@ export const verifyRefreshToken = (token: string): any => {
   });
 };
 
-export const generateMFAToken = (userId: string): string => {
-  const secret = process.env.JWT_SECRET || 'default_jwt_secret';
-  return jwt.sign({ userId, type: 'mfa' }, secret, {
-    algorithm: 'HS256',
-    issuer: JWT_ISSUER,
-    audience: JWT_AUDIENCE,
-    expiresIn: '5m',
-  });
-};
-
-export const verifyMFAToken = (token: string): any => {
-  const secret = process.env.JWT_SECRET || 'default_jwt_secret';
-  return jwt.verify(token, secret, {
-    algorithms: ['HS256'],
-    issuer: JWT_ISSUER,
-    audience: JWT_AUDIENCE,
-  });
-};
 
 export const issueTokens = async (user: { id: string }, req?: any): Promise<{ accessToken: string; refreshToken: string }> => {
   const device = req?.headers?.['user-agent']?.slice(0, 200) || 'unknown';

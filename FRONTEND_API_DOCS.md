@@ -129,7 +129,6 @@ Interactive Swagger Docs: `https://api.newquorum.me/api-docs`
       "email": "john@example.com",
       "role": "member",
       "isEmailVerified": true,
-      "is2FAEnabled": false,
       "createdAt": "2026-10-02T12:00:00.000Z",
       "lastLogin": "2026-10-02T19:00:00.000Z"
     }

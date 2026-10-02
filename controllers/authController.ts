@@ -4,7 +4,7 @@ import prisma from '../config/prisma';
 import { registerSchema, loginSchema } from '../validators/authValidators';
 import { ApiError } from '../utils/ApiError';
 import { sendSuccess } from '../utils/apiResponse';
-import { issueTokens, generateMFAToken, rotateRefreshToken, revokeRefreshToken } from '../services/tokenService';
+import { issueTokens, rotateRefreshToken, revokeRefreshToken } from '../services/tokenService';
 import { refreshCookieOptions } from '../utils/cookieOptions';
 import { loginRateLimiter } from '../middlewares/rateLimiter';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -78,11 +78,6 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
     throw new ApiError(403, 'Email not verified. A fresh verification code has been sent to your email.');
   }
 
-  if ((user as any).is2FAEnabled) {
-    const mfaToken = generateMFAToken(user.id);
-    return sendSuccess(res, 200, '2FA verification required', { requires2FA: true, mfaToken });
-  }
-
   await prisma.user.update({
     where: { id: user.id },
     data: { lastLogin: new Date() },
@@ -146,7 +141,6 @@ export const getMe = asyncHandler(async (req: any, res: Response, next: NextFunc
       email: true,
       role: true,
       isEmailVerified: true,
-      is2FAEnabled: true,
       createdAt: true,
       lastLogin: true,
     },
