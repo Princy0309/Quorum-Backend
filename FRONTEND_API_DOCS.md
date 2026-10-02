@@ -10,8 +10,7 @@ Interactive Swagger Docs: `https://api.newquorum.me/api-docs`
 ### Tokens & Headers
 - **Access Token:** Short-lived JWT (15 mins) signed with algorithm `HS256`, `issuer: quorum-api`, and `audience: quorum-app`. Pass in HTTP Header for protected routes:
   `Authorization: Bearer <accessToken>`
-- **Refresh Token:** Long-lived signed JWT (7 days) returned in the response header `x-refresh-token` (and in HTTPS-only cookie `refreshToken` for web browsers). Pass in HTTP Header for token rotation / logout:
-  `x-refresh-token: <refreshToken>`
+- **Refresh Token:** Long-lived signed JWT (7 days) sent **exclusively** via HTTPS `HttpOnly`, `Secure` cookie (`refreshToken`) for web browsers (preventing frontend JS leakage & XSS extraction). Mobile apps can send `x-client-type: mobile` request header to receive & send refresh tokens via headers/body.
 - **Registration Safeguard:** No tokens are issued upon registration. Users must verify their email with the 6-digit OTP code sent to their inbox before receiving tokens.
 
 ---
@@ -52,7 +51,7 @@ Interactive Swagger Docs: `https://api.newquorum.me/api-docs`
 ### 1.2 User Login (Password)
 - **Endpoint:** `POST /api/auth/login`
 - **Auth Required:** No
-- **Headers Returned:** `x-refresh-token: <signed_jwt_refresh_token>`
+- **Cookies Returned:** `refreshToken` (`HttpOnly`, `Secure`, `SameSite=none`)
 - **Request Body:**
 ```json
 {
@@ -83,8 +82,7 @@ Interactive Swagger Docs: `https://api.newquorum.me/api-docs`
 
 ### 1.3 Rotate Refresh Token
 - **Endpoint:** `POST /api/auth/refresh-token`
-- **Auth Header:** `x-refresh-token: <refreshToken>` (or in JSON body `{ "refreshToken": "..." }`)
-- **Headers Returned:** `x-refresh-token: <new_signed_jwt_refresh_token>`
+- **Auth Transport:** Automatically uses `refreshToken` HttpOnly cookie for web browsers (or `x-refresh-token` header if `x-client-type: mobile` is passed)
 - **Response (200 OK):**
 ```json
 {

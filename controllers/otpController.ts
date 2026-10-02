@@ -64,10 +64,11 @@ export const verifyEmail = asyncHandler(async (req: Request | any, res: Response
 
     const { accessToken, refreshToken } = await issueTokens(updatedUser, req);
 
-    res.setHeader('x-refresh-token', refreshToken);
     res.cookie('refreshToken', refreshToken, refreshCookieOptions);
 
-    return sendSuccess(res, 200, 'Email verified successfully', {
+    const isMobileClient = req.headers['x-client-type'] === 'mobile' || req.headers['x-client-type'] === 'native';
+
+    const responseData: any = {
       accessToken,
       user: {
         id: updatedUser.id,
@@ -76,7 +77,14 @@ export const verifyEmail = asyncHandler(async (req: Request | any, res: Response
         role: updatedUser.role,
         isEmailVerified: true,
       },
-    });
+    };
+
+    if (isMobileClient) {
+      res.setHeader('x-refresh-token', refreshToken);
+      responseData.refreshToken = refreshToken;
+    }
+
+    return sendSuccess(res, 200, 'Email verified successfully', responseData);
   } catch (err: any) {
     console.error('Error during post-verification:', err);
     throw new ApiError(500, `Verification completion failed: ${err.message}`);

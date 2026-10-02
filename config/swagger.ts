@@ -69,7 +69,7 @@ const swaggerDocument = {
       post: {
         tags: ['Authentication'],
         summary: 'Login user',
-        description: 'Authenticates credentials, updates last login, and returns access token & x-refresh-token header.',
+        description: 'Authenticates credentials and sets an HttpOnly, Secure refreshToken cookie for web clients. Mobile clients can pass x-client-type: mobile header to receive refreshToken in response headers and JSON body.',
         requestBody: {
           required: true,
           content: {
@@ -87,13 +87,7 @@ const swaggerDocument = {
         },
         responses: {
           200: {
-            description: 'Login successful',
-            headers: {
-              'x-refresh-token': {
-                schema: { type: 'string' },
-                description: 'Signed JWT Refresh Token',
-              },
-            },
+            description: 'Login successful. Sets HttpOnly refreshToken cookie.',
           },
           401: { description: 'Invalid credentials' },
           403: { description: 'Email not verified' },
@@ -105,38 +99,19 @@ const swaggerDocument = {
       post: {
         tags: ['Authentication'],
         summary: 'Rotate refresh token',
-        description: 'Rotates an active refresh token sent in x-refresh-token header or body and returns a new access token & refreshed x-refresh-token header.',
+        description: 'Rotates active refresh token from HttpOnly cookie (for web browsers) or x-refresh-token header (for mobile clients with x-client-type: mobile) and returns a new access token.',
         parameters: [
           {
-            name: 'x-refresh-token',
+            name: 'x-client-type',
             in: 'header',
             required: false,
             schema: { type: 'string' },
-            description: 'Active JWT Refresh Token',
+            description: 'Specify "mobile" or "native" for non-browser mobile app requests',
           },
         ],
-        requestBody: {
-          required: false,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  refreshToken: { type: 'string' },
-                },
-              },
-            },
-          },
-        },
         responses: {
           200: {
-            description: 'Token refreshed successfully',
-            headers: {
-              'x-refresh-token': {
-                schema: { type: 'string' },
-                description: 'New Signed JWT Refresh Token',
-              },
-            },
+            description: 'Token refreshed successfully. Sets updated HttpOnly refreshToken cookie.',
           },
           401: { description: 'Invalid or expired refresh token' },
         },

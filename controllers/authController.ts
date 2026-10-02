@@ -85,43 +85,57 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
 
   const { accessToken, refreshToken } = await issueTokens(user, req);
 
-  res.setHeader('x-refresh-token', refreshToken);
+  // Always set HttpOnly cookie for browser clients
   res.cookie('refreshToken', refreshToken, refreshCookieOptions);
 
-  return sendSuccess(res, 200, 'Login successful', {
+  const isMobileClient = req.headers['x-client-type'] === 'mobile' || req.headers['x-client-type'] === 'native';
+
+  const responseData: any = {
     accessToken,
-    refreshToken,
     user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
-  });
+  };
+
+  // Provide refreshToken in header & JSON body ONLY for explicit mobile/native non-browser clients
+  if (isMobileClient) {
+    res.setHeader('x-refresh-token', refreshToken);
+    responseData.refreshToken = refreshToken;
+  }
+
+  return sendSuccess(res, 200, 'Login successful', responseData);
 });
 
 export const refreshToken = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  const isMobileClient = req.headers['x-client-type'] === 'mobile' || req.headers['x-client-type'] === 'native';
+
   const incomingToken =
-    (req.headers['x-refresh-token'] as string) ||
-    (req.headers['refresh-token'] as string) ||
     req.cookies?.refreshToken ||
-    req.body?.refreshToken;
+    (isMobileClient ? ((req.headers['x-refresh-token'] as string) || (req.headers['refresh-token'] as string) || req.body?.refreshToken) : null);
 
   if (!incomingToken) throw new ApiError(401, 'Refresh token required');
 
   try {
     const { accessToken, refreshToken: newRefreshToken } = await rotateRefreshToken(incomingToken, req);
 
-    res.setHeader('x-refresh-token', newRefreshToken);
     res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
 
-    return sendSuccess(res, 200, 'Tokens refreshed successfully', { accessToken, refreshToken: newRefreshToken });
+    const responseData: any = { accessToken };
+    if (isMobileClient) {
+      res.setHeader('x-refresh-token', newRefreshToken);
+      responseData.refreshToken = newRefreshToken;
+    }
+
+    return sendSuccess(res, 200, 'Tokens refreshed successfully', responseData);
   } catch (err: any) {
     throw new ApiError(401, err.message || 'Invalid or expired refresh token');
   }
 });
 
 export const logout = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  const isMobileClient = req.headers['x-client-type'] === 'mobile' || req.headers['x-client-type'] === 'native';
+
   const incomingToken =
-    (req.headers['x-refresh-token'] as string) ||
-    (req.headers['refresh-token'] as string) ||
     req.cookies?.refreshToken ||
-    req.body?.refreshToken;
+    (isMobileClient ? ((req.headers['x-refresh-token'] as string) || (req.headers['refresh-token'] as string) || req.body?.refreshToken) : null);
 
   if (incomingToken) {
     await revokeRefreshToken(incomingToken);

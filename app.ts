@@ -9,6 +9,7 @@ import setupSwagger from './config/swagger';
 import authRoutes from './routes/authRoutes';
 import otpRoutes from './routes/otpRoutes';
 import errorHandler from './middlewares/errorHandler';
+import verifyCSRF from './middlewares/csrfProtection';
 
 const app = express();
 
@@ -40,11 +41,12 @@ app.use(cors({
     }
   },
   credentials: true,
-  exposedHeaders: ['x-refresh-token', 'X-Refresh-Token', 'x-access-token', 'authorization'],
+  exposedHeaders: ['authorization'],
 }));
 
 app.use(express.json());
 app.use(cookieParser());
+app.use(verifyCSRF);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/otp', otpRoutes);
