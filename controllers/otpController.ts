@@ -19,7 +19,6 @@ export const sendVerificationOTP = asyncHandler(async (req: Request | any, res: 
   const user = (await prisma.user.findUnique({ where: { email } })) || req.user;
   if (!user) throw new ApiError(404, 'User not found');
 
-  // Cooldown check: prevent generating duplicate OTP if one was sent in the last 60 seconds
   const existing = await redis.get(`otp:verify:${user.id}`);
   if (existing) {
     try {
@@ -30,7 +29,7 @@ export const sendVerificationOTP = asyncHandler(async (req: Request | any, res: 
     } catch (e) {}
   }
 
-  await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
+  await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
   return sendSuccess(res, 200, 'Verification OTP sent to your email');
 });
 
@@ -64,34 +63,21 @@ export const verifyEmail = asyncHandler(async (req: Request | any, res: Response
     });
 
     const { accessToken, refreshToken } = await issueTokens(updatedUser, req);
-    const isMobile = req.headers['x-client-platform'] === 'mobile';
 
-    if (isMobile) {
-      return sendSuccess(res, 200, 'Email verified successfully', {
-        accessToken,
-        refreshToken,
-        user: {
-          id: updatedUser.id,
-          name: updatedUser.name,
-          email: updatedUser.email,
-          role: updatedUser.role,
-          isEmailVerified: true,
-        },
-      });
-    } else {
-      res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-      return sendSuccess(res, 200, 'Email verified successfully', {
-        accessToken,
-        refreshToken,
-        user: {
-          id: updatedUser.id,
-          name: updatedUser.name,
-          email: updatedUser.email,
-          role: updatedUser.role,
-          isEmailVerified: true,
-        },
-      });
-    }
+    res.setHeader('x-refresh-token', refreshToken);
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+
+    return sendSuccess(res, 200, 'Email verified successfully', {
+      accessToken,
+      refreshToken,
+      user: {
+        id: updatedUser.id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        isEmailVerified: true,
+      },
+    });
   } catch (err: any) {
     console.error('Error during post-verification:', err);
     throw new ApiError(500, `Verification completion failed: ${err.message}`);
@@ -109,7 +95,7 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response, n
     return sendSuccess(res, 200, 'If an account with that email exists, a reset code has been sent');
   }
 
-  await storeAndSendOTP(user.id, user.email, `otp:reset:${user.id}`, 'reset');
+  await storeAndSendOTP(user.email, `otp:reset:${user.id}`, 'reset');
   return sendSuccess(res, 200, 'Password reset OTP sent to your email');
 });
 

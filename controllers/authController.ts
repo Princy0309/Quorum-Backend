@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/prisma';
-import redis from '../config/redis';
 import { registerSchema, loginSchema } from '../validators/authValidators';
 import { ApiError } from '../utils/ApiError';
 import { sendSuccess } from '../utils/apiResponse';
@@ -21,7 +20,6 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
   const cleanEmail = email.trim().toLowerCase();
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const isMobile = req.headers['x-client-platform'] === 'mobile';
 
   const existingUser = await prisma.user.findUnique({ where: { email: cleanEmail } });
 
@@ -35,44 +33,22 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
       data: { name, passwordHash },
     });
 
-    await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
-    const { accessToken, refreshToken } = await issueTokens(user, req);
+    await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
 
-    if (isMobile) {
-      return sendSuccess(res, 201, 'Account exists but unverified. A fresh verification code has been sent.', {
-        accessToken,
-        refreshToken,
-        user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
-      });
-    } else {
-      res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-      return sendSuccess(res, 201, 'Account exists but unverified. A fresh verification code has been sent.', {
-        accessToken,
-        user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
-      });
-    }
+    return sendSuccess(res, 201, 'Account exists but unverified. A fresh verification code has been sent to your email.', {
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: false },
+    });
   }
 
   const user = await prisma.user.create({
     data: { name, email: cleanEmail, passwordHash },
   });
 
-  await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
-  const { accessToken, refreshToken } = await issueTokens(user, req);
+  await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
 
-  if (isMobile) {
-    return sendSuccess(res, 201, 'User registered successfully', {
-      accessToken,
-      refreshToken,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
-    });
-  } else {
-    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-    return sendSuccess(res, 201, 'User registered successfully', {
-      accessToken,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
-    });
-  }
+  return sendSuccess(res, 201, 'User registered successfully. Please verify your email with the OTP sent to your inbox.', {
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: false },
+  });
 });
 
 export const login = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
@@ -100,7 +76,7 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
   }
 
   if (!user.isEmailVerified) {
-    await storeAndSendOTP(user.id, user.email, `otp:verify:${user.id}`, 'verification');
+    await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
     throw new ApiError(403, 'Email not verified. A fresh verification code has been sent to your email.');
   }
 
@@ -115,33 +91,28 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
   });
 
   const { accessToken, refreshToken } = await issueTokens(user, req);
-  const isMobile = req.headers['x-client-platform'] === 'mobile';
 
-  if (isMobile) {
-    return sendSuccess(res, 200, 'Login successful', {
-      accessToken,
-      refreshToken,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
-    });
-  } else {
-    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-    return sendSuccess(res, 200, 'Login successful', {
-      accessToken,
-      refreshToken,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
-    });
-  }
+  res.setHeader('x-refresh-token', refreshToken);
+  res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+
+  return sendSuccess(res, 200, 'Login successful', {
+    accessToken,
+    refreshToken,
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
+  });
 });
 
 export const refreshToken = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const isMobile = req.headers['x-client-platform'] === 'mobile';
-  const incomingToken = isMobile ? req.body.refreshToken : req.cookies.refreshToken;
+  const incomingToken =
+    (req.headers['x-refresh-token'] as string) ||
+    (req.headers['refresh-token'] as string) ||
+    req.cookies?.refreshToken ||
+    req.body?.refreshToken;
 
   if (!incomingToken) throw new ApiError(401, 'Refresh token required');
 
-  let decoded: any;
   try {
-    decoded = jwt.verify(incomingToken, process.env.JWT_REFRESH_SECRET || 'fallback_refresh_secret');
+    jwt.verify(incomingToken, process.env.JWT_REFRESH_SECRET || 'fallback_refresh_secret');
   } catch (err) {
     throw new ApiError(401, 'Invalid or expired refresh token');
   }
@@ -168,17 +139,18 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
 
   const { accessToken, refreshToken: newRefreshToken } = await issueTokens(storedToken.user, req);
 
-  if (isMobile) {
-    return sendSuccess(res, 200, 'Tokens refreshed successfully', { accessToken, refreshToken: newRefreshToken });
-  } else {
-    res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
-    return sendSuccess(res, 200, 'Tokens refreshed successfully', { accessToken });
-  }
+  res.setHeader('x-refresh-token', newRefreshToken);
+  res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
+
+  return sendSuccess(res, 200, 'Tokens refreshed successfully', { accessToken, refreshToken: newRefreshToken });
 });
 
 export const logout = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const isMobile = req.headers['x-client-platform'] === 'mobile';
-  const incomingToken = isMobile ? req.body.refreshToken : req.cookies.refreshToken;
+  const incomingToken =
+    (req.headers['x-refresh-token'] as string) ||
+    (req.headers['refresh-token'] as string) ||
+    req.cookies?.refreshToken ||
+    req.body?.refreshToken;
 
   if (incomingToken) {
     await prisma.refreshToken.updateMany({
@@ -187,9 +159,7 @@ export const logout = asyncHandler(async (req: Request, res: Response, next: Nex
     });
   }
 
-  if (!isMobile) {
-    res.clearCookie('refreshToken', refreshCookieOptions);
-  }
+  res.clearCookie('refreshToken', refreshCookieOptions);
 
   return sendSuccess(res, 200, 'Logged out successfully');
 });
