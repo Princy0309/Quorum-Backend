@@ -27,6 +27,7 @@ const allowedOrigins = env.ALLOWED_ORIGINS
       'https://quorum-web-omega.vercel.app',
       'https://newquorum.me',
       'https://www.newquorum.me',
+      'https://api.newquorum.me',
       'http://localhost:3000',
       'http://localhost:5173',
     ];
@@ -35,7 +36,7 @@ app.use(cors({
   origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
     if (!origin) return callback(null, true);
 
-    const isAllowedDomain = allowedOrigins.includes(origin);
+    const isAllowedDomain = allowedOrigins.includes(origin) || origin.includes('newquorum.me');
     const isLocalDev = env.NODE_ENV !== 'production' && (
       origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')
     );
