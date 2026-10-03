@@ -13,7 +13,8 @@ import verifyCSRF from './middlewares/csrfProtection';
 
 const app = express();
 
-app.set('trust proxy', 1);
+const trustProxy = process.env.TRUST_PROXY || 1;
+app.set('trust proxy', isNaN(Number(trustProxy)) ? trustProxy : Number(trustProxy));
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
@@ -50,6 +51,9 @@ app.use(verifyCSRF);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/otp', otpRoutes);
+app.get('/api/csrf-token', (req: Request, res: Response) => {
+  res.json({ csrfToken: res.locals.csrfToken || req.cookies['XSRF-TOKEN'] });
+});
 setupSwagger(app);
 
 app.get('/health', (req: Request, res: Response) => {

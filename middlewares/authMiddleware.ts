@@ -3,8 +3,17 @@ import { verifyAccessToken, AccessTokenPayload } from '../services/tokenService'
 import { ApiError } from '../utils/ApiError';
 import prisma from '../config/prisma';
 import redis from '../config/redis';
+import { User } from '@prisma/client';
 
-export const authMiddleware = async (req: Request | any, res: Response, next: NextFunction) => {
+declare global {
+  namespace Express {
+    interface Request {
+      user?: Omit<User, 'passwordHash'>;
+    }
+  }
+}
+
+export const authMiddleware = async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return next(new ApiError(401, 'Unauthorized, missing token'));
@@ -48,7 +57,7 @@ export const authMiddleware = async (req: Request | any, res: Response, next: Ne
 };
 
 export const authorizeRoles = (...roles: string[]) => {
-  return (req: Request | any, res: Response, next: NextFunction) => {
+  return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user || !roles.includes(req.user.role)) {
       return next(new ApiError(403, 'Forbidden, insufficient permissions'));
     }
@@ -56,31 +65,34 @@ export const authorizeRoles = (...roles: string[]) => {
   };
 };
 
-export const requireEmailVerified = (req: Request | any, res: Response, next: NextFunction) => {
+export const requireEmailVerified = (req: Request, res: Response, next: NextFunction) => {
 
   if(!req.user || !req.user.isEmailVerified){
     return next(new ApiError(403, 'Please verify your email address before accessing this resource'));
   }
   next();
 }
-export const optionalAuth = async (req: Request | any, res: Response, next: NextFunction) => {
+export const optionalAuth = async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return next();
   }
 
   const token = authHeader.split(' ')[1];
+  
+  let decoded: AccessTokenPayload;
   try {
-    const decoded: AccessTokenPayload = verifyAccessToken(token);
-    
+    decoded = verifyAccessToken(token);
+  } catch (err) {
+    // Treat invalid or expired tokens as anonymous
+    return next();
+  }
+
+  try {
     let isSessionValid = true;
     if (decoded.sid) {
-      try {
-        const isActive = await redis.exists(`refresh:${decoded.sid}`);
-        if (!isActive) isSessionValid = false;
-      } catch (err) {
-        isSessionValid = false;
-      }
+      const isActive = await redis.exists(`refresh:${decoded.sid}`);
+      if (!isActive) isSessionValid = false;
     }
 
     if (isSessionValid) {
@@ -90,8 +102,9 @@ export const optionalAuth = async (req: Request | any, res: Response, next: Next
         req.user = safeUser;
       }
     }
+    next();
   } catch (err) {
-    
+    // Surface backend failures (e.g., Redis or DB errors)
+    return next(new ApiError(500, 'Internal Server Error'));
   }
-  next();
 };

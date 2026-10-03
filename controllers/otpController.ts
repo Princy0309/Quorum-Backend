@@ -35,7 +35,7 @@ export const sendVerificationOTP = asyncHandler(async (req: Request | any, res: 
   return sendSuccess(res, 200, 'If an account with that email exists and is unverified, a verification code has been sent.');
 });
 
-export const verifyEmail = asyncHandler(async (req: Request | any, res: Response, next: NextFunction) => {
+export const verifyEmail = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const { error } = verifyEmailSchema.validate(req.body);
   if (error) throw new ApiError(400, error.details[0].message);
 
