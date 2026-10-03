@@ -7,8 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma/
 
-RUN npm install --omit=dev && npm cache clean --force
-
+RUN npm ci --omit=dev --no-optional && npm cache clean --force
 RUN npx prisma generate && rm -rf /root/.cache
 
 COPY . .

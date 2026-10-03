@@ -21,28 +21,22 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-             # 1. Free up disk space: remove the 2GB swapfile
              sudo swapoff /swapfile 2>/dev/null || true
              sudo rm -f /swapfile 2>/dev/null || true
-
-             # 2. Aggressively clean up Docker cache & journal logs
-             sudo docker system prune -af || true
-             sudo journalctl --vacuum-size=10M || true
+             sudo docker system prune -af --volumes || true
+             sudo rm -rf ~/.npm ~/.cache /tmp/* /var/tmp/* || true
+             sudo journalctl --vacuum-time=1h || true
              sudo apt-get clean || true
              sudo fuser -k 5000/tcp || true
 
-             # 3. Pull latest code from dev branch
              cd ~/Quorum-Backend
              git remote set-url origin https://github.com/Princy0309/Quorum-Backend.git
              git fetch origin dev
              git reset --hard origin/dev
 
-             # 4. Stop old containers and build fresh
              sudo docker compose down || true
-             sudo docker compose up -d --build
+             sudo docker compose build --no-cache app
+             sudo docker compose up -d
 
-             # 5. Sync Prisma schema to Postgres
              sudo docker compose exec -T app npx prisma db push
-
-             # 6. Print recent app container logs
              sudo docker compose logs --tail=50 app
