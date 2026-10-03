@@ -23,7 +23,8 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
 
   if (existingUser) {
     if (existingUser.isEmailVerified) {
-      throw new ApiError(409, 'Email already registered. Please log in.');
+      // Do not send OTP to avoid spam, but return the same consistent success response
+      return sendSuccess(res, 201, 'Registration processed. If the email is valid and available, a verification code has been sent.');
     }
 
     const user = await prisma.user.update({
@@ -31,22 +32,26 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
       data: { name, passwordHash },
     });
 
-    await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
+    try {
+      await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
+    } catch (err) {
+      console.error('Failed to send OTP during registration (existing unverified):', err);
+    }
 
-    return sendSuccess(res, 201, 'Account exists but unverified. A fresh verification code has been sent to your email.', {
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: false },
-    });
+    return sendSuccess(res, 201, 'Registration processed. If the email is valid and available, a verification code has been sent.');
   }
 
   const user = await prisma.user.create({
     data: { name, email: cleanEmail, passwordHash },
   });
 
-  await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
+  try {
+    await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
+  } catch (err) {
+    console.error('Failed to send OTP during registration:', err);
+  }
 
-  return sendSuccess(res, 201, 'User registered successfully. Please verify your email with the OTP sent to your inbox.', {
-    user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: false },
-  });
+  return sendSuccess(res, 201, 'Registration processed. If the email is valid and available, a verification code has been sent.');
 });
 
 const handleFailedLogin = async (userId: string, currentAttempts: number) => {
@@ -112,28 +117,19 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
 
   // Always set HttpOnly cookie for browser clients
   res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-
-  const isMobileClient = req.headers['x-client-type'] === 'mobile' || req.headers['x-client-type'] === 'native';
+  // Always provide header for native clients (browsers will ignore it if not exposed)
+  res.setHeader('x-refresh-token', refreshToken);
 
   const responseData: any = {
     accessToken,
     user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
   };
 
-  // Provide refreshToken in header ONLY for explicit mobile/native non-browser clients
-  if (isMobileClient) {
-    res.setHeader('x-refresh-token', refreshToken);
-  }
-
   return sendSuccess(res, 200, 'Login successful', responseData);
 });
 
 export const refreshToken = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const isMobileClient = req.headers['x-client-type'] === 'mobile' || req.headers['x-client-type'] === 'native';
-
-  const incomingToken =
-    req.cookies?.refreshToken ||
-    (isMobileClient ? (req.headers['x-refresh-token'] as string) : null);
+  const incomingToken = req.cookies?.refreshToken || req.headers['x-refresh-token'] as string;
 
   if (!incomingToken) throw new ApiError(401, 'Refresh token required');
 
@@ -141,11 +137,9 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
     const { accessToken, refreshToken: newRefreshToken } = await rotateRefreshToken(incomingToken, req);
 
     res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
+    res.setHeader('x-refresh-token', newRefreshToken);
 
     const responseData: any = { accessToken };
-    if (isMobileClient) {
-      res.setHeader('x-refresh-token', newRefreshToken);
-    }
 
     return sendSuccess(res, 200, 'Tokens refreshed successfully', responseData);
   } catch (err: any) {
@@ -154,11 +148,7 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
 });
 
 export const logout = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const isMobileClient = req.headers['x-client-type'] === 'mobile' || req.headers['x-client-type'] === 'native';
-
-  const incomingToken =
-    req.cookies?.refreshToken ||
-    (isMobileClient ? (req.headers['x-refresh-token'] as string) : null);
+  const incomingToken = req.cookies?.refreshToken || req.headers['x-refresh-token'] as string;
 
   if (incomingToken) {
     await revokeRefreshToken(incomingToken);

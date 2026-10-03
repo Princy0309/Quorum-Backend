@@ -17,7 +17,9 @@ export const sendVerificationOTP = asyncHandler(async (req: Request | any, res: 
   const email = rawEmail.trim().toLowerCase();
 
   const user = (await prisma.user.findUnique({ where: { email } })) || req.user;
-  if (!user) throw new ApiError(404, 'User not found');
+  if (!user) {
+    return sendSuccess(res, 200, 'If an account with that email exists and is unverified, a verification code has been sent.');
+  }
 
   const existing = await redis.get(`otp:verify:${user.id}`);
   if (existing) {
@@ -30,7 +32,7 @@ export const sendVerificationOTP = asyncHandler(async (req: Request | any, res: 
   }
 
   await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
-  return sendSuccess(res, 200, 'Verification OTP sent to your email');
+  return sendSuccess(res, 200, 'If an account with that email exists and is unverified, a verification code has been sent.');
 });
 
 export const verifyEmail = asyncHandler(async (req: Request | any, res: Response, next: NextFunction) => {
@@ -53,6 +55,18 @@ export const verifyEmail = asyncHandler(async (req: Request | any, res: Response
     throw new ApiError(400, 'User not found. Please provide your registered email address.');
   }
 
+  if (user.isEmailVerified) {
+    return sendSuccess(res, 200, 'Email is already verified. Please log in.', {
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isEmailVerified: true,
+      },
+    });
+  }
+
   const result = await verifyOTPFromRedis(`otp:verify:${user.id}`, cleanOtp);
   if (!result.success) throw new ApiError(400, result.message);
 
@@ -65,8 +79,7 @@ export const verifyEmail = asyncHandler(async (req: Request | any, res: Response
     const { accessToken, refreshToken } = await issueTokens(updatedUser, req);
 
     res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-
-    const isMobileClient = req.headers['x-client-type'] === 'mobile' || req.headers['x-client-type'] === 'native';
+    res.setHeader('x-refresh-token', refreshToken);
 
     const responseData: any = {
       accessToken,
@@ -79,15 +92,19 @@ export const verifyEmail = asyncHandler(async (req: Request | any, res: Response
       },
     };
 
-    if (isMobileClient) {
-      res.setHeader('x-refresh-token', refreshToken);
-      responseData.refreshToken = refreshToken;
-    }
-
     return sendSuccess(res, 200, 'Email verified successfully', responseData);
   } catch (err: any) {
-    console.error('Error during post-verification:', err);
-    throw new ApiError(500, `Verification completion failed: ${err.message}`);
+    console.error('Error during post-verification session issuance:', err);
+    // Recoverable workflow: user is verified, just needs to login
+    return sendSuccess(res, 200, 'Email verified successfully. Please log in to continue.', {
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isEmailVerified: true,
+      },
+    });
   }
 });
 
@@ -99,11 +116,11 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response, n
   const user = await prisma.user.findUnique({ where: { email } });
 
   if (!user) {
-    return sendSuccess(res, 200, 'If an account with that email exists, a reset code has been sent');
+    return sendSuccess(res, 200, 'If an account with that email exists, a password reset code has been sent to it.');
   }
 
   await storeAndSendOTP(user.email, `otp:reset:${user.id}`, 'reset');
-  return sendSuccess(res, 200, 'Password reset OTP sent to your email');
+  return sendSuccess(res, 200, 'If an account with that email exists, a password reset code has been sent to it.');
 });
 
 export const resetPassword = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
@@ -115,7 +132,7 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response, ne
   const { newPassword } = req.body;
 
   const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) throw new ApiError(404, 'User not found with this email address');
+  if (!user) throw new ApiError(400, 'Invalid or expired OTP');
 
   const result = await verifyOTPFromRedis(`otp:reset:${user.id}`, cleanOtp);
   if (!result.success) throw new ApiError(400, result.message);

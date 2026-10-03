@@ -12,9 +12,11 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
     ];
 
 export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
-  // Mobile/native clients passing explicit x-client-type do not rely on browser cookies
-  const isMobileClient = req.headers['x-client-type'] === 'mobile' || req.headers['x-client-type'] === 'native';
-  if (isMobileClient) {
+  // If the request does not include any cookies, it is not subject to cookie-based CSRF.
+  // Native clients using Authorization headers or custom transport bypass this check.
+  const hasCookies = req.cookies && Object.keys(req.cookies).length > 0;
+  
+  if (!hasCookies) {
     return next();
   }
 
