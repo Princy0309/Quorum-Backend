@@ -3,6 +3,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import expressWinston from 'express-winston';
+import helmet from 'helmet';
 
 dotenv.config();
 
@@ -49,6 +50,7 @@ app.use(cors({
   exposedHeaders: ['authorization'],
 }));
 
+app.use(helmet());
 app.use(express.json({limit: "10kb"}));
 app.use(cookieParser());
 app.use(verifyCSRF);
