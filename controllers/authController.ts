@@ -95,10 +95,9 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
     user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
   };
 
-  // Provide refreshToken in header & JSON body ONLY for explicit mobile/native non-browser clients
+  // Provide refreshToken in header ONLY for explicit mobile/native non-browser clients
   if (isMobileClient) {
     res.setHeader('x-refresh-token', refreshToken);
-    responseData.refreshToken = refreshToken;
   }
 
   return sendSuccess(res, 200, 'Login successful', responseData);
@@ -109,7 +108,7 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
 
   const incomingToken =
     req.cookies?.refreshToken ||
-    (isMobileClient ? ((req.headers['x-refresh-token'] as string) || (req.headers['refresh-token'] as string) || req.body?.refreshToken) : null);
+    (isMobileClient ? (req.headers['x-refresh-token'] as string) : null);
 
   if (!incomingToken) throw new ApiError(401, 'Refresh token required');
 
@@ -121,7 +120,6 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
     const responseData: any = { accessToken };
     if (isMobileClient) {
       res.setHeader('x-refresh-token', newRefreshToken);
-      responseData.refreshToken = newRefreshToken;
     }
 
     return sendSuccess(res, 200, 'Tokens refreshed successfully', responseData);
@@ -135,7 +133,7 @@ export const logout = asyncHandler(async (req: Request, res: Response, next: Nex
 
   const incomingToken =
     req.cookies?.refreshToken ||
-    (isMobileClient ? ((req.headers['x-refresh-token'] as string) || (req.headers['refresh-token'] as string) || req.body?.refreshToken) : null);
+    (isMobileClient ? (req.headers['x-refresh-token'] as string) : null);
 
   if (incomingToken) {
     await revokeRefreshToken(incomingToken);

@@ -18,19 +18,21 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
     return next();
   }
 
-  // For browser requests containing cookies on state-changing routes, validate origin/referer
-  if (req.cookies?.refreshToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+  // For browser requests on state-changing routes, validate origin/referer
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
     const origin = req.headers.origin || (req.headers.referer ? new URL(req.headers.referer).origin : null);
     
-    if (origin) {
-      const isAllowedDomain = allowedOrigins.includes(origin);
-      const isLocalDev = process.env.NODE_ENV !== 'production' && (
-        origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')
-      );
+    if (!origin) {
+      return next(new ApiError(403, 'CSRF validation failed: Missing origin'));
+    }
 
-      if (!isAllowedDomain && !isLocalDev) {
-        return next(new ApiError(403, 'CSRF validation failed: Unauthorized origin'));
-      }
+    const isAllowedDomain = allowedOrigins.includes(origin);
+    const isLocalDev = process.env.NODE_ENV !== 'production' && (
+      origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')
+    );
+
+    if (!isAllowedDomain && !isLocalDev) {
+      return next(new ApiError(403, 'CSRF validation failed: Unauthorized origin'));
     }
   }
 

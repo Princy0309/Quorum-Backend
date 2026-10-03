@@ -23,8 +23,29 @@ if (!process.env.JWT_REFRESH_SECRET) {
 }
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 
-export const generateAccessToken = (userId: string): string => {
-  return jwt.sign({ id: userId, jti: crypto.randomUUID() }, JWT_SECRET, {
+export interface AccessTokenPayload {
+  id: string;
+  type: 'access';
+  sid?: string;
+  jti: string;
+  iat?: number;
+  exp?: number;
+  iss?: string;
+  aud?: string;
+}
+
+export interface RefreshTokenPayload {
+  id: string;
+  type: 'refresh';
+  jti: string;
+  iat?: number;
+  exp?: number;
+  iss?: string;
+  aud?: string;
+}
+
+export const generateAccessToken = (userId: string, sid?: string): string => {
+  return jwt.sign({ id: userId, type: 'access', sid, jti: crypto.randomUUID() }, JWT_SECRET, {
     algorithm: 'HS256',
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
@@ -32,12 +53,18 @@ export const generateAccessToken = (userId: string): string => {
   });
 };
 
-export const verifyAccessToken = (token: string): any => {
-  return jwt.verify(token, JWT_SECRET, {
+export const verifyAccessToken = (token: string): AccessTokenPayload => {
+  const decoded = jwt.verify(token, JWT_SECRET, {
     algorithms: ['HS256'],
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
-  });
+  }) as any;
+
+  if (decoded.type !== 'access') {
+    throw new Error('Invalid token type');
+  }
+
+  return decoded as AccessTokenPayload;
 };
 
 export const generateRefreshToken = (userId: string): string => {
@@ -49,7 +76,7 @@ export const generateRefreshToken = (userId: string): string => {
   });
 };
 
-export const verifyRefreshToken = (token: string): any => {
+export const verifyRefreshToken = (token: string): RefreshTokenPayload => {
   const decoded = jwt.verify(token, JWT_REFRESH_SECRET, {
     algorithms: ['HS256'],
     issuer: JWT_ISSUER,
@@ -60,15 +87,15 @@ export const verifyRefreshToken = (token: string): any => {
     throw new Error('Invalid token type');
   }
 
-  return decoded;
+  return decoded as RefreshTokenPayload;
 };
 
 
 export const issueTokens = async (user: { id: string }, req?: any): Promise<{ accessToken: string; refreshToken: string }> => {
   const device = req?.headers?.['user-agent']?.slice(0, 200) || 'unknown';
-  const accessToken = generateAccessToken(user.id);
   const refreshToken = generateRefreshToken(user.id);
   const tokenHash = hashToken(refreshToken);
+  const accessToken = generateAccessToken(user.id, tokenHash);
 
   const expiresAt = new Date(Date.now() + REFRESH_TTL_SECONDS * 1000);
 
@@ -184,9 +211,9 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
 
     // Issue new tokens within the transaction
     const device = req?.headers?.['user-agent']?.slice(0, 200) || storedToken.device;
-    const accessToken = generateAccessToken(storedToken.userId);
     const refreshToken = generateRefreshToken(storedToken.userId);
     const newTokenHash = hashToken(refreshToken);
+    const accessToken = generateAccessToken(storedToken.userId, newTokenHash);
     const expiresAt = new Date(Date.now() + REFRESH_TTL_SECONDS * 1000);
 
     await tx.refreshToken.create({
@@ -228,7 +255,10 @@ export const revokeRefreshToken = async (rawToken: string): Promise<void> => {
       data: { revokedAt: new Date() },
     });
   } catch (err) {
-    // Database revocation error ignored safely
+    console.error('Failed to revoke RefreshToken in database:', err);
+    const error: any = new Error('Internal Server Error');
+    error.status = 500;
+    throw error;
   }
 
   try {
@@ -239,7 +269,7 @@ export const revokeRefreshToken = async (rawToken: string): Promise<void> => {
       await redis.srem(`user_sessions:${userId}`, tokenHash);
     }
   } catch (err) {
-    // Redis revocation error ignored safely
+    console.error('Redis revocation error ignored safely:', err);
   }
 };
 
@@ -250,7 +280,10 @@ export const revokeAllSessions = async (userId: string): Promise<void> => {
       data: { revokedAt: new Date() },
     });
   } catch (err) {
-    // Database revocation error ignored safely
+    console.error('Failed to revoke all sessions in database:', err);
+    const error: any = new Error('Internal Server Error');
+    error.status = 500;
+    throw error;
   }
 
   try {
@@ -260,6 +293,6 @@ export const revokeAllSessions = async (userId: string): Promise<void> => {
     }
     await redis.del(`user_sessions:${userId}`);
   } catch (err) {
-    // Redis revocation error ignored safely
+    console.error('Redis revocation error ignored safely:', err);
   }
 };

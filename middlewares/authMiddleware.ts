@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyAccessToken } from '../services/tokenService';
+import { verifyAccessToken, AccessTokenPayload } from '../services/tokenService';
 import { ApiError } from '../utils/ApiError';
 import prisma from '../config/prisma';
 import redis from '../config/redis';
@@ -12,7 +12,7 @@ export const authMiddleware = async (req: Request | any, res: Response, next: Ne
 
   const token = authHeader.split(' ')[1];
 
-  let decoded: any;
+  let decoded: AccessTokenPayload;
   try {
     decoded = verifyAccessToken(token);
   } catch (err) {
@@ -68,7 +68,7 @@ export const optionalAuth = async (req: Request | any, res: Response, next: Next
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded: any = verifyAccessToken(token);
+    const decoded: AccessTokenPayload = verifyAccessToken(token);
     
     let isSessionValid = true;
     if (decoded.sid) {
