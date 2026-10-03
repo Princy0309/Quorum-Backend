@@ -13,10 +13,20 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
   const { name, email, password } = req.body;
   const cleanEmail = email.trim().toLowerCase();
 
-  await registerUser(name, cleanEmail, password);
+  const { user } = await registerUser(name, cleanEmail, password);
 
-  return sendSuccess(res, 201, 'Registration processed. If the email is valid and available, a verification code has been sent.');
+  return sendSuccess(res, 201, 'User registered successfully. Please verify your email with the OTP sent to your inbox.', {
+    email: user.email,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      isEmailVerified: false,
+    },
+  });
 });
+
 
 export const login = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const { email, password } = req.body;
