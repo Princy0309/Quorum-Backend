@@ -9,30 +9,43 @@ import { User } from '@prisma/client';
 
 export const handleFailedLogin = async (userId: string) => {
   await prisma.$transaction(async (tx) => {
-    const updatedUser = await tx.user.update({
-      where: { id: userId },
-      data: { failedLoginAttempts: { increment: 1 } },
-      select: { failedLoginAttempts: true },
-    });
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user) return;
 
-    if (updatedUser.failedLoginAttempts >= 5) {
-      await tx.user.update({
-        where: { id: userId },
-        data: { lockedUntil: new Date(Date.now() + 15 * 60 * 1000) },
-      });
+    let attempts = user.failedLoginAttempts;
+    // If a previous lock has expired, reset the attempt counter before incrementing
+    if (user.lockedUntil && user.lockedUntil <= new Date()) {
+      attempts = 0;
     }
+
+    attempts += 1;
+
+    const updateData: any = { failedLoginAttempts: attempts };
+    if (user.lockedUntil && user.lockedUntil <= new Date()) {
+      updateData.lockedUntil = null;
+    }
+
+    if (attempts >= 5) {
+      updateData.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+    }
+
+    await tx.user.update({
+      where: { id: userId },
+      data: updateData,
+    });
   });
 };
 
 export const registerUser = async (name: string, email: string, passwordUnHashed: string) => {
+  // Hash upfront to prevent timing attacks that reveal if an email is registered
+  const passwordHash = await bcrypt.hash(passwordUnHashed, 10);
+
   const existingUser = await prisma.user.findUnique({ where: { email } });
   
   if (existingUser) {
     if (existingUser.isEmailVerified) {
       return { isNew: false, isVerified: true };
     }
-
-    const passwordHash = await bcrypt.hash(passwordUnHashed, 10);
 
     const user = await prisma.user.update({
       where: { id: existingUser.id },
@@ -47,8 +60,6 @@ export const registerUser = async (name: string, email: string, passwordUnHashed
 
     return { isNew: false, isVerified: false };
   }
-
-  const passwordHash = await bcrypt.hash(passwordUnHashed, 10);
 
   let user;
   try {
@@ -81,17 +92,17 @@ export const loginUser = async (email: string, password: string, ip: string, req
     await bcrypt.compare(password, '$2a$10$XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX');
   }
 
+  // Check lock status before processing failure/success to prevent lockout extension
+  if (user && user.lockedUntil && user.lockedUntil > new Date()) {
+    throw new ApiError(403, 'Account is temporarily locked due to multiple failed login attempts. Please try again later.');
+  }
+
   if (!user || !isMatch) {
     await loginAccountRateLimiter.consume(hashEmail(email)).catch(() => {});
     if (user) {
       await handleFailedLogin(user.id);
     }
     throw new ApiError(401, 'Invalid credentials');
-  }
-
-  // 2. Check account restrictions and email verification
-  if (user.lockedUntil && user.lockedUntil > new Date()) {
-    throw new ApiError(403, 'Account is temporarily locked due to multiple failed login attempts. Please try again later.');
   }
 
   if (!user.isEmailVerified) {

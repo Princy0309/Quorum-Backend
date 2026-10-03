@@ -59,7 +59,12 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
 
     return sendSuccess(res, 200, 'Tokens refreshed successfully', responseData);
   } catch (err: any) {
-    throw new ApiError(401, err.message || 'Invalid or expired refresh token');
+    if (err instanceof ApiError) {
+      throw err;
+    }
+    // Propagate unexpected errors (like DB/Redis outages) to be handled as 500s
+    // rather than mapping them to 401s which would incorrectly log the user out.
+    throw err;
   }
 });
 

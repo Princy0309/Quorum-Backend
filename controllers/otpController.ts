@@ -77,9 +77,7 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response, next
 
     const { accessToken, refreshToken } = await issueTokens(updatedUser, req);
 
-    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-    res.setHeader('x-refresh-token', refreshToken);
-
+    const isMobile = req.headers['x-client-platform'] === 'mobile';
     const responseData: any = {
       accessToken,
       user: {
@@ -90,6 +88,12 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response, next
         isEmailVerified: true,
       },
     };
+
+    if (isMobile) {
+      responseData.refreshToken = refreshToken;
+    } else {
+      res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+    }
 
     return sendSuccess(res, 200, 'Email verified successfully', responseData);
   } catch (err: unknown) {

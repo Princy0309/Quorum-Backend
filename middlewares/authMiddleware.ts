@@ -72,7 +72,7 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
       return next(new ApiError(401, 'User no longer exists'));
     }
     if (user.lockedUntil && user.lockedUntil > new Date()) {
-      return next(new ApiError(403, 'User account is temporarily locked or suspended'));
+      // Intentionally do nothing; lockouts should only gate new logins, not existing valid sessions.
     }
     const { passwordHash, ...safeUser } = user;
     req.user = safeUser;
@@ -148,7 +148,7 @@ export const optionalAuth = async (req: Request, res: Response, next: NextFuncti
   if (isSessionValid) {
     try {
       const user = await prisma.user.findUnique({ where: { id: decoded.id } });
-      if (user && (!user.lockedUntil || user.lockedUntil <= new Date())) {
+      if (user) {
         const { passwordHash, ...safeUser } = user;
         req.user = safeUser;
       }
