@@ -11,7 +11,7 @@ import { refreshCookieOptions } from '../utils/cookieOptions';
 
 import { verifyEmailSchema, sendResetSchema, resetPasswordSchema } from '../validators/otpValidators';
 
-export const sendVerificationOTP = asyncHandler(async (req: Request | any, res: Response, next: NextFunction) => {
+export const sendVerificationOTP = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const rawEmail = req.body?.email || req.user?.email;
   if (!rawEmail) throw new ApiError(400, 'Email address is required');
   const email = rawEmail.trim().toLowerCase();
@@ -93,7 +93,7 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response, next
     };
 
     return sendSuccess(res, 200, 'Email verified successfully', responseData);
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Error during post-verification session issuance:', err);
     // Recoverable workflow: user is verified, just needs to login
     return sendSuccess(res, 200, 'Email verified successfully. Please log in to continue.', {

@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import prisma from '../config/prisma';
 import redis from '../config/redis';
 import { hashToken } from '../utils/hashToken';
+import { ApiError } from '../utils/ApiError';
 
 const JWT_ISSUER = process.env.JWT_ISSUER || 'quorum-api';
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE || 'quorum-app';
@@ -91,6 +92,49 @@ export const verifyRefreshToken = (token: string): RefreshTokenPayload => {
 };
 
 
+export const saveSessionToDb = async (tokenHash: string, userId: string, device: string, expiresAt: Date, familyId?: string) => {
+  try {
+    return await prisma.refreshToken.create({
+      data: {
+        tokenHash,
+        userId,
+        device,
+        expiresAt,
+        ...(familyId && { familyId }),
+      },
+    });
+  } catch (err) {
+    console.error('Failed to save RefreshToken session to database:', err);
+    throw new ApiError(500, 'Internal Server Error');
+  }
+};
+
+export const saveSessionToRedis = async (tokenHash: string, userId: string, device: string) => {
+  try {
+    await redis.set(
+      `refresh:${tokenHash}`,
+      JSON.stringify({ userId, device, createdAt: Date.now() }),
+      'EX',
+      REFRESH_TTL_SECONDS
+    );
+    await redis.sadd(`user_sessions:${userId}`, tokenHash);
+    await redis.expire(`user_sessions:${userId}`, REFRESH_TTL_SECONDS);
+  } catch (err) {
+    console.error('Failed to save RefreshToken session to Redis:', err);
+    throw new ApiError(500, 'Internal Server Error');
+  }
+};
+
+export const deleteSessionFromRedis = async (tokenHash: string, userId: string) => {
+  try {
+    await redis.del(`refresh:${tokenHash}`);
+    await redis.srem(`user_sessions:${userId}`, tokenHash);
+  } catch (err) {
+    console.error('Failed to remove session from Redis:', err);
+    throw new ApiError(500, 'Internal Server Error');
+  }
+};
+
 export const issueTokens = async (user: { id: string }, req?: any): Promise<{ accessToken: string; refreshToken: string }> => {
   const device = req?.headers?.['user-agent']?.slice(0, 200) || 'unknown';
   const refreshToken = generateRefreshToken(user.id);
@@ -99,37 +143,14 @@ export const issueTokens = async (user: { id: string }, req?: any): Promise<{ ac
 
   const expiresAt = new Date(Date.now() + REFRESH_TTL_SECONDS * 1000);
 
-  try {
-    await prisma.refreshToken.create({
-      data: {
-        tokenHash,
-        userId: user.id,
-        device,
-        expiresAt,
-      },
-    });
-  } catch (err) {
-    console.error('Failed to save RefreshToken session to database:', err);
-    const error: any = new Error('Internal Server Error');
-    error.status = 500;
-    throw error;
-  }
+  await saveSessionToDb(tokenHash, user.id, device, expiresAt);
 
   try {
-    await redis.set(
-      `refresh:${tokenHash}`,
-      JSON.stringify({ userId: user.id, device, createdAt: Date.now() }),
-      'EX',
-      REFRESH_TTL_SECONDS
-    );
-    await redis.sadd(`user_sessions:${user.id}`, tokenHash);
-    await redis.expire(`user_sessions:${user.id}`, REFRESH_TTL_SECONDS);
+    await saveSessionToRedis(tokenHash, user.id, device);
   } catch (err) {
-    console.error('Failed to save RefreshToken session to Redis, rolling back DB:', err);
+    console.error('Rolling back DB after Redis failure');
     await prisma.refreshToken.delete({ where: { tokenHash } }).catch(e => console.error('Rollback failed:', e));
-    const error: any = new Error('Internal Server Error');
-    error.status = 500;
-    throw error;
+    throw err;
   }
 
   return { accessToken, refreshToken };
@@ -161,9 +182,7 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
   try {
     verifyRefreshToken(rawToken);
   } catch (err) {
-    const error: any = new Error('Invalid or expired refresh token');
-    error.status = 401;
-    throw error;
+    throw new ApiError(401, 'Invalid or expired refresh token');
   }
 
   const tokenHash = hashToken(rawToken);
@@ -177,18 +196,14 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
   let isConcurrentRefresh = false;
 
   if (!storedToken || storedToken.expiresAt < new Date()) {
-    const error: any = new Error('Invalid or expired refresh token');
-    error.status = 401;
-    throw error;
+    throw new ApiError(401, 'Invalid or expired refresh token');
   }
 
   if (storedToken.revokedAt) {
     const timeSinceRevoked = Date.now() - storedToken.revokedAt.getTime();
     if (timeSinceRevoked > GRACE_PERIOD_MS) {
       await performReuseRevocation(storedToken);
-      const error: any = new Error('Invalid or expired refresh token');
-      error.status = 401;
-      throw error;
+      throw new ApiError(401, 'Invalid or expired refresh token');
     } else {
       isConcurrentRefresh = true;
     }
@@ -238,20 +253,11 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
     await redis.del(`refresh:${tokenHash}`);
     await redis.srem(`user_sessions:${storedToken.userId}`, tokenHash);
     
-    await redis.set(
-      `refresh:${result.newTokenHash}`,
-      JSON.stringify({ userId: storedToken.userId, device: result.device, createdAt: Date.now() }),
-      'EX',
-      REFRESH_TTL_SECONDS
-    );
-    await redis.sadd(`user_sessions:${storedToken.userId}`, result.newTokenHash);
-    await redis.expire(`user_sessions:${storedToken.userId}`, REFRESH_TTL_SECONDS);
+    await saveSessionToRedis(result.newTokenHash, storedToken.userId, result.device);
   } catch (err) {
     console.error('Failed to update Redis during rotation, performing DB compensation:', err);
     await prisma.refreshToken.delete({ where: { tokenHash: result.newTokenHash } }).catch(e => console.error('Compensation failed:', e));
-    const error: any = new Error('Internal Server Error');
-    error.status = 500;
-    throw error;
+    throw new ApiError(500, 'Internal Server Error');
   }
 
   return { accessToken: result.accessToken, refreshToken: result.refreshToken };
@@ -267,23 +273,18 @@ export const revokeRefreshToken = async (rawToken: string): Promise<void> => {
     });
   } catch (err) {
     console.error('Failed to revoke RefreshToken in database:', err);
-    const error: any = new Error('Internal Server Error');
-    error.status = 500;
-    throw error;
+    throw new ApiError(500, 'Internal Server Error');
   }
 
   try {
     const raw = await redis.get(`refresh:${tokenHash}`);
     if (raw) {
       const { userId } = JSON.parse(raw);
-      await redis.del(`refresh:${tokenHash}`);
-      await redis.srem(`user_sessions:${userId}`, tokenHash);
+      await deleteSessionFromRedis(tokenHash, userId);
     }
   } catch (err) {
     console.error('Failed to revoke RefreshToken in Redis:', err);
-    const error: any = new Error('Internal Server Error');
-    error.status = 500;
-    throw error;
+    throw new ApiError(500, 'Internal Server Error');
   }
 };
 
@@ -295,9 +296,7 @@ export const revokeAllSessions = async (userId: string): Promise<void> => {
     });
   } catch (err) {
     console.error('Failed to revoke all sessions in database:', err);
-    const error: any = new Error('Internal Server Error');
-    error.status = 500;
-    throw error;
+    throw new ApiError(500, 'Internal Server Error');
   }
 
   try {
@@ -308,8 +307,6 @@ export const revokeAllSessions = async (userId: string): Promise<void> => {
     await redis.del(`user_sessions:${userId}`);
   } catch (err) {
     console.error('Failed to revoke all sessions in Redis:', err);
-    const error: any = new Error('Internal Server Error');
-    error.status = 500;
-    throw error;
+    throw new ApiError(500, 'Internal Server Error');
   }
 };
