@@ -125,10 +125,36 @@ export const issueTokens = async (user: { id: string }, req?: any): Promise<{ ac
     await redis.sadd(`user_sessions:${user.id}`, tokenHash);
     await redis.expire(`user_sessions:${user.id}`, REFRESH_TTL_SECONDS);
   } catch (err) {
-    console.error('Failed to save RefreshToken session to Redis:', err);
+    console.error('Failed to save RefreshToken session to Redis, rolling back DB:', err);
+    await prisma.refreshToken.delete({ where: { tokenHash } }).catch(e => console.error('Rollback failed:', e));
+    const error: any = new Error('Internal Server Error');
+    error.status = 500;
+    throw error;
   }
 
   return { accessToken, refreshToken };
+};
+
+const performReuseRevocation = async (storedToken: any) => {
+  const familyTokens = await prisma.refreshToken.findMany({
+    where: { familyId: storedToken.familyId, revokedAt: null },
+    select: { tokenHash: true }
+  });
+  const hashesToRevoke = familyTokens.map(t => t.tokenHash);
+
+  await prisma.refreshToken.updateMany({
+    where: { familyId: storedToken.familyId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  
+  console.warn(`[Security] Token reuse detected for user ${storedToken.userId}. Session family revoked.`);
+  
+  try {
+    if (hashesToRevoke.length > 0) {
+      await redis.del(...hashesToRevoke.map((h) => `refresh:${h}`));
+      await redis.srem(`user_sessions:${storedToken.userId}`, ...hashesToRevoke);
+    }
+  } catch (redisErr) {}
 };
 
 export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{ accessToken: string; refreshToken: string }> => {
@@ -142,108 +168,79 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
 
   const tokenHash = hashToken(rawToken);
 
-  return await prisma.$transaction(async (tx) => {
-    const storedToken = await tx.refreshToken.findUnique({
-      where: { tokenHash },
-      include: { user: true },
-    });
+  const storedToken = await prisma.refreshToken.findUnique({
+    where: { tokenHash },
+    include: { user: true },
+  });
 
-    if (!storedToken || storedToken.revokedAt || storedToken.expiresAt < new Date()) {
-      if (storedToken && storedToken.revokedAt) {
-        // Reuse detection: revoke only the affected session family
-        const familyTokens = await tx.refreshToken.findMany({
-          where: { familyId: storedToken.familyId, revokedAt: null },
-          select: { tokenHash: true }
-        });
-        const hashesToRevoke = familyTokens.map(t => t.tokenHash);
-
-        await tx.refreshToken.updateMany({
-          where: { familyId: storedToken.familyId, revokedAt: null },
-          data: { revokedAt: new Date() },
-        });
-        
-        console.warn(`[Security] Token reuse detected for user ${storedToken.userId}. Session family revoked.`);
-        
-        try {
-          if (hashesToRevoke.length > 0) {
-            await redis.del(...hashesToRevoke.map((h) => `refresh:${h}`));
-            await redis.srem(`user_sessions:${storedToken.userId}`, ...hashesToRevoke);
-          }
-        } catch (redisErr) {}
-      }
-      const error: any = new Error('Invalid or expired refresh token');
-      error.status = 401;
-      throw error;
+  if (!storedToken || storedToken.revokedAt || storedToken.expiresAt < new Date()) {
+    if (storedToken && storedToken.revokedAt) {
+      await performReuseRevocation(storedToken);
     }
+    const error: any = new Error('Invalid or expired refresh token');
+    error.status = 401;
+    throw error;
+  }
 
-    // Atomic conditional update
-    const { count } = await tx.refreshToken.updateMany({
-      where: { id: storedToken.id, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-
-    if (count === 0) {
-      // Token was revoked by a concurrent request - trigger reuse detection
-      const familyTokens = await tx.refreshToken.findMany({
-        where: { familyId: storedToken.familyId, revokedAt: null },
-        select: { tokenHash: true }
-      });
-      const hashesToRevoke = familyTokens.map(t => t.tokenHash);
-
-      await tx.refreshToken.updateMany({
-        where: { familyId: storedToken.familyId, revokedAt: null },
+  try {
+    return await prisma.$transaction(async (tx) => {
+      // Atomic conditional update
+      const { count } = await tx.refreshToken.updateMany({
+        where: { id: storedToken.id, revokedAt: null },
         data: { revokedAt: new Date() },
       });
-      
-      console.warn(`[Security] Concurrent token reuse detected for user ${storedToken.userId}. Session family revoked.`);
-      
+
+      if (count === 0) {
+        throw new Error('REUSE_DETECTED');
+      }
+
+      // Issue new tokens within the transaction
+      const device = req?.headers?.['user-agent']?.slice(0, 200) || storedToken.device;
+      const refreshToken = generateRefreshToken(storedToken.userId);
+      const newTokenHash = hashToken(refreshToken);
+      const accessToken = generateAccessToken(storedToken.userId, newTokenHash);
+      const expiresAt = new Date(Date.now() + REFRESH_TTL_SECONDS * 1000);
+
+      await tx.refreshToken.create({
+        data: {
+          tokenHash: newTokenHash,
+          userId: storedToken.userId,
+          familyId: storedToken.familyId,
+          device,
+          expiresAt,
+        },
+      });
+
       try {
-        if (hashesToRevoke.length > 0) {
-          await redis.del(...hashesToRevoke.map((h) => `refresh:${h}`));
-          await redis.srem(`user_sessions:${storedToken.userId}`, ...hashesToRevoke);
-        }
-      } catch (redisErr) {}
-      
+        await redis.del(`refresh:${tokenHash}`);
+        await redis.srem(`user_sessions:${storedToken.userId}`, tokenHash);
+        
+        await redis.set(
+          `refresh:${newTokenHash}`,
+          JSON.stringify({ userId: storedToken.userId, device, createdAt: Date.now() }),
+          'EX',
+          REFRESH_TTL_SECONDS
+        );
+        await redis.sadd(`user_sessions:${storedToken.userId}`, newTokenHash);
+        await redis.expire(`user_sessions:${storedToken.userId}`, REFRESH_TTL_SECONDS);
+      } catch (err) {
+        console.error('Failed to update Redis during rotation, rolling back transaction:', err);
+        const error: any = new Error('Internal Server Error');
+        error.status = 500;
+        throw error;
+      }
+
+      return { accessToken, refreshToken };
+    });
+  } catch (err: any) {
+    if (err.message === 'REUSE_DETECTED') {
+      await performReuseRevocation(storedToken);
       const error: any = new Error('Invalid or expired refresh token');
       error.status = 401;
       throw error;
     }
-
-    // Issue new tokens within the transaction
-    const device = req?.headers?.['user-agent']?.slice(0, 200) || storedToken.device;
-    const refreshToken = generateRefreshToken(storedToken.userId);
-    const newTokenHash = hashToken(refreshToken);
-    const accessToken = generateAccessToken(storedToken.userId, newTokenHash);
-    const expiresAt = new Date(Date.now() + REFRESH_TTL_SECONDS * 1000);
-
-    await tx.refreshToken.create({
-      data: {
-        tokenHash: newTokenHash,
-        userId: storedToken.userId,
-        familyId: storedToken.familyId,
-        device,
-        expiresAt,
-      },
-    });
-
-    try {
-      await redis.del(`refresh:${tokenHash}`);
-      await redis.srem(`user_sessions:${storedToken.userId}`, tokenHash);
-      
-      await redis.set(
-        `refresh:${newTokenHash}`,
-        JSON.stringify({ userId: storedToken.userId, device, createdAt: Date.now() }),
-        'EX',
-        REFRESH_TTL_SECONDS
-      );
-      await redis.sadd(`user_sessions:${storedToken.userId}`, newTokenHash);
-      await redis.expire(`user_sessions:${storedToken.userId}`, REFRESH_TTL_SECONDS);
-    } catch (err) {
-      console.error('Failed to update Redis during rotation:', err);
-    }
-
-    return { accessToken, refreshToken };
-  });
+    throw err;
+  }
 };
 
 export const revokeRefreshToken = async (rawToken: string): Promise<void> => {
