@@ -1,11 +1,17 @@
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import prisma from '../config/prisma';
 import redis from '../config/redis';
 import { hashToken } from '../utils/hashToken';
 
 const JWT_ISSUER = process.env.JWT_ISSUER || 'quorum-api';
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE || 'quorum-app';
-const REFRESH_TTL_SECONDS = parseInt(process.env.REFRESH_TOKEN_TTL_SECONDS || '', 10) || 7 * 24 * 60 * 60;
+
+const parsedTTL = parseInt(process.env.REFRESH_TOKEN_TTL_SECONDS || '', 10);
+if (isNaN(parsedTTL) || parsedTTL <= 0) {
+  throw new Error('FATAL: REFRESH_TOKEN_TTL_SECONDS must be a valid positive integer');
+}
+const REFRESH_TTL_SECONDS = parsedTTL;
 
 if (!process.env.JWT_SECRET) {
   throw new Error('FATAL: JWT_SECRET environment variable is missing');
@@ -18,7 +24,7 @@ if (!process.env.JWT_REFRESH_SECRET) {
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 
 export const generateAccessToken = (userId: string): string => {
-  return jwt.sign({ id: userId }, JWT_SECRET, {
+  return jwt.sign({ id: userId, jti: crypto.randomUUID() }, JWT_SECRET, {
     algorithm: 'HS256',
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
@@ -35,11 +41,11 @@ export const verifyAccessToken = (token: string): any => {
 };
 
 export const generateRefreshToken = (userId: string): string => {
-  return jwt.sign({ id: userId, type: 'refresh' }, JWT_REFRESH_SECRET, {
+  return jwt.sign({ id: userId, type: 'refresh', jti: crypto.randomUUID() }, JWT_REFRESH_SECRET, {
     algorithm: 'HS256',
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
-    expiresIn: (process.env.REFRESH_TOKEN_EXPIRES_IN as any) || '7d',
+    expiresIn: REFRESH_TTL_SECONDS,
   });
 };
 
