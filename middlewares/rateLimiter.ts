@@ -1,9 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import { RateLimiterRedis } from 'rate-limiter-flexible';
-import redisClient from '../config/redis';
+import redisClient from '../config/redis.js';
 
 import crypto from 'crypto';
-import env from '../config/env';
+import env from '../config/env.js';
 
 export const loginIpRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,

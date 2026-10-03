@@ -1,7 +1,7 @@
-import redis from '../config/redis';
-import { generateOTP } from '../utils/generateOTP';
-import { hashToken } from '../utils/hashToken';
-import { addEmailToQueue } from '../queues/emailQueue';
+import redis from '../config/redis.js';
+import { generateOTP } from '../utils/generateOTP.js';
+import { hashToken } from '../utils/hashToken.js';
+import { addEmailToQueue } from '../queues/emailQueue.js';
 
 const OTP_TTL_SECONDS = parseInt(process.env.OTP_TTL_SECONDS || '600', 10);
 
@@ -10,7 +10,8 @@ export const storeAndSendOTP = async (
   redisKey: string,
   emailType: 'verification' | 'reset',
   payload?: any
-): Promise<boolean> => {  const existing = await redis.get(redisKey);
+): Promise<boolean> => {
+  const existing = await redis.get(redisKey);
   if (existing) {
     try {
       const parsed = JSON.parse(existing);

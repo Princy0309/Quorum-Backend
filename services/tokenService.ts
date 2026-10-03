@@ -1,12 +1,12 @@
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import prisma from '../config/prisma';
-import redis from '../config/redis';
-import { hashToken } from '../utils/hashToken';
-import { ApiError } from '../utils/ApiError';
-import { encryptPayload, decryptPayload } from '../utils/encryption';
+import prisma from '../config/prisma.js';
+import redis from '../config/redis.js';
+import { hashToken } from '../utils/hashToken.js';
+import { ApiError } from '../utils/ApiError.js';
+import { encryptPayload, decryptPayload } from '../utils/encryption.js';
 
-import env from '../config/env';
+import env from '../config/env.js';
 
 const JWT_ISSUER = env.JWT_ISSUER;
 const JWT_AUDIENCE = env.JWT_AUDIENCE;

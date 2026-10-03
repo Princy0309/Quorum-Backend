@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { hashToken } from './hashToken';
+import { hashToken } from './hashToken.js';
 
 export interface GeneratedOTP {
   code: string;

@@ -1,15 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
-import prisma from '../config/prisma';
-import redis from '../config/redis';
-import { asyncHandler } from '../utils/asyncHandler';
-import { ApiError } from '../utils/ApiError';
-import { sendSuccess } from '../utils/apiResponse';
-import { storeAndSendOTP, verifyOTPFromRedis } from '../services/otpService';
-import { issueTokens, revokeAllSessions } from '../services/tokenService';
-import { refreshCookieOptions } from '../utils/cookieOptions';
+import prisma from '../config/prisma.js';
+import redis from '../config/redis.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { ApiError } from '../utils/ApiError.js';
+import { sendSuccess } from '../utils/apiResponse.js';
+import { storeAndSendOTP, verifyOTPFromRedis } from '../services/otpService.js';
+import { issueTokens, revokeAllSessions } from '../services/tokenService.js';
+import { refreshCookieOptions } from '../utils/cookieOptions.js';
 
-import { verifyEmailSchema, sendResetSchema, resetPasswordSchema } from '../validators/otpValidators';
+import { verifyEmailSchema, sendResetSchema, resetPasswordSchema } from '../validators/otpValidators.js';
 
 export const sendVerificationOTP = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const rawEmail = req.body?.email || req.user?.email;

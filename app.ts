@@ -6,14 +6,14 @@ import expressWinston from 'express-winston';
 
 dotenv.config();
 
-import setupSwagger from './config/swagger';
-import authRoutes from './routes/authRoutes';
-import otpRoutes from './routes/otpRoutes';
-import errorHandler from './middlewares/errorHandler';
-import verifyCSRF from './middlewares/csrfProtection';
-import logger from './utils/logger';
+import setupSwagger from './config/swagger.js';
+import authRoutes from './routes/authRoutes.js';
+import otpRoutes from './routes/otpRoutes.js';
+import errorHandler from './middlewares/errorHandler.js';
+import verifyCSRF from './middlewares/csrfProtection.js';
+import logger from './utils/logger.js';
 
-import env from './config/env';
+import env from './config/env.js';
 
 const app = express();
 

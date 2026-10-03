@@ -1,5 +1,5 @@
 import { CookieOptions } from 'express';
-import env from '../config/env';
+import env from '../config/env.js';
 
 const isProduction = env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true';
 

@@ -1,10 +1,10 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import prisma from './config/prisma';
-import app from './app';
-import { emailWorker, queueRedisConnection } from './queues/emailQueue';
-import redis from './config/redis';
+import prisma from './config/prisma.js';
+import app from './app.js';
+import { emailWorker, queueRedisConnection } from './queues/emailQueue.js';
+import redis from './config/redis.js';
 
 let server: any;
 

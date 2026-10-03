@@ -1,5 +1,5 @@
 import Joi from 'joi';
-import { passwordSchema } from './authValidators';
+import { passwordSchema } from './authValidators.js';
 
 export const verifyEmailSchema = Joi.object({
   email: Joi.string().email().optional(),

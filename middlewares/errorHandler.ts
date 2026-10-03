@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { ApiError } from '../utils/ApiError';
-import logger from '../utils/logger';
+import { ApiError } from '../utils/ApiError.js';
+import logger from '../utils/logger.js';
 
 const errorHandler = (err: Error | ApiError, req: Request, res: Response, next: NextFunction) => {
   const statusCode = err instanceof ApiError ? err.statusCode : 500;

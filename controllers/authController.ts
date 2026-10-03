@@ -61,7 +61,8 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
   } catch (err: any) {
     if (err instanceof ApiError) {
       throw err;
-    }    throw err;
+    }
+    throw err;
   }
 });
 
@@ -89,6 +90,9 @@ export const logoutAll = asyncHandler(async (req: Request, res: Response, next: 
 });
 
 export const getMe = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user){
+    return next(new ApiError(401, 'unauthorized'));
+  }
   const user = await prisma.user.findUnique({
     where: { id: req.user.id },
     select: {

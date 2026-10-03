@@ -6,11 +6,12 @@
   "scripts": {
     "postinstall": "prisma generate",
     "test": "jest",
-    "start": "tsx server.ts",
+    "start": "node dist/server.js",
     "dev": "nodemon -e ts --exec tsx server.ts",
     "db:migrate": ".\\node_modules\\.bin\\prisma migrate dev",
     "db:generate": ".\\node_modules\\.bin\\prisma generate",
-    "db:studio": ".\\node_modules\\.bin\\prisma studio"
+    "db:studio": ".\\node_modules\\.bin\\prisma studio",
+    "build": "tsc"
   },
   "repository": {
     "type": "git",
@@ -19,7 +20,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "bugs": {
     "url": "https://github.com/Princy0309/Quorum-Backend/issues"
   },

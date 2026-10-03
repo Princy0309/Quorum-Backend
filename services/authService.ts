@@ -1,9 +1,9 @@
 import bcrypt from 'bcryptjs';
-import prisma from '../config/prisma';
-import { ApiError } from '../utils/ApiError';
-import { issueTokens } from './tokenService';
-import { storeAndSendOTP } from './otpService';
-import { loginAccountRateLimiter, hashEmail } from '../middlewares/rateLimiter';
+import prisma from '../config/prisma.js';
+import { ApiError } from '../utils/ApiError.js';
+import { issueTokens } from './tokenService.js';
+import { storeAndSendOTP } from './otpService.js';
+import { loginAccountRateLimiter, hashEmail } from '../middlewares/rateLimiter.js';
 import { Request } from 'express';
 import { User } from '@prisma/client';
 
@@ -12,7 +12,8 @@ export const handleFailedLogin = async (userId: string) => {
     const user = await tx.user.findUnique({ where: { id: userId } });
     if (!user) return;
 
-    let attempts = user.failedLoginAttempts;    if (user.lockedUntil && user.lockedUntil <= new Date()) {
+    let attempts = user.failedLoginAttempts;
+    if (user.lockedUntil && user.lockedUntil <= new Date()) {
       attempts = 0;
     }
 
@@ -34,14 +35,16 @@ export const handleFailedLogin = async (userId: string) => {
   });
 };
 
-export const registerUser = async (name: string, email: string, passwordUnHashed: string) => {  const passwordHash = await bcrypt.hash(passwordUnHashed, 10);
+export const registerUser = async (name: string, email: string, passwordUnHashed: string) => {
+  const passwordHash = await bcrypt.hash(passwordUnHashed, 10);
 
   const existingUser = await prisma.user.findUnique({ where: { email } });
   
   if (existingUser) {
     if (existingUser.isEmailVerified) {
       return { isNew: false, isVerified: true };
-    }    try {
+    }
+    try {
       await storeAndSendOTP(existingUser.email, `otp:verify:${existingUser.id}`, 'verification', { name, passwordHash });
     } catch (err) {
       console.error('Failed to send OTP during registration (existing unverified):', err);
@@ -79,7 +82,8 @@ export const loginUser = async (email: string, password: string, ip: string, req
     isMatch = await bcrypt.compare(password, user.passwordHash);
   } else {
     await bcrypt.compare(password, '$2a$10$XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX');
-  }  if (user && user.lockedUntil && user.lockedUntil > new Date()) {
+  }
+  if (user && user.lockedUntil && user.lockedUntil > new Date()) {
     throw new ApiError(403, 'Account is temporarily locked due to multiple failed login attempts. Please try again later.');
   }
 
@@ -94,7 +98,8 @@ export const loginUser = async (email: string, password: string, ip: string, req
   if (!user.isEmailVerified) {
     await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
     throw new ApiError(403, 'Email not verified. A fresh verification code has been sent to your email.');
-  }  await prisma.user.update({
+  }
+  await prisma.user.update({
     where: { id: user.id },
     data: { 
       lastLogin: new Date(),

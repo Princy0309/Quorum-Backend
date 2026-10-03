@@ -1,7 +1,7 @@
 import { Queue, Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
 
-import { sendOTPEmail } from '../services/emailService';
+import { sendOTPEmail } from '../services/emailService.js';
 
 export const queueRedisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
   maxRetriesPerRequest: null,

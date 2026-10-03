@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { ApiError } from '../utils/ApiError';
+import { ApiError } from '../utils/ApiError.js';
 import crypto from 'crypto';
-import env from '../config/env';
+import env from '../config/env.js';
 
 const allowedOrigins = env.ALLOWED_ORIGINS 
   ? env.ALLOWED_ORIGINS.split(',').map((o: string) => o.trim()).filter(Boolean)
@@ -30,7 +30,8 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
   }
   res.locals.csrfToken = csrfToken;
 
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {    let origin = req.headers.origin;
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    let origin = req.headers.origin;
     if (!origin && req.headers.referer) {
       try {
         origin = new URL(req.headers.referer).origin;
@@ -50,7 +51,8 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
 
     if (!isAllowedDomain && !isLocalDev) {
       return next(new ApiError(403, 'CSRF validation failed: Unauthorized origin'));
-    }    const hasAuthCookie = !!req.cookies['refreshToken'];
+    }
+    const hasAuthCookie = !!req.cookies['refreshToken'];
     
     if (hasAuthCookie) {
       const headerToken = req.headers['x-xsrf-token'] || req.headers['x-csrf-token'];

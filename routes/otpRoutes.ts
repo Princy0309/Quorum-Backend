@@ -1,14 +1,14 @@
 import { Router } from 'express';
-import { optionalAuth } from '../middlewares/authMiddleware';
-import { otpLimiter } from '../middlewares/rateLimiter';
-import { validate } from '../middlewares/validate';
-import { verifyEmailSchema, sendResetSchema, resetPasswordSchema } from '../validators/otpValidators';
+import { optionalAuth } from '../middlewares/authMiddleware.js';
+import { otpLimiter } from '../middlewares/rateLimiter.js';
+import { validate } from '../middlewares/validate.js';
+import { verifyEmailSchema, sendResetSchema, resetPasswordSchema } from '../validators/otpValidators.js';
 import {
   sendVerificationOTP,
   verifyEmail,
   forgotPassword,
   resetPassword,
-} from '../controllers/otpController';
+} from '../controllers/otpController.js';
 
 const router = Router();
 
