@@ -12,9 +12,8 @@ import { asyncHandler } from '../utils/asyncHandler';
 export const register = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const { name, email, password } = req.body;
   const cleanEmail = email.trim().toLowerCase();
-  const passwordHash = await bcrypt.hash(password, 10);
 
-  await registerUser(name, cleanEmail, passwordHash);
+  await registerUser(name, cleanEmail, password);
 
   return sendSuccess(res, 201, 'Registration processed. If the email is valid and available, a verification code has been sent.');
 });

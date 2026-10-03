@@ -38,32 +38,47 @@ export const verifyOTPFromRedis = async (
   redisKey: string,
   otp: string
 ): Promise<{ success: boolean; message: string }> => {
-  const raw = await redis.get(redisKey);
+  const inputHash = hashToken(otp);
 
-  if (!raw) {
+  const luaScript = `
+    local raw = redis.call('GET', KEYS[1])
+    if not raw then
+      return 'EXPIRED'
+    end
+
+    local data = cjson.decode(raw)
+    local storedHash = data.codeHash
+    local attempts = data.attempts
+
+    if attempts >= 5 then
+      redis.call('DEL', KEYS[1])
+      return 'TOO_MANY_ATTEMPTS'
+    end
+
+    if ARGV[1] == storedHash then
+      redis.call('DEL', KEYS[1])
+      return 'SUCCESS'
+    else
+      data.attempts = attempts + 1
+      redis.call('SET', KEYS[1], cjson.encode(data), 'KEEPTTL')
+      return tostring(4 - attempts)
+    end
+  `;
+
+  const result = await redis.eval(luaScript, 1, redisKey, inputHash);
+
+  if (result === 'EXPIRED') {
     return { success: false, message: 'OTP expired or not found. Please request a new one.' };
   }
-
-  const { codeHash: storedHash, attempts } = JSON.parse(raw);
-
-  if (attempts >= 5) {
-    await redis.del(redisKey);
+  if (result === 'TOO_MANY_ATTEMPTS') {
     return { success: false, message: 'Too many failed attempts. Please request a new OTP.' };
   }
-
-  if (hashToken(otp) !== storedHash) {
-    await redis.set(
-      redisKey,
-      JSON.stringify({ codeHash: storedHash, attempts: attempts + 1 }),
-      'EX',
-      OTP_TTL_SECONDS
-    );
-    return {
-      success: false,
-      message: `Incorrect OTP. You have ${4 - attempts} attempts remaining.`,
-    };
+  if (result === 'SUCCESS') {
+    return { success: true, message: 'OTP verified successfully.' };
   }
-
-  await redis.del(redisKey);
-  return { success: true, message: 'OTP verified successfully.' };
+  
+  return {
+    success: false,
+    message: `Incorrect OTP. You have ${result} attempts remaining.`,
+  };
 };

@@ -22,8 +22,10 @@ export const handleFailedLogin = async (userId: string, currentAttempts: number)
   });
 };
 
-export const registerUser = async (name: string, email: string, passwordHash: string) => {
+export const registerUser = async (name: string, email: string, passwordUnHashed: string) => {
   const existingUser = await prisma.user.findUnique({ where: { email } });
+  
+  const passwordHash = await bcrypt.hash(passwordUnHashed, 10);
 
   if (existingUser) {
     if (existingUser.isEmailVerified) {
@@ -60,26 +62,26 @@ export const registerUser = async (name: string, email: string, passwordHash: st
 export const loginUser = async (email: string, password: string, ip: string, req: Request) => {
   const user = await prisma.user.findUnique({ where: { email } });
   
-  if (!user) {
+  // 1. Retrieve the account and compare the password hash (with timing attack protection)
+  let isMatch = false;
+  if (user && user.passwordHash) {
+    isMatch = await bcrypt.compare(password, user.passwordHash);
+  } else {
+    // Dummy compare to prevent timing enumeration
+    await bcrypt.compare(password, '$2a$10$XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX');
+  }
+
+  if (!user || !isMatch) {
     await loginRateLimiter.consume(ip).catch(() => {});
+    if (user) {
+      await handleFailedLogin(user.id, user.failedLoginAttempts);
+    }
     throw new ApiError(401, 'Invalid credentials');
   }
 
+  // 2. Check account restrictions and email verification
   if (user.lockedUntil && user.lockedUntil > new Date()) {
     throw new ApiError(403, 'Account is temporarily locked due to multiple failed login attempts. Please try again later.');
-  }
-
-  if (!user.passwordHash) {
-    await loginRateLimiter.consume(ip).catch(() => {});
-    await handleFailedLogin(user.id, user.failedLoginAttempts);
-    throw new ApiError(401, 'Invalid credentials');
-  }
-
-  const isMatch = await bcrypt.compare(password, user.passwordHash);
-  if (!isMatch) {
-    await loginRateLimiter.consume(ip).catch(() => {});
-    await handleFailedLogin(user.id, user.failedLoginAttempts);
-    throw new ApiError(401, 'Invalid credentials');
   }
 
   if (!user.isEmailVerified) {
@@ -87,6 +89,7 @@ export const loginUser = async (email: string, password: string, ip: string, req
     throw new ApiError(403, 'Email not verified. A fresh verification code has been sent to your email.');
   }
 
+  // Reset lock and update last login
   await prisma.user.update({
     where: { id: user.id },
     data: { 
