@@ -44,11 +44,17 @@ export const generateRefreshToken = (userId: string): string => {
 };
 
 export const verifyRefreshToken = (token: string): any => {
-  return jwt.verify(token, JWT_REFRESH_SECRET, {
+  const decoded = jwt.verify(token, JWT_REFRESH_SECRET, {
     algorithms: ['HS256'],
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
-  });
+  }) as any;
+
+  if (decoded.type !== 'refresh') {
+    throw new Error('Invalid token type');
+  }
+
+  return decoded;
 };
 
 
