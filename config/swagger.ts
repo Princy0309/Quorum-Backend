@@ -156,6 +156,18 @@ const swaggerDocument = {
         },
       },
     },
+    '/api/auth/logout-all': {
+      post: {
+        tags: ['Authentication'],
+        summary: 'Logout from all devices',
+        description: 'Revokes all active sessions across all devices for the authenticated user.',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          200: { description: 'Logged out from all devices successfully' },
+          401: { description: 'Unauthorized' },
+        },
+      },
+    },
     '/api/auth/me': {
       get: {
         tags: ['Authentication'],
@@ -214,12 +226,6 @@ const swaggerDocument = {
         responses: {
           200: {
             description: 'Email verified successfully',
-            headers: {
-              'x-refresh-token': {
-                schema: { type: 'string' },
-                description: 'Signed JWT Refresh Token',
-              },
-            },
           },
           400: { description: 'Incorrect or expired OTP' },
         },
