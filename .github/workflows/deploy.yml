@@ -21,23 +21,15 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-             # 0. Enable 2GB Swap space so EC2 never runs out of RAM
-             if [ ! -f /swapfile ]; then
-               sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
-               sudo chmod 600 /swapfile
-               sudo mkswap /swapfile
-               sudo swapon /swapfile
-             fi
+             # 1. Free up disk space: remove the 2GB swapfile
+             sudo swapoff /swapfile 2>/dev/null || true
+             sudo rm -f /swapfile 2>/dev/null || true
 
-             # 1. Kill any ghost processes running on port 5000 outside Docker
-             command -v pm2 >/dev/null 2>&1 && pm2 delete all || true
+             # 2. Aggressively clean up Docker cache & journal logs
+             sudo docker system prune -af || true
+             sudo journalctl --vacuum-size=10M || true
+             sudo apt-get clean || true
              sudo fuser -k 5000/tcp || true
-
-             # 2. Clean up journal logs and docker cache
-             sudo journalctl --vacuum-size=50M
-             sudo apt-get clean
-             sudo docker builder prune -af
-             sudo docker image prune -af
 
              # 3. Pull latest code from dev branch
              cd ~/Quorum-Backend
@@ -45,12 +37,12 @@ jobs:
              git fetch origin dev
              git reset --hard origin/dev
 
-             # 4. Completely stop old containers and rebuild fresh
-             sudo docker compose down
+             # 4. Stop old containers and build fresh
+             sudo docker compose down || true
              sudo docker compose up -d --build
 
-             # 5. Automatically sync Prisma schema to Postgres
+             # 5. Sync Prisma schema to Postgres
              sudo docker compose exec -T app npx prisma db push
 
-             # 6. Print recent app container logs to GitHub Actions
+             # 6. Print recent app container logs
              sudo docker compose logs --tail=50 app
