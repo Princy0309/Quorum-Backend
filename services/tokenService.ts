@@ -111,18 +111,25 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
 
     if (!storedToken || storedToken.revokedAt || storedToken.expiresAt < new Date()) {
       if (storedToken && storedToken.revokedAt) {
-        // Reuse detection: revoke all sessions if a revoked token is reused
+        // Reuse detection: revoke only the affected session family
+        const familyTokens = await tx.refreshToken.findMany({
+          where: { familyId: storedToken.familyId, revokedAt: null },
+          select: { tokenHash: true }
+        });
+        const hashesToRevoke = familyTokens.map(t => t.tokenHash);
+
         await tx.refreshToken.updateMany({
-          where: { userId: storedToken.userId, revokedAt: null },
+          where: { familyId: storedToken.familyId, revokedAt: null },
           data: { revokedAt: new Date() },
         });
         
+        console.warn(`[Security] Token reuse detected for user ${storedToken.userId}. Session family revoked.`);
+        
         try {
-          const hashes = await redis.smembers(`user_sessions:${storedToken.userId}`);
-          if (hashes.length) {
-            await redis.del(...hashes.map((h) => `refresh:${h}`));
+          if (hashesToRevoke.length > 0) {
+            await redis.del(...hashesToRevoke.map((h) => `refresh:${h}`));
+            await redis.srem(`user_sessions:${storedToken.userId}`, ...hashesToRevoke);
           }
-          await redis.del(`user_sessions:${storedToken.userId}`);
         } catch (redisErr) {}
       }
       const error: any = new Error('Invalid or expired refresh token');
@@ -138,17 +145,24 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
 
     if (count === 0) {
       // Token was revoked by a concurrent request - trigger reuse detection
+      const familyTokens = await tx.refreshToken.findMany({
+        where: { familyId: storedToken.familyId, revokedAt: null },
+        select: { tokenHash: true }
+      });
+      const hashesToRevoke = familyTokens.map(t => t.tokenHash);
+
       await tx.refreshToken.updateMany({
-        where: { userId: storedToken.userId, revokedAt: null },
+        where: { familyId: storedToken.familyId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
       
+      console.warn(`[Security] Concurrent token reuse detected for user ${storedToken.userId}. Session family revoked.`);
+      
       try {
-        const hashes = await redis.smembers(`user_sessions:${storedToken.userId}`);
-        if (hashes.length) {
-          await redis.del(...hashes.map((h) => `refresh:${h}`));
+        if (hashesToRevoke.length > 0) {
+          await redis.del(...hashesToRevoke.map((h) => `refresh:${h}`));
+          await redis.srem(`user_sessions:${storedToken.userId}`, ...hashesToRevoke);
         }
-        await redis.del(`user_sessions:${storedToken.userId}`);
       } catch (redisErr) {}
       
       const error: any = new Error('Invalid or expired refresh token');
@@ -167,6 +181,7 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
       data: {
         tokenHash: newTokenHash,
         userId: storedToken.userId,
+        familyId: storedToken.familyId,
         device,
         expiresAt,
       },
