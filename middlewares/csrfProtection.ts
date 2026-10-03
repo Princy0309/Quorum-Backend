@@ -30,9 +30,7 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
   }
   res.locals.csrfToken = csrfToken;
 
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
-    // 1. Strict Origin Validation
-    let origin = req.headers.origin;
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {    let origin = req.headers.origin;
     if (!origin && req.headers.referer) {
       try {
         origin = new URL(req.headers.referer).origin;
@@ -52,11 +50,7 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
 
     if (!isAllowedDomain && !isLocalDev) {
       return next(new ApiError(403, 'CSRF validation failed: Unauthorized origin'));
-    }
-
-    // 2. Token Validation (Double Submit Cookie)
-    // Only enforced when the request is cookie-authenticated
-    const hasAuthCookie = !!req.cookies['refreshToken'];
+    }    const hasAuthCookie = !!req.cookies['refreshToken'];
     
     if (hasAuthCookie) {
       const headerToken = req.headers['x-xsrf-token'] || req.headers['x-csrf-token'];

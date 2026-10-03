@@ -61,10 +61,7 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
   } catch (err: any) {
     if (err instanceof ApiError) {
       throw err;
-    }
-    // Propagate unexpected errors (like DB/Redis outages) to be handled as 500s
-    // rather than mapping them to 401s which would incorrectly log the user out.
-    throw err;
+    }    throw err;
   }
 });
 

@@ -1,4 +1,5 @@
 import Joi from 'joi';
+import { passwordSchema } from './authValidators';
 
 export const verifyEmailSchema = Joi.object({
   email: Joi.string().email().optional(),
@@ -18,5 +19,5 @@ export const resetPasswordSchema = Joi.object({
     Joi.string().length(6),
     Joi.number().integer().min(100000).max(999999)
   ).required(),
-  newPassword: Joi.string().min(8).max(50).required(),
+  newPassword: passwordSchema,
 }).unknown(true);

@@ -10,9 +10,7 @@ export const storeAndSendOTP = async (
   redisKey: string,
   emailType: 'verification' | 'reset',
   payload?: any
-): Promise<boolean> => {
-  // Cooldown check (30 seconds)
-  const existing = await redis.get(redisKey);
+): Promise<boolean> => {  const existing = await redis.get(redisKey);
   if (existing) {
     try {
       const parsed = JSON.parse(existing);

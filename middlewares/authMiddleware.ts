@@ -1,35 +1,42 @@
-import { Request, Response, NextFunction } from 'express';
-import { verifyAccessToken, AccessTokenPayload } from '../services/tokenService';
-import { ApiError } from '../utils/ApiError';
-import prisma from '../config/prisma';
-import redis from '../config/redis';
-import { User } from '@prisma/client';
+import { Request, Response, NextFunction } from "express";
+import {
+  verifyAccessToken,
+  AccessTokenPayload,
+} from "../services/tokenService";
+import { ApiError } from "../utils/ApiError";
+import prisma from "../config/prisma";
+import redis from "../config/redis";
+import { User } from "@prisma/client";
 
 declare global {
   namespace Express {
     interface Request {
-      user?: Omit<User, 'passwordHash'>;
+      user?: Omit<User, "passwordHash">;
     }
   }
 }
 
-export const authMiddleware = async (req: Request, res: Response, next: NextFunction) => {
+export const authMiddleware = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return next(new ApiError(401, 'Unauthorized, missing token'));
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return next(new ApiError(401, "Unauthorized, missing token"));
   }
 
-  const token = authHeader.split(' ')[1];
+  const token = authHeader.split(" ")[1];
 
   let decoded: AccessTokenPayload;
   try {
     decoded = verifyAccessToken(token);
   } catch (err) {
-    return next(new ApiError(401, 'Invalid or expired token'));
+    return next(new ApiError(401, "Invalid or expired token"));
   }
 
   if (!decoded.sid) {
-    return next(new ApiError(401, 'Invalid token: missing session ID'));
+    return next(new ApiError(401, "Invalid token: missing session ID"));
   }
 
   let isSessionActive = false;
@@ -38,83 +45,98 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
     if (isRedisActive) {
       isSessionActive = true;
     } else {
-      // Cache miss (eviction/restart) -> Fallback to PostgreSQL
       const dbSession = await prisma.refreshToken.findFirst({
-        where: { familyId: decoded.sid, revokedAt: null }
+        where: { familyId: decoded.sid, revokedAt: null },
       });
       if (dbSession) {
         isSessionActive = true;
-        // Asynchronously repair the cache
         Promise.all([
-          redis.set(`refresh:${dbSession.familyId}`, JSON.stringify({ userId: dbSession.userId, device: dbSession.device }), 'EX', 15 * 24 * 60 * 60),
+          redis.set(
+            `refresh:${dbSession.familyId}`,
+            JSON.stringify({
+              userId: dbSession.userId,
+              device: dbSession.device,
+            }),
+            "EX",
+            15 * 24 * 60 * 60,
+          ),
           redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
-          redis.expire(`user_sessions:${dbSession.userId}`, 15 * 24 * 60 * 60)
+          redis.expire(`user_sessions:${dbSession.userId}`, 15 * 24 * 60 * 60),
         ]).catch(() => {});
       }
     }
   } catch (err) {
-    // Redis is down -> Fallback to PostgreSQL
     try {
       const dbSession = await prisma.refreshToken.findFirst({
-        where: { familyId: decoded.sid, revokedAt: null }
+        where: { familyId: decoded.sid, revokedAt: null },
       });
       if (dbSession) {
         isSessionActive = true;
       }
     } catch (dbErr) {
-      return next(new ApiError(500, 'Internal Server Error'));
+      return next(new ApiError(500, "Internal Server Error"));
     }
   }
 
   if (!isSessionActive) {
-    return next(new ApiError(401, 'Session revoked'));
+    return next(new ApiError(401, "Session revoked"));
   }
 
   try {
     const user = await prisma.user.findUnique({ where: { id: decoded.id } });
     if (!user) {
-      return next(new ApiError(401, 'User no longer exists'));
+      return next(new ApiError(401, "User no longer exists"));
     }
     if (user.lockedUntil && user.lockedUntil > new Date()) {
-      // Intentionally do nothing; lockouts should only gate new logins, not existing valid sessions.
     }
     const { passwordHash, ...safeUser } = user;
     req.user = safeUser;
     next();
   } catch (err) {
-    return next(new ApiError(500, 'Internal Server Error'));
+    return next(new ApiError(500, "Internal Server Error"));
   }
 };
 
 export const authorizeRoles = (...roles: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user || !roles.includes(req.user.role)) {
-      return next(new ApiError(403, 'Forbidden, insufficient permissions'));
+      return next(new ApiError(403, "Forbidden, insufficient permissions"));
     }
     next();
   };
 };
 
-export const requireEmailVerified = (req: Request, res: Response, next: NextFunction) => {
-
-  if(!req.user || !req.user.isEmailVerified){
-    return next(new ApiError(403, 'Please verify your email address before accessing this resource'));
+export const requireEmailVerified = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  if (!req.user || !req.user.isEmailVerified) {
+    return next(
+      new ApiError(
+        403,
+        "Please verify your email address before accessing this resource",
+      ),
+    );
   }
   next();
-}
-export const optionalAuth = async (req: Request, res: Response, next: NextFunction) => {
+};
+export const optionalAuth = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return next();
   }
 
-  const token = authHeader.split(' ')[1];
-  
+  const token = authHeader.split(" ")[1];
+
   let decoded: AccessTokenPayload;
   try {
     decoded = verifyAccessToken(token);
   } catch (err) {
-    // Treat invalid or expired tokens as anonymous
     return next();
   }
 
@@ -129,27 +151,35 @@ export const optionalAuth = async (req: Request, res: Response, next: NextFuncti
       isSessionValid = true;
     } else {
       const dbSession = await prisma.refreshToken.findFirst({
-        where: { familyId: decoded.sid, revokedAt: null }
+        where: { familyId: decoded.sid, revokedAt: null },
       });
       if (dbSession) {
         isSessionValid = true;
         Promise.all([
-          redis.set(`refresh:${dbSession.familyId}`, JSON.stringify({ userId: dbSession.userId, device: dbSession.device }), 'EX', 15 * 24 * 60 * 60),
+          redis.set(
+            `refresh:${dbSession.familyId}`,
+            JSON.stringify({
+              userId: dbSession.userId,
+              device: dbSession.device,
+            }),
+            "EX",
+            15 * 24 * 60 * 60,
+          ),
           redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
-          redis.expire(`user_sessions:${dbSession.userId}`, 15 * 24 * 60 * 60)
+          redis.expire(`user_sessions:${dbSession.userId}`, 15 * 24 * 60 * 60),
         ]).catch(() => {});
       }
     }
   } catch (err) {
     try {
       const dbSession = await prisma.refreshToken.findFirst({
-        where: { familyId: decoded.sid, revokedAt: null }
+        where: { familyId: decoded.sid, revokedAt: null },
       });
       if (dbSession) {
         isSessionValid = true;
       }
     } catch (dbErr) {
-      return next(new ApiError(500, 'Internal Server Error'));
+      return next(new ApiError(500, "Internal Server Error"));
     }
   }
 
@@ -161,7 +191,7 @@ export const optionalAuth = async (req: Request, res: Response, next: NextFuncti
         req.user = safeUser;
       }
     } catch (err) {
-      return next(new ApiError(500, 'Internal Server Error'));
+      return next(new ApiError(500, "Internal Server Error"));
     }
   }
   next();

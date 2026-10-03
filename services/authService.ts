@@ -12,9 +12,7 @@ export const handleFailedLogin = async (userId: string) => {
     const user = await tx.user.findUnique({ where: { id: userId } });
     if (!user) return;
 
-    let attempts = user.failedLoginAttempts;
-    // If a previous lock has expired, reset the attempt counter before incrementing
-    if (user.lockedUntil && user.lockedUntil <= new Date()) {
+    let attempts = user.failedLoginAttempts;    if (user.lockedUntil && user.lockedUntil <= new Date()) {
       attempts = 0;
     }
 
@@ -36,20 +34,14 @@ export const handleFailedLogin = async (userId: string) => {
   });
 };
 
-export const registerUser = async (name: string, email: string, passwordUnHashed: string) => {
-  // Hash upfront to prevent timing attacks that reveal if an email is registered
-  const passwordHash = await bcrypt.hash(passwordUnHashed, 10);
+export const registerUser = async (name: string, email: string, passwordUnHashed: string) => {  const passwordHash = await bcrypt.hash(passwordUnHashed, 10);
 
   const existingUser = await prisma.user.findUnique({ where: { email } });
   
   if (existingUser) {
     if (existingUser.isEmailVerified) {
       return { isNew: false, isVerified: true };
-    }
-
-    // Do NOT overwrite the database yet! Store the pending name and hash in Redis.
-    // This prevents pre-hijacking where an attacker registers a victim's email and overwrites their password.
-    try {
+    }    try {
       await storeAndSendOTP(existingUser.email, `otp:verify:${existingUser.id}`, 'verification', { name, passwordHash });
     } catch (err) {
       console.error('Failed to send OTP during registration (existing unverified):', err);
@@ -87,10 +79,7 @@ export const loginUser = async (email: string, password: string, ip: string, req
     isMatch = await bcrypt.compare(password, user.passwordHash);
   } else {
     await bcrypt.compare(password, '$2a$10$XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX');
-  }
-
-  // Check lock status before processing failure/success to prevent lockout extension
-  if (user && user.lockedUntil && user.lockedUntil > new Date()) {
+  }  if (user && user.lockedUntil && user.lockedUntil > new Date()) {
     throw new ApiError(403, 'Account is temporarily locked due to multiple failed login attempts. Please try again later.');
   }
 
@@ -105,10 +94,7 @@ export const loginUser = async (email: string, password: string, ip: string, req
   if (!user.isEmailVerified) {
     await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
     throw new ApiError(403, 'Email not verified. A fresh verification code has been sent to your email.');
-  }
-
-  // Reset lock and update last login
-  await prisma.user.update({
+  }  await prisma.user.update({
     where: { id: user.id },
     data: { 
       lastLogin: new Date(),
