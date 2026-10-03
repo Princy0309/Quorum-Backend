@@ -10,10 +10,7 @@ import { refreshCookieOptions } from '../utils/cookieOptions';
 import { asyncHandler } from '../utils/asyncHandler';
 
 export const register = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const { error, value } = registerSchema.validate(req.body);
-  if (error) throw new ApiError(400, error.details[0].message);
-
-  const { name, email, password } = value;
+  const { name, email, password } = req.body;
   const cleanEmail = email.trim().toLowerCase();
   const passwordHash = await bcrypt.hash(password, 10);
 
@@ -23,17 +20,13 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
 });
 
 export const login = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const { error, value } = loginSchema.validate(req.body);
-  if (error) throw new ApiError(400, error.details[0].message);
-
-  const { email, password } = value;
+  const { email, password } = req.body;
   const cleanEmail = email.trim().toLowerCase();
   
   const { user, accessToken, refreshToken } = await loginUser(cleanEmail, password, req.ip || '127.0.0.1', req);
 
-  // Always set HttpOnly cookie for browser clients
   res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-  // Always provide header for native clients (browsers will ignore it if not exposed)
+
   res.setHeader('x-refresh-token', refreshToken);
 
   const responseData = {

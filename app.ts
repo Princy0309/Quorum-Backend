@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
+import expressWinston from 'express-winston';
 
 dotenv.config();
 
@@ -10,6 +11,7 @@ import authRoutes from './routes/authRoutes';
 import otpRoutes from './routes/otpRoutes';
 import errorHandler from './middlewares/errorHandler';
 import verifyCSRF from './middlewares/csrfProtection';
+import logger from './utils/logger';
 
 const app = express();
 
@@ -48,6 +50,15 @@ app.use(cors({
 app.use(express.json());
 app.use(cookieParser());
 app.use(verifyCSRF);
+
+app.use(expressWinston.logger({
+  winstonInstance: logger,
+  meta: true,
+  msg: "HTTP {{req.method}} {{req.url}}",
+  expressFormat: true,
+  colorize: false,
+  ignoreRoute: function (req, res) { return req.path === '/health'; }
+}));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/otp', otpRoutes);

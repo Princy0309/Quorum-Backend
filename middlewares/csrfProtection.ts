@@ -25,15 +25,13 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
   }
   res.locals.csrfToken = csrfToken;
 
-  // If the request does not include any cookies, it is not subject to cookie-based CSRF.
-  // Native clients using Authorization headers or custom transport bypass this check.
+
   const hasCookies = req.cookies && Object.keys(req.cookies).length > 0;
   
   if (!hasCookies) {
     return next();
   }
 
-  // For browser requests on state-changing routes, validate origin/referer
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
     let origin = req.headers.origin;
     if (!origin && req.headers.referer) {
@@ -57,9 +55,8 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
       return next(new ApiError(403, 'CSRF validation failed: Unauthorized origin'));
     }
 
-    // Double-submit cookie verification (Synchronizer token pattern)
-    // If the frontend does not send the header, and relies on Origin only, 
-    // we log a warning or enforce it based on strictness. Here we enforce it if the cookie was sent.
+
+
     const headerToken = req.headers['x-xsrf-token'] || req.headers['x-csrf-token'];
     if (csrfToken && headerToken !== csrfToken) {
       return next(new ApiError(403, 'CSRF validation failed: Token mismatch'));

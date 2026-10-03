@@ -11,7 +11,7 @@ export const handleFailedLogin = async (userId: string, currentAttempts: number)
   const newAttempts = currentAttempts + 1;
   let lockedUntil = null;
   if (newAttempts >= 5) {
-    lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 mins lock
+    lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
   }
   await prisma.user.update({
     where: { id: userId },

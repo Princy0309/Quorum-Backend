@@ -3,7 +3,10 @@ dotenv.config();
 
 import prisma from './config/prisma';
 import app from './app';
-import './queues/emailQueue';
+import { emailWorker, queueRedisConnection } from './queues/emailQueue';
+import redis from './config/redis';
+
+let server: any;
 
 const startServer = async (): Promise<void> => {
   try {
@@ -11,7 +14,7 @@ const startServer = async (): Promise<void> => {
     console.log('Database connected');
 
     const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => {
+    server = app.listen(PORT, () => {
       console.log(`Quorum server running on port ${PORT}`);
     });
   } catch (err) {
@@ -19,5 +22,44 @@ const startServer = async (): Promise<void> => {
     process.exit(1);
   }
 };
+
+const gracefulShutdown = async (signal: string) => {
+  console.log(`Received ${signal}. Shutting down gracefully...`);
+  
+  if (server) {
+    server.close(async () => {
+      console.log('HTTP server closed.');
+      
+      try {
+        await emailWorker.close();
+        console.log('Email worker closed.');
+
+        queueRedisConnection.disconnect();
+        console.log('Queue Redis disconnected.');
+
+        redis.disconnect();
+        console.log('Main Redis disconnected.');
+
+        await prisma.$disconnect();
+        console.log('Prisma disconnected.');
+
+        process.exit(0);
+      } catch (err) {
+        console.error('Error during shutdown:', err);
+        process.exit(1);
+      }
+    });
+  } else {
+    process.exit(0);
+  }
+
+  setTimeout(() => {
+    console.error('Could not close connections in time, forcefully shutting down');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 startServer();

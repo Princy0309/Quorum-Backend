@@ -36,8 +36,7 @@ export const sendVerificationOTP = asyncHandler(async (req: Request, res: Respon
 });
 
 export const verifyEmail = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const { error } = verifyEmailSchema.validate(req.body);
-  if (error) throw new ApiError(400, error.details[0].message);
+  
 
   const rawEmail = req.body?.email;
   const cleanEmail = rawEmail ? rawEmail.trim().toLowerCase() : null;
@@ -95,7 +94,7 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response, next
     return sendSuccess(res, 200, 'Email verified successfully', responseData);
   } catch (err: unknown) {
     console.error('Error during post-verification session issuance:', err);
-    // Recoverable workflow: user is verified, just needs to login
+
     return sendSuccess(res, 200, 'Email verified successfully. Please log in to continue.', {
       user: {
         id: user.id,
@@ -109,8 +108,7 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response, next
 });
 
 export const forgotPassword = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const { error } = sendResetSchema.validate(req.body);
-  if (error) throw new ApiError(400, error.details[0].message);
+  
 
   const email = String(req.body?.email || '').trim().toLowerCase();
   const user = await prisma.user.findUnique({ where: { email } });
@@ -124,8 +122,7 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response, n
 });
 
 export const resetPassword = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const { error } = resetPasswordSchema.validate(req.body);
-  if (error) throw new ApiError(400, error.details[0].message);
+  
 
   const email = String(req.body?.email || '').trim().toLowerCase();
   const cleanOtp = String(req.body?.otp || '').trim();

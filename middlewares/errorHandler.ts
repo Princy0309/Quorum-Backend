@@ -1,11 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { ApiError } from '../utils/ApiError';
+import logger from '../utils/logger';
 
 const errorHandler = (err: Error | ApiError, req: Request, res: Response, next: NextFunction) => {
   const statusCode = err instanceof ApiError ? err.statusCode : 500;
   const isOperational = err instanceof ApiError ? err.isOperational : false;
 
-  // Structured logging
   const errorLog = {
     message: err.message,
     statusCode,
@@ -17,9 +17,9 @@ const errorHandler = (err: Error | ApiError, req: Request, res: Response, next: 
   };
 
   if (statusCode >= 500) {
-    console.error('SERVER ERROR:', JSON.stringify(errorLog));
+    logger.error('SERVER ERROR:', errorLog);
   } else {
-    console.warn('CLIENT ERROR:', JSON.stringify(errorLog));
+    logger.warn('CLIENT ERROR:', errorLog);
   }
 
   res.status(statusCode).json({

@@ -192,7 +192,7 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
     include: { user: true },
   });
 
-  const GRACE_PERIOD_MS = 20000; // 20 seconds grace period for concurrent requests
+  const GRACE_PERIOD_MS = 20000;
   let isConcurrentRefresh = false;
 
   if (!storedToken || storedToken.expiresAt < new Date()) {
@@ -213,19 +213,18 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
   try {
     result = await prisma.$transaction(async (tx) => {
       if (!isConcurrentRefresh) {
-        // Atomic conditional update
+
         const { count } = await tx.refreshToken.updateMany({
           where: { id: storedToken.id, revokedAt: null },
           data: { revokedAt: new Date() },
         });
 
         if (count === 0) {
-          // A concurrent request just revoked it between our read and write!
+
           isConcurrentRefresh = true;
         }
       }
 
-      // Issue new tokens within the transaction
       const device = req?.headers?.['user-agent']?.slice(0, 200) || storedToken.device;
       const refreshToken = generateRefreshToken(storedToken.userId);
       const newTokenHash = hashToken(refreshToken);
@@ -248,7 +247,6 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
     throw err;
   }
 
-  // Perform Redis updates AFTER successful database commit
   try {
     await redis.del(`refresh:${tokenHash}`);
     await redis.srem(`user_sessions:${storedToken.userId}`, tokenHash);
