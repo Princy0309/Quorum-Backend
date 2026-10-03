@@ -5,29 +5,18 @@ import redis from '../config/redis';
 import { hashToken } from '../utils/hashToken';
 import { ApiError } from '../utils/ApiError';
 
-const JWT_ISSUER = process.env.JWT_ISSUER || 'quorum-api';
-const JWT_AUDIENCE = process.env.JWT_AUDIENCE || 'quorum-app';
+import env from '../config/env';
 
-const parsedTTL = parseInt(process.env.REFRESH_TOKEN_TTL_SECONDS || '', 10);
-if (isNaN(parsedTTL) || parsedTTL <= 0) {
-  throw new Error('FATAL: REFRESH_TOKEN_TTL_SECONDS must be a valid positive integer');
-}
-const REFRESH_TTL_SECONDS = parsedTTL;
-
-if (!process.env.JWT_SECRET) {
-  throw new Error('FATAL: JWT_SECRET environment variable is missing');
-}
-const JWT_SECRET = process.env.JWT_SECRET;
-
-if (!process.env.JWT_REFRESH_SECRET) {
-  throw new Error('FATAL: JWT_REFRESH_SECRET environment variable is missing');
-}
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+const JWT_ISSUER = env.JWT_ISSUER;
+const JWT_AUDIENCE = env.JWT_AUDIENCE;
+const REFRESH_TTL_SECONDS = env.REFRESH_TOKEN_TTL_SECONDS;
+const JWT_SECRET = env.JWT_SECRET;
+const JWT_REFRESH_SECRET = env.JWT_REFRESH_SECRET;
 
 export interface AccessTokenPayload {
   id: string;
   type: 'access';
-  sid?: string;
+  sid: string;
   jti: string;
   iat?: number;
   exp?: number;
@@ -50,7 +39,7 @@ export const generateAccessToken = (userId: string, sid?: string): string => {
     algorithm: 'HS256',
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
-    expiresIn: (process.env.JWT_EXPIRES_IN as any) || '15m',
+    expiresIn: env.JWT_EXPIRES_IN || '15m',
   });
 };
 
@@ -59,10 +48,22 @@ export const verifyAccessToken = (token: string): AccessTokenPayload => {
     algorithms: ['HS256'],
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
-  }) as any;
+  });
 
+  if (typeof decoded !== 'object' || decoded === null) {
+    throw new Error('Invalid token payload');
+  }
   if (decoded.type !== 'access') {
     throw new Error('Invalid token type');
+  }
+  if (typeof decoded.id !== 'string' || !decoded.id.trim()) {
+    throw new Error('Missing or invalid id claim');
+  }
+  if (typeof decoded.jti !== 'string' || !decoded.jti.trim()) {
+    throw new Error('Missing or invalid jti claim');
+  }
+  if (typeof decoded.sid !== 'string' || !decoded.sid.trim()) {
+    throw new Error('Missing or invalid sid claim');
   }
 
   return decoded as AccessTokenPayload;
@@ -82,10 +83,19 @@ export const verifyRefreshToken = (token: string): RefreshTokenPayload => {
     algorithms: ['HS256'],
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
-  }) as any;
+  });
 
+  if (typeof decoded !== 'object' || decoded === null) {
+    throw new Error('Invalid token payload');
+  }
   if (decoded.type !== 'refresh') {
     throw new Error('Invalid token type');
+  }
+  if (typeof decoded.id !== 'string' || !decoded.id.trim()) {
+    throw new Error('Missing or invalid id claim');
+  }
+  if (typeof decoded.jti !== 'string' || !decoded.jti.trim()) {
+    throw new Error('Missing or invalid jti claim');
   }
 
   return decoded as RefreshTokenPayload;
@@ -175,7 +185,9 @@ const performReuseRevocation = async (storedToken: any) => {
       await redis.del(...hashesToRevoke.map((h) => `refresh:${h}`));
       await redis.srem(`user_sessions:${storedToken.userId}`, ...hashesToRevoke);
     }
-  } catch (redisErr) {}
+  } catch (redisErr) {
+    console.error(`[Security] Failed to remove revoked family from Redis for user ${storedToken.userId}. DB revocation succeeded.`, redisErr);
+  }
 };
 
 export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{ accessToken: string; refreshToken: string }> => {
@@ -187,42 +199,43 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
 
   const tokenHash = hashToken(rawToken);
 
+  // 1. Idempotency Check
+  const idempotencyKey = `rotate_result:${tokenHash}`;
+  const cachedResult = await redis.get(idempotencyKey);
+  if (cachedResult) {
+    const parsed = JSON.parse(cachedResult);
+    return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
+  }
+
   const storedToken = await prisma.refreshToken.findUnique({
     where: { tokenHash },
     include: { user: true },
   });
-
-  const GRACE_PERIOD_MS = 20000;
-  let isConcurrentRefresh = false;
 
   if (!storedToken || storedToken.expiresAt < new Date()) {
     throw new ApiError(401, 'Invalid or expired refresh token');
   }
 
   if (storedToken.revokedAt) {
-    const timeSinceRevoked = Date.now() - storedToken.revokedAt.getTime();
-    if (timeSinceRevoked > GRACE_PERIOD_MS) {
-      await performReuseRevocation(storedToken);
-      throw new ApiError(401, 'Invalid or expired refresh token');
-    } else {
-      isConcurrentRefresh = true;
-    }
+    // If it is revoked but not in the idempotency cache, the 20s grace period is over.
+    // This is confirmed reuse outside the retry mechanism.
+    await performReuseRevocation(storedToken);
+    throw new ApiError(401, 'Invalid or expired refresh token');
   }
 
   let result: any;
   try {
     result = await prisma.$transaction(async (tx) => {
-      if (!isConcurrentRefresh) {
+      // Atomically claim the token
+      const { count } = await tx.refreshToken.updateMany({
+        where: { id: storedToken.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
 
-        const { count } = await tx.refreshToken.updateMany({
-          where: { id: storedToken.id, revokedAt: null },
-          data: { revokedAt: new Date() },
-        });
-
-        if (count === 0) {
-
-          isConcurrentRefresh = true;
-        }
+      if (count === 0) {
+        // We lost the race. Another thread is currently processing the rotation.
+        // Throw a specific error to catch and poll the idempotency cache.
+        throw new Error('CONCURRENT_ROTATION');
       }
 
       const device = req?.headers?.['user-agent']?.slice(0, 200) || storedToken.device;
@@ -244,18 +257,33 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
       return { accessToken, refreshToken, newTokenHash, device };
     });
   } catch (err: any) {
+    if (err.message === 'CONCURRENT_ROTATION') {
+      // Wait briefly for the winning thread to write the rotation result to Redis
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const retryCache = await redis.get(idempotencyKey);
+      if (retryCache) {
+        const parsed = JSON.parse(retryCache);
+        return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
+      }
+      throw new ApiError(401, 'Invalid or expired refresh token');
+    }
     throw err;
   }
 
   try {
     await redis.del(`refresh:${tokenHash}`);
     await redis.srem(`user_sessions:${storedToken.userId}`, tokenHash);
-    
     await saveSessionToRedis(result.newTokenHash, storedToken.userId, result.device);
+    
+    // Save idempotency result in Redis for the grace period (20s)
+    await redis.set(idempotencyKey, JSON.stringify({
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken
+    }), 'EX', 20);
+    
   } catch (err) {
-    console.error('Failed to update Redis during rotation, performing DB compensation:', err);
-    await prisma.refreshToken.delete({ where: { tokenHash: result.newTokenHash } }).catch(e => console.error('Compensation failed:', e));
-    throw new ApiError(500, 'Internal Server Error');
+    console.error('Failed to update Redis during rotation. DB transaction succeeded. Client will receive tokens and can recover via DB.', err);
+    // We do NOT throw an error or compensate here. PostgreSQL is the source of truth.
   }
 
   return { accessToken: result.accessToken, refreshToken: result.refreshToken };

@@ -30,17 +30,8 @@ This tells the backend to return the `refreshToken` in the JSON response body in
 ```json
 {
   "success": true,
-  "message": "User registered successfully",
-  "data": {
-    "accessToken": "eyJhbGci...",
-    "refreshToken": "710063...",
-    "user": {
-      "id": "uuid-here",
-      "name": "User Name",
-      "email": "user@example.com",
-      "role": "member"
-    }
-  }
+  "statusCode": 201,
+  "message": "Registration processed. If the email is valid and available, a verification code has been sent."
 }
 ```
 

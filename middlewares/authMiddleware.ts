@@ -28,16 +28,42 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
     return next(new ApiError(401, 'Invalid or expired token'));
   }
 
-  if (decoded.sid) {
-    try {
-      const isActive = await redis.exists(`refresh:${decoded.sid}`);
-      if (!isActive) {
-        return next(new ApiError(401, 'Session revoked'));
+  if (!decoded.sid) {
+    return next(new ApiError(401, 'Invalid token: missing session ID'));
+  }
+
+  let isSessionActive = false;
+  try {
+    const isRedisActive = await redis.exists(`refresh:${decoded.sid}`);
+    if (isRedisActive) {
+      isSessionActive = true;
+    } else {
+      // Cache miss (eviction/restart) -> Fallback to PostgreSQL
+      const dbSession = await prisma.refreshToken.findUnique({
+        where: { tokenHash: decoded.sid, revokedAt: null }
+      });
+      if (dbSession) {
+        isSessionActive = true;
+        // Asynchronously repair the cache
+        redis.set(`refresh:${dbSession.tokenHash}`, JSON.stringify({ userId: dbSession.userId, device: dbSession.device }), 'EX', 15 * 24 * 60 * 60).catch(() => {});
       }
-    } catch (err) {
-      // If Redis fails, we might choose to allow or deny. We'll deny for strict security.
+    }
+  } catch (err) {
+    // Redis is down -> Fallback to PostgreSQL
+    try {
+      const dbSession = await prisma.refreshToken.findUnique({
+        where: { tokenHash: decoded.sid, revokedAt: null }
+      });
+      if (dbSession) {
+        isSessionActive = true;
+      }
+    } catch (dbErr) {
       return next(new ApiError(500, 'Internal Server Error'));
     }
+  }
+
+  if (!isSessionActive) {
+    return next(new ApiError(401, 'Session revoked'));
   }
 
   try {
@@ -88,23 +114,47 @@ export const optionalAuth = async (req: Request, res: Response, next: NextFuncti
     return next();
   }
 
-  try {
-    let isSessionValid = true;
-    if (decoded.sid) {
-      const isActive = await redis.exists(`refresh:${decoded.sid}`);
-      if (!isActive) isSessionValid = false;
-    }
+  if (!decoded.sid) {
+    return next();
+  }
 
-    if (isSessionValid) {
+  let isSessionValid = false;
+  try {
+    const isRedisActive = await redis.exists(`refresh:${decoded.sid}`);
+    if (isRedisActive) {
+      isSessionValid = true;
+    } else {
+      const dbSession = await prisma.refreshToken.findUnique({
+        where: { tokenHash: decoded.sid, revokedAt: null }
+      });
+      if (dbSession) {
+        isSessionValid = true;
+        redis.set(`refresh:${dbSession.tokenHash}`, JSON.stringify({ userId: dbSession.userId, device: dbSession.device }), 'EX', 15 * 24 * 60 * 60).catch(() => {});
+      }
+    }
+  } catch (err) {
+    try {
+      const dbSession = await prisma.refreshToken.findUnique({
+        where: { tokenHash: decoded.sid, revokedAt: null }
+      });
+      if (dbSession) {
+        isSessionValid = true;
+      }
+    } catch (dbErr) {
+      return next(new ApiError(500, 'Internal Server Error'));
+    }
+  }
+
+  if (isSessionValid) {
+    try {
       const user = await prisma.user.findUnique({ where: { id: decoded.id } });
       if (user && (!user.lockedUntil || user.lockedUntil <= new Date())) {
         const { passwordHash, ...safeUser } = user;
         req.user = safeUser;
       }
+    } catch (err) {
+      return next(new ApiError(500, 'Internal Server Error'));
     }
-    next();
-  } catch (err) {
-    // Surface backend failures (e.g., Redis or DB errors)
-    return next(new ApiError(500, 'Internal Server Error'));
   }
+  next();
 };

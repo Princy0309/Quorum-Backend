@@ -24,30 +24,38 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
   
   const { user, accessToken, refreshToken } = await loginUser(cleanEmail, password, req.ip || '127.0.0.1', req);
 
-  res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+  const isMobile = req.headers['x-client-platform'] === 'mobile';
 
-  res.setHeader('x-refresh-token', refreshToken);
-
-  const responseData = {
+  const responseData: any = {
     accessToken,
     user: { id: user.id, name: user.name, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified },
   };
+
+  if (isMobile) {
+    responseData.refreshToken = refreshToken;
+  } else {
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+  }
 
   return sendSuccess(res, 200, 'Login successful', responseData);
 });
 
 export const refreshToken = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const incomingToken = req.cookies?.refreshToken || req.headers['x-refresh-token'] as string;
+  const isMobile = req.headers['x-client-platform'] === 'mobile';
+  const incomingToken = isMobile ? req.body.refreshToken : req.cookies?.refreshToken;
 
   if (!incomingToken) throw new ApiError(401, 'Refresh token required');
 
   try {
     const { accessToken, refreshToken: newRefreshToken } = await rotateRefreshToken(incomingToken, req);
 
-    res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
-    res.setHeader('x-refresh-token', newRefreshToken);
+    const responseData: any = { accessToken };
 
-    const responseData = { accessToken };
+    if (isMobile) {
+      responseData.refreshToken = newRefreshToken;
+    } else {
+      res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
+    }
 
     return sendSuccess(res, 200, 'Tokens refreshed successfully', responseData);
   } catch (err: any) {
@@ -56,13 +64,16 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
 });
 
 export const logout = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const incomingToken = req.cookies?.refreshToken || req.headers['x-refresh-token'] as string;
+  const isMobile = req.headers['x-client-platform'] === 'mobile';
+  const incomingToken = isMobile ? req.body.refreshToken : req.cookies?.refreshToken;
 
   if (incomingToken) {
     await revokeRefreshToken(incomingToken);
   }
 
-  res.clearCookie('refreshToken', refreshCookieOptions);
+  if (!isMobile) {
+    res.clearCookie('refreshToken', refreshCookieOptions);
+  }
 
   return sendSuccess(res, 200, 'Logged out successfully');
 });

@@ -33,16 +33,7 @@ Interactive Swagger Docs: `https://api.newquorum.me/api-docs`
 {
   "success": true,
   "statusCode": 201,
-  "message": "User registered successfully. Please verify your email with the OTP sent to your inbox.",
-  "data": {
-    "user": {
-      "id": "uuid-v4",
-      "name": "John Doe",
-      "email": "john@example.com",
-      "role": "member",
-      "isEmailVerified": false
-    }
-  }
+  "message": "Registration processed. If the email is valid and available, a verification code has been sent."
 }
 ```
 
@@ -99,7 +90,7 @@ Interactive Swagger Docs: `https://api.newquorum.me/api-docs`
 
 ### 1.4 User Logout
 - **Endpoint:** `POST /api/auth/logout`
-- **Auth Header:** `x-refresh-token: <refreshToken>`
+- **Auth Transport:** Uses `refreshToken` HttpOnly cookie automatically. Mobile apps passing `x-client-platform: mobile` should send `{ "refreshToken": "..." }` in the JSON body.
 - **Response (200 OK):**
 ```json
 {
@@ -140,7 +131,6 @@ Interactive Swagger Docs: `https://api.newquorum.me/api-docs`
 
 ### 2.1 Verify Email OTP
 - **Endpoint:** `POST /api/otp/verify-email`
-- **Headers Returned:** `x-refresh-token: <signed_jwt_refresh_token>`
 - **Request Body:**
 ```json
 {

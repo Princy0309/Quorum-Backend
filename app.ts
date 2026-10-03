@@ -13,13 +13,15 @@ import errorHandler from './middlewares/errorHandler';
 import verifyCSRF from './middlewares/csrfProtection';
 import logger from './utils/logger';
 
+import env from './config/env';
+
 const app = express();
 
 const trustProxy = process.env.TRUST_PROXY || 1;
 app.set('trust proxy', isNaN(Number(trustProxy)) ? trustProxy : Number(trustProxy));
 
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
+const allowedOrigins = env.ALLOWED_ORIGINS 
+  ? env.ALLOWED_ORIGINS.split(',').map((o: string) => o.trim()).filter(Boolean)
   : [
       'https://quorum-web-omega.vercel.app',
       'https://newquorum.me',
@@ -33,7 +35,7 @@ app.use(cors({
     if (!origin) return callback(null, true);
 
     const isAllowedDomain = allowedOrigins.includes(origin);
-    const isLocalDev = process.env.NODE_ENV !== 'production' && (
+    const isLocalDev = env.NODE_ENV !== 'production' && (
       origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')
     );
 

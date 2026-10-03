@@ -1,8 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import { ApiError } from '../utils/ApiError';
+import crypto from 'crypto';
+import env from '../config/env';
 
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
+const allowedOrigins = env.ALLOWED_ORIGINS 
+  ? env.ALLOWED_ORIGINS.split(',').map((o: string) => o.trim()).filter(Boolean)
   : [
       'https://quorum-web-omega.vercel.app',
       'https://newquorum.me',
@@ -11,28 +13,25 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
       'http://localhost:5173',
     ];
 
-import crypto from 'crypto';
-
 export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
+  const isMobile = req.headers['x-client-platform'] === 'mobile';
+  if (isMobile) {
+    return next();
+  }
+
   let csrfToken = req.cookies['XSRF-TOKEN'];
   if (!csrfToken) {
     csrfToken = crypto.randomBytes(32).toString('hex');
     res.cookie('XSRF-TOKEN', csrfToken, {
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: env.NODE_ENV === 'production',
+      sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
       httpOnly: false,
     });
   }
   res.locals.csrfToken = csrfToken;
 
-
-  const hasCookies = req.cookies && Object.keys(req.cookies).length > 0;
-  
-  if (!hasCookies) {
-    return next();
-  }
-
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    // 1. Strict Origin Validation
     let origin = req.headers.origin;
     if (!origin && req.headers.referer) {
       try {
@@ -47,7 +46,7 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
     }
 
     const isAllowedDomain = allowedOrigins.includes(origin);
-    const isLocalDev = process.env.NODE_ENV !== 'production' && (
+    const isLocalDev = env.NODE_ENV !== 'production' && (
       origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')
     );
 
@@ -55,11 +54,15 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
       return next(new ApiError(403, 'CSRF validation failed: Unauthorized origin'));
     }
 
-
-
-    const headerToken = req.headers['x-xsrf-token'] || req.headers['x-csrf-token'];
-    if (csrfToken && headerToken !== csrfToken) {
-      return next(new ApiError(403, 'CSRF validation failed: Token mismatch'));
+    // 2. Token Validation (Double Submit Cookie)
+    // Only enforced when the request is cookie-authenticated
+    const hasAuthCookie = !!req.cookies['refreshToken'];
+    
+    if (hasAuthCookie) {
+      const headerToken = req.headers['x-xsrf-token'] || req.headers['x-csrf-token'];
+      if (!headerToken || headerToken !== csrfToken) {
+        return next(new ApiError(403, 'CSRF validation failed: Token mismatch'));
+      }
     }
   }
 
