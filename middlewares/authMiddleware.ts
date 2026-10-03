@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { verifyAccessToken } from '../services/tokenService';
 import { ApiError } from '../utils/ApiError';
 import prisma from '../config/prisma';
+import redis from '../config/redis';
 
 export const authMiddleware = async (req: Request | any, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
@@ -16,6 +17,18 @@ export const authMiddleware = async (req: Request | any, res: Response, next: Ne
     decoded = verifyAccessToken(token);
   } catch (err) {
     return next(new ApiError(401, 'Invalid or expired token'));
+  }
+
+  if (decoded.sid) {
+    try {
+      const isActive = await redis.exists(`refresh:${decoded.sid}`);
+      if (!isActive) {
+        return next(new ApiError(401, 'Session revoked'));
+      }
+    } catch (err) {
+      // If Redis fails, we might choose to allow or deny. We'll deny for strict security.
+      return next(new ApiError(500, 'Internal Server Error'));
+    }
   }
 
   try {
@@ -56,10 +69,23 @@ export const optionalAuth = async (req: Request | any, res: Response, next: Next
   const token = authHeader.split(' ')[1];
   try {
     const decoded: any = verifyAccessToken(token);
-    const user = await prisma.user.findUnique({ where: { id: decoded.id } });
-    if (user) {
-      const { passwordHash, ...safeUser } = user;
-      req.user = safeUser;
+    
+    let isSessionValid = true;
+    if (decoded.sid) {
+      try {
+        const isActive = await redis.exists(`refresh:${decoded.sid}`);
+        if (!isActive) isSessionValid = false;
+      } catch (err) {
+        isSessionValid = false;
+      }
+    }
+
+    if (isSessionValid) {
+      const user = await prisma.user.findUnique({ where: { id: decoded.id } });
+      if (user) {
+        const { passwordHash, ...safeUser } = user;
+        req.user = safeUser;
+      }
     }
   } catch (err) {
     
