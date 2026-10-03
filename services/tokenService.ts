@@ -173,25 +173,41 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
     include: { user: true },
   });
 
-  if (!storedToken || storedToken.revokedAt || storedToken.expiresAt < new Date()) {
-    if (storedToken && storedToken.revokedAt) {
-      await performReuseRevocation(storedToken);
-    }
+  const GRACE_PERIOD_MS = 20000; // 20 seconds grace period for concurrent requests
+  let isConcurrentRefresh = false;
+
+  if (!storedToken || storedToken.expiresAt < new Date()) {
     const error: any = new Error('Invalid or expired refresh token');
     error.status = 401;
     throw error;
   }
 
-  try {
-    return await prisma.$transaction(async (tx) => {
-      // Atomic conditional update
-      const { count } = await tx.refreshToken.updateMany({
-        where: { id: storedToken.id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
+  if (storedToken.revokedAt) {
+    const timeSinceRevoked = Date.now() - storedToken.revokedAt.getTime();
+    if (timeSinceRevoked > GRACE_PERIOD_MS) {
+      await performReuseRevocation(storedToken);
+      const error: any = new Error('Invalid or expired refresh token');
+      error.status = 401;
+      throw error;
+    } else {
+      isConcurrentRefresh = true;
+    }
+  }
 
-      if (count === 0) {
-        throw new Error('REUSE_DETECTED');
+  let result: any;
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      if (!isConcurrentRefresh) {
+        // Atomic conditional update
+        const { count } = await tx.refreshToken.updateMany({
+          where: { id: storedToken.id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+
+        if (count === 0) {
+          // A concurrent request just revoked it between our read and write!
+          isConcurrentRefresh = true;
+        }
       }
 
       // Issue new tokens within the transaction
@@ -211,36 +227,34 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
         },
       });
 
-      try {
-        await redis.del(`refresh:${tokenHash}`);
-        await redis.srem(`user_sessions:${storedToken.userId}`, tokenHash);
-        
-        await redis.set(
-          `refresh:${newTokenHash}`,
-          JSON.stringify({ userId: storedToken.userId, device, createdAt: Date.now() }),
-          'EX',
-          REFRESH_TTL_SECONDS
-        );
-        await redis.sadd(`user_sessions:${storedToken.userId}`, newTokenHash);
-        await redis.expire(`user_sessions:${storedToken.userId}`, REFRESH_TTL_SECONDS);
-      } catch (err) {
-        console.error('Failed to update Redis during rotation, rolling back transaction:', err);
-        const error: any = new Error('Internal Server Error');
-        error.status = 500;
-        throw error;
-      }
-
-      return { accessToken, refreshToken };
+      return { accessToken, refreshToken, newTokenHash, device };
     });
   } catch (err: any) {
-    if (err.message === 'REUSE_DETECTED') {
-      await performReuseRevocation(storedToken);
-      const error: any = new Error('Invalid or expired refresh token');
-      error.status = 401;
-      throw error;
-    }
     throw err;
   }
+
+  // Perform Redis updates AFTER successful database commit
+  try {
+    await redis.del(`refresh:${tokenHash}`);
+    await redis.srem(`user_sessions:${storedToken.userId}`, tokenHash);
+    
+    await redis.set(
+      `refresh:${result.newTokenHash}`,
+      JSON.stringify({ userId: storedToken.userId, device: result.device, createdAt: Date.now() }),
+      'EX',
+      REFRESH_TTL_SECONDS
+    );
+    await redis.sadd(`user_sessions:${storedToken.userId}`, result.newTokenHash);
+    await redis.expire(`user_sessions:${storedToken.userId}`, REFRESH_TTL_SECONDS);
+  } catch (err) {
+    console.error('Failed to update Redis during rotation, performing DB compensation:', err);
+    await prisma.refreshToken.delete({ where: { tokenHash: result.newTokenHash } }).catch(e => console.error('Compensation failed:', e));
+    const error: any = new Error('Internal Server Error');
+    error.status = 500;
+    throw error;
+  }
+
+  return { accessToken: result.accessToken, refreshToken: result.refreshToken };
 };
 
 export const revokeRefreshToken = async (rawToken: string): Promise<void> => {
