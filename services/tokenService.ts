@@ -280,7 +280,10 @@ export const revokeRefreshToken = async (rawToken: string): Promise<void> => {
       await redis.srem(`user_sessions:${userId}`, tokenHash);
     }
   } catch (err) {
-    console.error('Redis revocation error ignored safely:', err);
+    console.error('Failed to revoke RefreshToken in Redis:', err);
+    const error: any = new Error('Internal Server Error');
+    error.status = 500;
+    throw error;
   }
 };
 
@@ -304,6 +307,9 @@ export const revokeAllSessions = async (userId: string): Promise<void> => {
     }
     await redis.del(`user_sessions:${userId}`);
   } catch (err) {
-    console.error('Redis revocation error ignored safely:', err);
+    console.error('Failed to revoke all sessions in Redis:', err);
+    const error: any = new Error('Internal Server Error');
+    error.status = 500;
+    throw error;
   }
 };

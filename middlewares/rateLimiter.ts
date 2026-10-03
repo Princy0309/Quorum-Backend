@@ -5,7 +5,7 @@ import redisClient from '../config/redis';
 export const loginRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
   keyPrefix: 'login_v2',
-  points: 50,
+  points: 10,
   duration: 15 * 60,
   blockDuration: 15 * 60,
 });
@@ -34,6 +34,9 @@ export const loginLimiter = async (req: Request, res: Response, next: NextFuncti
     }
     next();
   } catch (err) {
+    if (err instanceof Error) {
+      return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
+    }
     next();
   }
 };
@@ -43,7 +46,7 @@ export const refreshLimiter = (req: Request, res: Response, next: NextFunction):
     .then(() => next())
     .catch((err) => {
       if (err instanceof Error) {
-        return next();
+        return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
       }
       res.status(429).json({ success: false, statusCode: 429, message: 'Too many refresh token requests, try again later.' });
     });
@@ -54,7 +57,7 @@ export const registerLimiter = (req: Request, res: Response, next: NextFunction)
     .then(() => next())
     .catch((err) => {
       if (err instanceof Error) {
-        return next();
+        return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
       }
       res.status(429).json({ success: false, statusCode: 429, message: 'Too many registration attempts, try again later.' });
     });
@@ -73,7 +76,7 @@ export const otpLimiter = (req: Request, res: Response, next: NextFunction): voi
     .then(() => next())
     .catch((err) => {
       if (err instanceof Error) {
-        return next();
+        return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
       }
       res.status(429).json({ success: false, statusCode: 429, message: 'Too many OTP requests, try again after 15 minutes.' });
     });

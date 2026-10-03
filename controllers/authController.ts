@@ -4,7 +4,7 @@ import prisma from '../config/prisma';
 import { registerSchema, loginSchema } from '../validators/authValidators';
 import { ApiError } from '../utils/ApiError';
 import { sendSuccess } from '../utils/apiResponse';
-import { issueTokens, rotateRefreshToken, revokeRefreshToken } from '../services/tokenService';
+import { issueTokens, rotateRefreshToken, revokeRefreshToken, revokeAllSessions } from '../services/tokenService';
 import { refreshCookieOptions } from '../utils/cookieOptions';
 import { loginRateLimiter } from '../middlewares/rateLimiter';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -49,6 +49,21 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
   });
 });
 
+const handleFailedLogin = async (userId: string, currentAttempts: number) => {
+  const newAttempts = currentAttempts + 1;
+  let lockedUntil = null;
+  if (newAttempts >= 5) {
+    lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 mins lock
+  }
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      failedLoginAttempts: newAttempts,
+      lockedUntil,
+    },
+  });
+};
+
 export const login = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const { error, value } = loginSchema.validate(req.body);
   if (error) throw new ApiError(400, error.details[0].message);
@@ -62,14 +77,20 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
     throw new ApiError(401, 'Invalid credentials');
   }
 
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    throw new ApiError(403, 'Account is temporarily locked due to multiple failed login attempts. Please try again later.');
+  }
+
   if (!user.passwordHash) {
     await loginRateLimiter.consume(req.ip || '127.0.0.1').catch(() => {});
+    await handleFailedLogin(user.id, user.failedLoginAttempts);
     throw new ApiError(401, 'Invalid credentials');
   }
 
   const isMatch = await bcrypt.compare(password, user.passwordHash);
   if (!isMatch) {
     await loginRateLimiter.consume(req.ip || '127.0.0.1').catch(() => {});
+    await handleFailedLogin(user.id, user.failedLoginAttempts);
     throw new ApiError(401, 'Invalid credentials');
   }
 
@@ -80,7 +101,11 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
 
   await prisma.user.update({
     where: { id: user.id },
-    data: { lastLogin: new Date() },
+    data: { 
+      lastLogin: new Date(),
+      failedLoginAttempts: 0,
+      lockedUntil: null
+    },
   });
 
   const { accessToken, refreshToken } = await issueTokens(user, req);
@@ -142,6 +167,14 @@ export const logout = asyncHandler(async (req: Request, res: Response, next: Nex
   res.clearCookie('refreshToken', refreshCookieOptions);
 
   return sendSuccess(res, 200, 'Logged out successfully');
+});
+
+export const logoutAll = asyncHandler(async (req: any, res: Response, next: NextFunction) => {
+  if (req.user && req.user.id) {
+    await revokeAllSessions(req.user.id);
+  }
+  res.clearCookie('refreshToken', refreshCookieOptions);
+  return sendSuccess(res, 200, 'Logged out of all sessions successfully');
 });
 
 export const getMe = asyncHandler(async (req: any, res: Response, next: NextFunction) => {
