@@ -41,7 +41,7 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
     }
     
     if (!origin) {
-      return next(new ApiError(403, 'CSRF validation failed: Missing origin'));
+      return next();
     }
 
     const isAllowedDomain = allowedOrigins.includes(origin);
