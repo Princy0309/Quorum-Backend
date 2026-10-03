@@ -14,7 +14,7 @@ const startServer = async (): Promise<void> => {
     console.log('Database connected');
 
     const PORT = process.env.PORT || 5000;
-    server = app.listen(PORT, () => {
+    server = app.listen(Number(PORT), '0.0.0.0', () => {
       console.log(`Quorum server running on port ${PORT}`);
     });
   } catch (err) {
