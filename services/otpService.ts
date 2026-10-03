@@ -8,10 +8,9 @@ const OTP_TTL_SECONDS = parseInt(process.env.OTP_TTL_SECONDS || '600', 10);
 export const storeAndSendOTP = async (
   email: string,
   redisKey: string,
-  emailType: 'verification' | 'reset'
-): Promise<boolean> => {
-  // Cooldown check (30 seconds)
-  const existing = await redis.get(redisKey);
+  emailType: 'verification' | 'reset',
+  payload?: any
+): Promise<boolean> => {  const existing = await redis.get(redisKey);
   if (existing) {
     try {
       const parsed = JSON.parse(existing);
@@ -25,7 +24,7 @@ export const storeAndSendOTP = async (
 
   await redis.set(
     redisKey,
-    JSON.stringify({ codeHash, attempts: 0, createdAt: Date.now() }),
+    JSON.stringify({ codeHash, attempts: 0, createdAt: Date.now(), payload }),
     'EX',
     OTP_TTL_SECONDS
   );
@@ -37,13 +36,13 @@ export const storeAndSendOTP = async (
 export const verifyOTPFromRedis = async (
   redisKey: string,
   otp: string
-): Promise<{ success: boolean; message: string }> => {
+): Promise<{ success: boolean; message: string; payload?: any }> => {
   const inputHash = hashToken(otp);
 
   const luaScript = `
     local raw = redis.call('GET', KEYS[1])
     if not raw then
-      return 'EXPIRED'
+      return cjson.encode({ status = 'EXPIRED' })
     end
 
     local data = cjson.decode(raw)
@@ -52,33 +51,34 @@ export const verifyOTPFromRedis = async (
 
     if attempts >= 5 then
       redis.call('DEL', KEYS[1])
-      return 'TOO_MANY_ATTEMPTS'
+      return cjson.encode({ status = 'TOO_MANY_ATTEMPTS' })
     end
 
     if ARGV[1] == storedHash then
       redis.call('DEL', KEYS[1])
-      return 'SUCCESS'
+      return cjson.encode({ status = 'SUCCESS', payload = data.payload })
     else
       data.attempts = attempts + 1
       redis.call('SET', KEYS[1], cjson.encode(data), 'KEEPTTL')
-      return tostring(4 - attempts)
+      return cjson.encode({ status = tostring(4 - attempts) })
     end
   `;
 
-  const result = await redis.eval(luaScript, 1, redisKey, inputHash);
+  const resultRaw = await redis.eval(luaScript, 1, redisKey, inputHash) as string;
+  const result = JSON.parse(resultRaw);
 
-  if (result === 'EXPIRED') {
+  if (result.status === 'EXPIRED') {
     return { success: false, message: 'OTP expired or not found. Please request a new one.' };
   }
-  if (result === 'TOO_MANY_ATTEMPTS') {
+  if (result.status === 'TOO_MANY_ATTEMPTS') {
     return { success: false, message: 'Too many failed attempts. Please request a new OTP.' };
   }
-  if (result === 'SUCCESS') {
-    return { success: true, message: 'OTP verified successfully.' };
+  if (result.status === 'SUCCESS') {
+    return { success: true, message: 'OTP verified successfully.', payload: result.payload };
   }
   
   return {
     success: false,
-    message: `Incorrect OTP. You have ${result} attempts remaining.`,
+    message: `Incorrect OTP. You have ${result.status} attempts remaining.`,
   };
 };

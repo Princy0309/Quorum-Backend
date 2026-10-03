@@ -26,12 +26,6 @@ const swaggerDocument = {
         bearerFormat: 'JWT',
         description: 'Enter your Bearer Access Token in the format: Bearer <token>',
       },
-      RefreshTokenHeader: {
-        type: 'apiKey',
-        in: 'header',
-        name: 'x-refresh-token',
-        description: 'Pass your signed JWT Refresh Token in the x-refresh-token request header.',
-      },
     },
   },
   paths: {
@@ -69,7 +63,7 @@ const swaggerDocument = {
       post: {
         tags: ['Authentication'],
         summary: 'Login user',
-        description: 'Authenticates credentials and sets an HttpOnly, Secure refreshToken cookie for web clients. Mobile clients can pass x-client-type: mobile header to receive refreshToken in response headers and JSON body.',
+        description: 'Authenticates credentials and sets an HttpOnly, Secure refreshToken cookie for web clients. Mobile clients can pass x-client-platform: mobile header to receive refreshToken in response JSON body.',
         requestBody: {
           required: true,
           content: {
@@ -99,16 +93,29 @@ const swaggerDocument = {
       post: {
         tags: ['Authentication'],
         summary: 'Rotate refresh token',
-        description: 'Rotates active refresh token from HttpOnly cookie (for web browsers) or x-refresh-token header (for mobile clients with x-client-type: mobile) and returns a new access token.',
+        description: 'Rotates active refresh token from HttpOnly cookie (for web browsers) or JSON body (for mobile clients with x-client-platform: mobile) and returns a new access token.',
         parameters: [
           {
-            name: 'x-client-type',
+            name: 'x-client-platform',
             in: 'header',
             required: false,
             schema: { type: 'string' },
-            description: 'Specify "mobile" or "native" for non-browser mobile app requests',
+            description: 'Specify "mobile" for non-browser mobile app requests',
           },
         ],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  refreshToken: { type: 'string', description: 'Refresh token (required for mobile clients)' },
+                },
+              },
+            },
+          },
+        },
         responses: {
           200: {
             description: 'Token refreshed successfully. Sets updated HttpOnly refreshToken cookie.',
@@ -121,14 +128,14 @@ const swaggerDocument = {
       post: {
         tags: ['Authentication'],
         summary: 'Logout user',
-        description: 'Revokes the active refresh token provided in x-refresh-token header or body.',
+        description: 'Revokes the active refresh token provided in HttpOnly cookie or JSON body.',
         parameters: [
           {
-            name: 'x-refresh-token',
+            name: 'x-client-platform',
             in: 'header',
             required: false,
             schema: { type: 'string' },
-            description: 'Active JWT Refresh Token to revoke',
+            description: 'Specify "mobile" for non-browser mobile app requests',
           },
         ],
         requestBody: {

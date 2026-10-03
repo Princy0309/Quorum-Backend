@@ -4,30 +4,20 @@ import prisma from '../config/prisma';
 import redis from '../config/redis';
 import { hashToken } from '../utils/hashToken';
 import { ApiError } from '../utils/ApiError';
+import { encryptPayload, decryptPayload } from '../utils/encryption';
 
-const JWT_ISSUER = process.env.JWT_ISSUER || 'quorum-api';
-const JWT_AUDIENCE = process.env.JWT_AUDIENCE || 'quorum-app';
+import env from '../config/env';
 
-const parsedTTL = parseInt(process.env.REFRESH_TOKEN_TTL_SECONDS || '', 10);
-if (isNaN(parsedTTL) || parsedTTL <= 0) {
-  throw new Error('FATAL: REFRESH_TOKEN_TTL_SECONDS must be a valid positive integer');
-}
-const REFRESH_TTL_SECONDS = parsedTTL;
-
-if (!process.env.JWT_SECRET) {
-  throw new Error('FATAL: JWT_SECRET environment variable is missing');
-}
-const JWT_SECRET = process.env.JWT_SECRET;
-
-if (!process.env.JWT_REFRESH_SECRET) {
-  throw new Error('FATAL: JWT_REFRESH_SECRET environment variable is missing');
-}
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+const JWT_ISSUER = env.JWT_ISSUER;
+const JWT_AUDIENCE = env.JWT_AUDIENCE;
+const REFRESH_TTL_SECONDS = env.REFRESH_TOKEN_TTL_SECONDS;
+const JWT_SECRET = env.JWT_SECRET;
+const JWT_REFRESH_SECRET = env.JWT_REFRESH_SECRET;
 
 export interface AccessTokenPayload {
   id: string;
   type: 'access';
-  sid?: string;
+  sid: string;
   jti: string;
   iat?: number;
   exp?: number;
@@ -50,7 +40,7 @@ export const generateAccessToken = (userId: string, sid?: string): string => {
     algorithm: 'HS256',
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
-    expiresIn: (process.env.JWT_EXPIRES_IN as any) || '15m',
+    expiresIn: env.JWT_EXPIRES_IN || '15m',
   });
 };
 
@@ -59,10 +49,22 @@ export const verifyAccessToken = (token: string): AccessTokenPayload => {
     algorithms: ['HS256'],
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
-  }) as any;
+  });
 
+  if (typeof decoded !== 'object' || decoded === null) {
+    throw new Error('Invalid token payload');
+  }
   if (decoded.type !== 'access') {
     throw new Error('Invalid token type');
+  }
+  if (typeof decoded.id !== 'string' || !decoded.id.trim()) {
+    throw new Error('Missing or invalid id claim');
+  }
+  if (typeof decoded.jti !== 'string' || !decoded.jti.trim()) {
+    throw new Error('Missing or invalid jti claim');
+  }
+  if (typeof decoded.sid !== 'string' || !decoded.sid.trim()) {
+    throw new Error('Missing or invalid sid claim');
   }
 
   return decoded as AccessTokenPayload;
@@ -82,10 +84,19 @@ export const verifyRefreshToken = (token: string): RefreshTokenPayload => {
     algorithms: ['HS256'],
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
-  }) as any;
+  });
 
+  if (typeof decoded !== 'object' || decoded === null) {
+    throw new Error('Invalid token payload');
+  }
   if (decoded.type !== 'refresh') {
     throw new Error('Invalid token type');
+  }
+  if (typeof decoded.id !== 'string' || !decoded.id.trim()) {
+    throw new Error('Missing or invalid id claim');
+  }
+  if (typeof decoded.jti !== 'string' || !decoded.jti.trim()) {
+    throw new Error('Missing or invalid jti claim');
   }
 
   return decoded as RefreshTokenPayload;
@@ -109,15 +120,15 @@ export const saveSessionToDb = async (tokenHash: string, userId: string, device:
   }
 };
 
-export const saveSessionToRedis = async (tokenHash: string, userId: string, device: string) => {
+export const saveSessionToRedis = async (familyId: string, userId: string, device: string) => {
   try {
     await redis.set(
-      `refresh:${tokenHash}`,
+      `refresh:${familyId}`,
       JSON.stringify({ userId, device, createdAt: Date.now() }),
       'EX',
       REFRESH_TTL_SECONDS
     );
-    await redis.sadd(`user_sessions:${userId}`, tokenHash);
+    await redis.sadd(`user_sessions:${userId}`, familyId);
     await redis.expire(`user_sessions:${userId}`, REFRESH_TTL_SECONDS);
   } catch (err) {
     console.error('Failed to save RefreshToken session to Redis:', err);
@@ -125,10 +136,10 @@ export const saveSessionToRedis = async (tokenHash: string, userId: string, devi
   }
 };
 
-export const deleteSessionFromRedis = async (tokenHash: string, userId: string) => {
+export const deleteSessionFromRedis = async (familyId: string, userId: string) => {
   try {
-    await redis.del(`refresh:${tokenHash}`);
-    await redis.srem(`user_sessions:${userId}`, tokenHash);
+    await redis.del(`refresh:${familyId}`);
+    await redis.srem(`user_sessions:${userId}`, familyId);
   } catch (err) {
     console.error('Failed to remove session from Redis:', err);
     throw new ApiError(500, 'Internal Server Error');
@@ -139,14 +150,16 @@ export const issueTokens = async (user: { id: string }, req?: any): Promise<{ ac
   const device = req?.headers?.['user-agent']?.slice(0, 200) || 'unknown';
   const refreshToken = generateRefreshToken(user.id);
   const tokenHash = hashToken(refreshToken);
-  const accessToken = generateAccessToken(user.id, tokenHash);
+  
+  const familyId = crypto.randomUUID();
+  const accessToken = generateAccessToken(user.id, familyId);
 
   const expiresAt = new Date(Date.now() + REFRESH_TTL_SECONDS * 1000);
 
-  await saveSessionToDb(tokenHash, user.id, device, expiresAt);
+  await saveSessionToDb(tokenHash, user.id, device, expiresAt, familyId);
 
   try {
-    await saveSessionToRedis(tokenHash, user.id, device);
+    await saveSessionToRedis(familyId, user.id, device);
   } catch (err) {
     console.error('Rolling back DB after Redis failure');
     await prisma.refreshToken.delete({ where: { tokenHash } }).catch(e => console.error('Rollback failed:', e));
@@ -156,13 +169,7 @@ export const issueTokens = async (user: { id: string }, req?: any): Promise<{ ac
   return { accessToken, refreshToken };
 };
 
-const performReuseRevocation = async (storedToken: any) => {
-  const familyTokens = await prisma.refreshToken.findMany({
-    where: { familyId: storedToken.familyId, revokedAt: null },
-    select: { tokenHash: true }
-  });
-  const hashesToRevoke = familyTokens.map(t => t.tokenHash);
-
+const performReuseRevocation = async (storedToken: any) => {
   await prisma.refreshToken.updateMany({
     where: { familyId: storedToken.familyId, revokedAt: null },
     data: { revokedAt: new Date() },
@@ -171,11 +178,11 @@ const performReuseRevocation = async (storedToken: any) => {
   console.warn(`[Security] Token reuse detected for user ${storedToken.userId}. Session family revoked.`);
   
   try {
-    if (hashesToRevoke.length > 0) {
-      await redis.del(...hashesToRevoke.map((h) => `refresh:${h}`));
-      await redis.srem(`user_sessions:${storedToken.userId}`, ...hashesToRevoke);
-    }
-  } catch (redisErr) {}
+    await redis.del(`refresh:${storedToken.familyId}`);
+    await redis.srem(`user_sessions:${storedToken.userId}`, storedToken.familyId);
+  } catch (redisErr) {
+    console.error(`[Security] Failed to remove revoked family from Redis for user ${storedToken.userId}. DB revocation succeeded.`, redisErr);
+  }
 };
 
 export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{ accessToken: string; refreshToken: string }> => {
@@ -192,43 +199,37 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
     include: { user: true },
   });
 
-  const GRACE_PERIOD_MS = 20000;
-  let isConcurrentRefresh = false;
-
   if (!storedToken || storedToken.expiresAt < new Date()) {
     throw new ApiError(401, 'Invalid or expired refresh token');
   }
 
-  if (storedToken.revokedAt) {
-    const timeSinceRevoked = Date.now() - storedToken.revokedAt.getTime();
-    if (timeSinceRevoked > GRACE_PERIOD_MS) {
-      await performReuseRevocation(storedToken);
-      throw new ApiError(401, 'Invalid or expired refresh token');
-    } else {
-      isConcurrentRefresh = true;
-    }
+  if (storedToken.revokedAt) {    const idempotencyKey = `rotate_result:${tokenHash}`;
+    const cachedResult = await redis.get(idempotencyKey);
+    if (cachedResult) {
+      try {
+        const parsed = decryptPayload(rawToken, cachedResult);
+        return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
+      } catch (e) {
+        throw new ApiError(401, 'Invalid or expired refresh token');
+      }
+    }    await performReuseRevocation(storedToken);
+    throw new ApiError(401, 'Invalid or expired refresh token');
   }
 
   let result: any;
   try {
-    result = await prisma.$transaction(async (tx) => {
-      if (!isConcurrentRefresh) {
+    result = await prisma.$transaction(async (tx) => {      const { count } = await tx.refreshToken.updateMany({
+        where: { id: storedToken.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
 
-        const { count } = await tx.refreshToken.updateMany({
-          where: { id: storedToken.id, revokedAt: null },
-          data: { revokedAt: new Date() },
-        });
-
-        if (count === 0) {
-
-          isConcurrentRefresh = true;
-        }
+      if (count === 0) {        throw new Error('CONCURRENT_ROTATION');
       }
 
       const device = req?.headers?.['user-agent']?.slice(0, 200) || storedToken.device;
       const refreshToken = generateRefreshToken(storedToken.userId);
       const newTokenHash = hashToken(refreshToken);
-      const accessToken = generateAccessToken(storedToken.userId, newTokenHash);
+      const accessToken = generateAccessToken(storedToken.userId, storedToken.familyId);
       const expiresAt = new Date(Date.now() + REFRESH_TTL_SECONDS * 1000);
 
       await tx.refreshToken.create({
@@ -244,19 +245,32 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
       return { accessToken, refreshToken, newTokenHash, device };
     });
   } catch (err: any) {
+    if (err.message === 'CONCURRENT_ROTATION') {      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+        const retryCache = await redis.get(idempotencyKey);
+        if (retryCache) {
+          try {
+            const parsed = decryptPayload(rawToken, retryCache);
+            return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
+          } catch (e) {
+            throw new ApiError(401, 'Invalid or expired refresh token');
+          }
+        }
+      }
+      throw new ApiError(401, 'Invalid or expired refresh token');
+    }
     throw err;
   }
 
   try {
-    await redis.del(`refresh:${tokenHash}`);
-    await redis.srem(`user_sessions:${storedToken.userId}`, tokenHash);
+    await saveSessionToRedis(storedToken.familyId, storedToken.userId, result.device);    const encryptedCache = encryptPayload(rawToken, {
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken
+    });
+    await redis.set(idempotencyKey, encryptedCache, 'EX', 20);
     
-    await saveSessionToRedis(result.newTokenHash, storedToken.userId, result.device);
   } catch (err) {
-    console.error('Failed to update Redis during rotation, performing DB compensation:', err);
-    await prisma.refreshToken.delete({ where: { tokenHash: result.newTokenHash } }).catch(e => console.error('Compensation failed:', e));
-    throw new ApiError(500, 'Internal Server Error');
-  }
+    console.error('Failed to update Redis during rotation. DB transaction succeeded. Client will receive tokens and can recover via DB.', err);  }
 
   return { accessToken: result.accessToken, refreshToken: result.refreshToken };
 };
@@ -264,30 +278,48 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
 export const revokeRefreshToken = async (rawToken: string): Promise<void> => {
   const tokenHash = hashToken(rawToken);
 
+  let familyId: string | undefined;
   try {
-    await prisma.refreshToken.updateMany({
-      where: { tokenHash, revokedAt: null },
-      data: { revokedAt: new Date() },
+    const token = await prisma.refreshToken.findUnique({
+      where: { tokenHash },
+      select: { familyId: true }
     });
+    
+    if (token) {
+      familyId = token.familyId;
+      await prisma.refreshToken.updateMany({
+        where: { familyId: token.familyId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
   } catch (err) {
-    console.error('Failed to revoke RefreshToken in database:', err);
+    console.error('Failed to revoke session family in database:', err);
     throw new ApiError(500, 'Internal Server Error');
   }
 
-  try {
-    const raw = await redis.get(`refresh:${tokenHash}`);
-    if (raw) {
-      const { userId } = JSON.parse(raw);
-      await deleteSessionFromRedis(tokenHash, userId);
+  if (familyId) {
+    try {
+      const raw = await redis.get(`refresh:${familyId}`);
+      if (raw) {
+        const { userId } = JSON.parse(raw);
+        await deleteSessionFromRedis(familyId, userId);
+      }
+    } catch (err) {
+      console.error('Failed to revoke session family in Redis:', err);
+      throw new ApiError(500, 'Internal Server Error');
     }
-  } catch (err) {
-    console.error('Failed to revoke RefreshToken in Redis:', err);
-    throw new ApiError(500, 'Internal Server Error');
   }
 };
 
 export const revokeAllSessions = async (userId: string): Promise<void> => {
+  let dbFamilyIds: string[] = [];
   try {
+    const activeSessions = await prisma.refreshToken.findMany({
+      where: { userId, revokedAt: null },
+      select: { familyId: true },
+    });
+    dbFamilyIds = activeSessions.map(s => s.familyId);
+
     await prisma.refreshToken.updateMany({
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
@@ -298,9 +330,11 @@ export const revokeAllSessions = async (userId: string): Promise<void> => {
   }
 
   try {
-    const hashes = await redis.smembers(`user_sessions:${userId}`);
-    if (hashes.length) {
-      await redis.del(...hashes.map((h) => `refresh:${h}`));
+    const redisHashes = await redis.smembers(`user_sessions:${userId}`);
+    const allFamilyIds = Array.from(new Set([...redisHashes, ...dbFamilyIds]));
+    
+    if (allFamilyIds.length > 0) {
+      await redis.del(...allFamilyIds.map((h) => `refresh:${h}`));
     }
     await redis.del(`user_sessions:${userId}`);
   } catch (err) {

@@ -70,16 +70,20 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response, next
   if (!result.success) throw new ApiError(400, result.message);
 
   try {
+    const updateData: any = { isEmailVerified: true };
+    if (result.payload && result.payload.name && result.payload.passwordHash) {
+      updateData.name = result.payload.name;
+      updateData.passwordHash = result.payload.passwordHash;
+    }
+
     const updatedUser = await prisma.user.update({
       where: { id: user.id },
-      data: { isEmailVerified: true },
+      data: updateData,
     });
 
     const { accessToken, refreshToken } = await issueTokens(updatedUser, req);
 
-    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-    res.setHeader('x-refresh-token', refreshToken);
-
+    const isMobile = req.headers['x-client-platform'] === 'mobile';
     const responseData: any = {
       accessToken,
       user: {
@@ -90,6 +94,12 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response, next
         isEmailVerified: true,
       },
     };
+
+    if (isMobile) {
+      responseData.refreshToken = refreshToken;
+    } else {
+      res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+    }
 
     return sendSuccess(res, 200, 'Email verified successfully', responseData);
   } catch (err: unknown) {
