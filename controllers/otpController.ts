@@ -6,7 +6,7 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { ApiError } from '../utils/ApiError';
 import { sendSuccess } from '../utils/apiResponse';
 import { storeAndSendOTP, verifyOTPFromRedis } from '../services/otpService';
-import { issueTokens } from '../services/tokenService';
+import { issueTokens, revokeAllSessions } from '../services/tokenService';
 import { refreshCookieOptions } from '../utils/cookieOptions';
 
 import { verifyEmailSchema, sendResetSchema, resetPasswordSchema } from '../validators/otpValidators';
@@ -125,6 +125,8 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response, ne
     where: { id: user.id },
     data: { passwordHash },
   });
+
+  await revokeAllSessions(user.id);
 
   return sendSuccess(res, 200, 'Password reset successfully. Please log in with your new password.');
 });
