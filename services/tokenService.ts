@@ -169,7 +169,8 @@ export const issueTokens = async (user: { id: string }, req?: any): Promise<{ ac
   return { accessToken, refreshToken };
 };
 
-const performReuseRevocation = async (storedToken: any) => {
+const performReuseRevocation = async (storedToken: any) => {
+
   await prisma.refreshToken.updateMany({
     where: { familyId: storedToken.familyId, revokedAt: null },
     data: { revokedAt: new Date() },
@@ -203,7 +204,9 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
     throw new ApiError(401, 'Invalid or expired refresh token');
   }
 
-  if (storedToken.revokedAt) {    const idempotencyKey = `rotate_result:${tokenHash}`;
+  const idempotencyKey = `rotate_result:${tokenHash}`;
+
+  if (storedToken.revokedAt) {
     const cachedResult = await redis.get(idempotencyKey);
     if (cachedResult) {
       try {
@@ -212,18 +215,21 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
       } catch (e) {
         throw new ApiError(401, 'Invalid or expired refresh token');
       }
-    }    await performReuseRevocation(storedToken);
+    }
+    await performReuseRevocation(storedToken);
     throw new ApiError(401, 'Invalid or expired refresh token');
   }
 
   let result: any;
   try {
-    result = await prisma.$transaction(async (tx) => {      const { count } = await tx.refreshToken.updateMany({
+    result = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.refreshToken.updateMany({
         where: { id: storedToken.id, revokedAt: null },
         data: { revokedAt: new Date() },
       });
 
-      if (count === 0) {        throw new Error('CONCURRENT_ROTATION');
+      if (count === 0) {
+        throw new Error('CONCURRENT_ROTATION');
       }
 
       const device = req?.headers?.['user-agent']?.slice(0, 200) || storedToken.device;
@@ -245,7 +251,8 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
       return { accessToken, refreshToken, newTokenHash, device };
     });
   } catch (err: any) {
-    if (err.message === 'CONCURRENT_ROTATION') {      for (let i = 0; i < 10; i++) {
+    if (err.message === 'CONCURRENT_ROTATION') {
+      for (let i = 0; i < 10; i++) {
         await new Promise(resolve => setTimeout(resolve, 300));
         const retryCache = await redis.get(idempotencyKey);
         if (retryCache) {
@@ -263,14 +270,16 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
   }
 
   try {
-    await saveSessionToRedis(storedToken.familyId, storedToken.userId, result.device);    const encryptedCache = encryptPayload(rawToken, {
+    await saveSessionToRedis(storedToken.familyId, storedToken.userId, result.device);
+    const encryptedCache = encryptPayload(rawToken, {
       accessToken: result.accessToken,
       refreshToken: result.refreshToken
     });
     await redis.set(idempotencyKey, encryptedCache, 'EX', 20);
     
   } catch (err) {
-    console.error('Failed to update Redis during rotation. DB transaction succeeded. Client will receive tokens and can recover via DB.', err);  }
+    console.error('Failed to update Redis during rotation. DB transaction succeeded. Client will receive tokens and can recover via DB.', err);
+  }
 
   return { accessToken: result.accessToken, refreshToken: result.refreshToken };
 };
