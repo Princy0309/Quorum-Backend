@@ -7,7 +7,7 @@ export const refreshCookieOptions: CookieOptions = {
   secure: isProduction,
   sameSite: isProduction ? 'none' : 'lax',
   maxAge: (parseInt(process.env.REFRESH_TOKEN_TTL_SECONDS || '', 10) || 7 * 24 * 60 * 60) * 1000,
-  path: '/',
+  path: '/api/auth',
 };
 
 export default { refreshCookieOptions };

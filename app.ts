@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
+import expressWinston from 'express-winston';
 
 dotenv.config();
 
@@ -10,10 +11,12 @@ import authRoutes from './routes/authRoutes';
 import otpRoutes from './routes/otpRoutes';
 import errorHandler from './middlewares/errorHandler';
 import verifyCSRF from './middlewares/csrfProtection';
+import logger from './utils/logger';
 
 const app = express();
 
-app.set('trust proxy', 1);
+const trustProxy = process.env.TRUST_PROXY || 1;
+app.set('trust proxy', isNaN(Number(trustProxy)) ? trustProxy : Number(trustProxy));
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
@@ -48,8 +51,20 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(verifyCSRF);
 
+app.use(expressWinston.logger({
+  winstonInstance: logger,
+  meta: true,
+  msg: "HTTP {{req.method}} {{req.url}}",
+  expressFormat: true,
+  colorize: false,
+  ignoreRoute: function (req, res) { return req.path === '/health'; }
+}));
+
 app.use('/api/auth', authRoutes);
 app.use('/api/otp', otpRoutes);
+app.get('/api/csrf-token', (req: Request, res: Response) => {
+  res.json({ csrfToken: res.locals.csrfToken || req.cookies['XSRF-TOKEN'] });
+});
 setupSwagger(app);
 
 app.get('/health', (req: Request, res: Response) => {

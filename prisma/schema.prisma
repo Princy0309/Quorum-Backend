@@ -30,6 +30,7 @@ model RefreshToken {
   id        String    @id @default(uuid())
   tokenHash String    @unique
   userId    String
+  familyId  String    @default(uuid())
   device    String    @default("unknown")
   expiresAt DateTime
   revokedAt DateTime?
@@ -37,6 +38,7 @@ model RefreshToken {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([familyId])
 }
 
 model PasswordResetToken {
