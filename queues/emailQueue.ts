@@ -1,5 +1,5 @@
 import { Queue, Worker, Job } from 'bullmq';
-import IORedis from 'ioredis';
+import { Redis as IORedis } from 'ioredis';
 
 import { sendOTPEmail } from '../services/emailService.js';
 

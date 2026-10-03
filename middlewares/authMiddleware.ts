@@ -2,10 +2,10 @@ import { Request, Response, NextFunction } from "express";
 import {
   verifyAccessToken,
   AccessTokenPayload,
-} from "../services/tokenService";
-import { ApiError } from "../utils/ApiError";
-import prisma from "../config/prisma";
-import redis from "../config/redis";
+} from "../services/tokenService.js";
+import { ApiError } from "../utils/ApiError.js";
+import prisma from "../config/prisma.js";
+import redis from "../config/redis.js";
 import { User } from "@prisma/client";
 
 declare global {

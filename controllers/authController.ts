@@ -1,13 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
-import prisma from '../config/prisma';
-import { registerSchema, loginSchema } from '../validators/authValidators';
-import { ApiError } from '../utils/ApiError';
-import { sendSuccess } from '../utils/apiResponse';
-import { rotateRefreshToken, revokeRefreshToken, revokeAllSessions } from '../services/tokenService';
-import { registerUser, loginUser } from '../services/authService';
-import { refreshCookieOptions } from '../utils/cookieOptions';
-import { asyncHandler } from '../utils/asyncHandler';
+import prisma from '../config/prisma.js';
+import { registerSchema, loginSchema } from '../validators/authValidators.js';
+import { ApiError } from '../utils/ApiError.js';
+import { sendSuccess } from '../utils/apiResponse.js';
+import { rotateRefreshToken, revokeRefreshToken, revokeAllSessions } from '../services/tokenService.js';
+import { registerUser, loginUser } from '../services/authService.js';
+import { refreshCookieOptions } from '../utils/cookieOptions.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 export const register = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const { name, email, password } = req.body;
