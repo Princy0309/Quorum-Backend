@@ -7,9 +7,18 @@ const JWT_ISSUER = process.env.JWT_ISSUER || 'quorum-api';
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE || 'quorum-app';
 const REFRESH_TTL_SECONDS = parseInt(process.env.REFRESH_TOKEN_TTL_SECONDS || '', 10) || 7 * 24 * 60 * 60;
 
+if (!process.env.JWT_SECRET) {
+  throw new Error('FATAL: JWT_SECRET environment variable is missing');
+}
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!process.env.JWT_REFRESH_SECRET) {
+  throw new Error('FATAL: JWT_REFRESH_SECRET environment variable is missing');
+}
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+
 export const generateAccessToken = (userId: string): string => {
-  const secret = process.env.JWT_SECRET || 'default_jwt_secret';
-  return jwt.sign({ id: userId }, secret, {
+  return jwt.sign({ id: userId }, JWT_SECRET, {
     algorithm: 'HS256',
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
@@ -18,8 +27,7 @@ export const generateAccessToken = (userId: string): string => {
 };
 
 export const verifyAccessToken = (token: string): any => {
-  const secret = process.env.JWT_SECRET || 'default_jwt_secret';
-  return jwt.verify(token, secret, {
+  return jwt.verify(token, JWT_SECRET, {
     algorithms: ['HS256'],
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
@@ -27,8 +35,7 @@ export const verifyAccessToken = (token: string): any => {
 };
 
 export const generateRefreshToken = (userId: string): string => {
-  const secret = process.env.JWT_REFRESH_SECRET || 'fallback_refresh_secret';
-  return jwt.sign({ id: userId, type: 'refresh' }, secret, {
+  return jwt.sign({ id: userId, type: 'refresh' }, JWT_REFRESH_SECRET, {
     algorithm: 'HS256',
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
@@ -37,8 +44,7 @@ export const generateRefreshToken = (userId: string): string => {
 };
 
 export const verifyRefreshToken = (token: string): any => {
-  const secret = process.env.JWT_REFRESH_SECRET || 'fallback_refresh_secret';
-  return jwt.verify(token, secret, {
+  return jwt.verify(token, JWT_REFRESH_SECRET, {
     algorithms: ['HS256'],
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
