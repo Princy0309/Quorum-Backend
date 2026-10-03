@@ -21,6 +21,14 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+             # 0. Enable 2GB Swap space so EC2 never runs out of RAM
+             if [ ! -f /swapfile ]; then
+               sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+               sudo chmod 600 /swapfile
+               sudo mkswap /swapfile
+               sudo swapon /swapfile
+             fi
+
              # 1. Kill any ghost processes running on port 5000 outside Docker
              command -v pm2 >/dev/null 2>&1 && pm2 delete all || true
              sudo fuser -k 5000/tcp || true
