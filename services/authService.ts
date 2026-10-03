@@ -47,13 +47,10 @@ export const registerUser = async (name: string, email: string, passwordUnHashed
       return { isNew: false, isVerified: true };
     }
 
-    const user = await prisma.user.update({
-      where: { id: existingUser.id },
-      data: { name, passwordHash },
-    });
-
+    // Do NOT overwrite the database yet! Store the pending name and hash in Redis.
+    // This prevents pre-hijacking where an attacker registers a victim's email and overwrites their password.
     try {
-      await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
+      await storeAndSendOTP(existingUser.email, `otp:verify:${existingUser.id}`, 'verification', { name, passwordHash });
     } catch (err) {
       console.error('Failed to send OTP during registration (existing unverified):', err);
     }

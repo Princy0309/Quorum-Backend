@@ -42,7 +42,7 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
 
 export const refreshToken = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const isMobile = req.headers['x-client-platform'] === 'mobile';
-  const incomingToken = isMobile ? req.body.refreshToken : req.cookies?.refreshToken;
+  const incomingToken = isMobile ? req.body?.refreshToken : req.cookies?.refreshToken;
 
   if (!incomingToken) throw new ApiError(401, 'Refresh token required');
 
@@ -70,7 +70,7 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
 
 export const logout = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const isMobile = req.headers['x-client-platform'] === 'mobile';
-  const incomingToken = isMobile ? req.body.refreshToken : req.cookies?.refreshToken;
+  const incomingToken = isMobile ? req.body?.refreshToken : req.cookies?.refreshToken;
 
   if (incomingToken) {
     await revokeRefreshToken(incomingToken);

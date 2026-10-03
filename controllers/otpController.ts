@@ -70,9 +70,15 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response, next
   if (!result.success) throw new ApiError(400, result.message);
 
   try {
+    const updateData: any = { isEmailVerified: true };
+    if (result.payload && result.payload.name && result.payload.passwordHash) {
+      updateData.name = result.payload.name;
+      updateData.passwordHash = result.payload.passwordHash;
+    }
+
     const updatedUser = await prisma.user.update({
       where: { id: user.id },
-      data: { isEmailVerified: true },
+      data: updateData,
     });
 
     const { accessToken, refreshToken } = await issueTokens(updatedUser, req);
