@@ -28,7 +28,7 @@ export const hashEmail = (email: string) => {
 export const refreshRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
   keyPrefix: 'refresh_v2',
-  points: 50,
+  points: 20,
   duration: 15 * 60,
   blockDuration: 15 * 60,
 });
@@ -36,7 +36,7 @@ export const refreshRateLimiter = new RateLimiterRedis({
 export const registerRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
   keyPrefix: 'register_v2',
-  points: 50,
+  points: 5,
   duration: 60 * 60,
   blockDuration: 15 * 60,
 });
@@ -89,7 +89,7 @@ export const registerLimiter = (req: Request, res: Response, next: NextFunction)
 export const otpRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
   keyPrefix: 'otp_v2',
-  points: 30,
+  points: 10,
   duration: 15 * 60,
   blockDuration: 5 * 60,
 });
