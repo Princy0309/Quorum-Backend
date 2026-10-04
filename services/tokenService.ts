@@ -206,6 +206,10 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
     throw new ApiError(401, 'Invalid or expired refresh token');
   }
 
+  if (storedToken.user.lockedUntil && storedToken.user.lockedUntil > new Date()) {
+    throw new ApiError(403, 'Account is temporarily locked due to multiple failed login attempts. Please try again later.');
+  }
+
   if (storedToken.revokedAt) {
     if (storedToken.rotationCache) {
       try {

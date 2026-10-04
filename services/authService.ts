@@ -9,28 +9,32 @@ import { User } from '@prisma/client';
 
 export const handleFailedLogin = async (userId: string) => {
   await prisma.$transaction(async (tx) => {
-    const user = await tx.user.findUnique({ where: { id: userId } });
+    const rows = await tx.$queryRaw<{id: string, failedLoginAttempts: number, lockedUntil: Date | null}[]>`
+      SELECT id, "failedLoginAttempts", "lockedUntil" FROM "User" WHERE id = ${userId} FOR UPDATE
+    `;
+    const user = rows[0];
     if (!user) return;
 
     let attempts = user.failedLoginAttempts;
-    if (user.lockedUntil && user.lockedUntil <= new Date()) {
+    let newLockedUntil = user.lockedUntil;
+
+    if (user.lockedUntil && new Date(user.lockedUntil).getTime() <= Date.now()) {
       attempts = 0;
+      newLockedUntil = null;
     }
 
     attempts += 1;
 
-    const updateData: any = { failedLoginAttempts: attempts };
-    if (user.lockedUntil && user.lockedUntil <= new Date()) {
-      updateData.lockedUntil = null;
-    }
-
     if (attempts >= 5) {
-      updateData.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+      newLockedUntil = new Date(Date.now() + 15 * 60 * 1000);
     }
 
     await tx.user.update({
       where: { id: userId },
-      data: updateData,
+      data: { 
+        failedLoginAttempts: attempts,
+        lockedUntil: newLockedUntil
+      },
     });
   });
 };

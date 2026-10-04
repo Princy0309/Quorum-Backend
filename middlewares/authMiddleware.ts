@@ -84,7 +84,7 @@ export const authMiddleware = async (
       return next(new ApiError(401, "User no longer exists"));
     }
     if (user.lockedUntil && user.lockedUntil > new Date()) {
-      return next(new ApiError(403, "Account is temporarily locked due to ,ultiple failed login attemots. Please try again later"));
+      return next(new ApiError(403, "Account is temporarily locked due to multiple failed login attempts. Please try again later."));
     }
     const { passwordHash, ...safeUser } = user;
     req.user = safeUser;
@@ -180,6 +180,9 @@ export const optionalAuth = async (
     try {
       const user = await prisma.user.findUnique({ where: { id: decoded.id } });
       if (user) {
+        if (user.lockedUntil && user.lockedUntil > new Date()) {
+          return next(new ApiError(403, "Account is temporarily locked due to multiple failed login attempts. Please try again later."));
+        }
         const { passwordHash, ...safeUser } = user;
         req.user = safeUser;
       }
