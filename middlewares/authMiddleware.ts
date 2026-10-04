@@ -41,44 +41,30 @@ export const authMiddleware = async (
 
   let isSessionActive = false;
   try {
-    const isRedisActive = await redis.exists(`refresh:${decoded.sid}`);
-    if (isRedisActive) {
-      isSessionActive = true;
-    } else {
-      const dbSession = await prisma.refreshToken.findFirst({
-        where: { familyId: decoded.sid, revokedAt: null },
-      });
-      if (dbSession) {
-        const remainingSeconds = Math.floor((dbSession.expiresAt.getTime() - Date.now()) / 1000);
-        if (remainingSeconds > 0) {
-          isSessionActive = true;
-          Promise.all([
-            redis.set(
-              `refresh:${dbSession.familyId}`,
-              JSON.stringify({
-                userId: dbSession.userId,
-                device: dbSession.device,
-              }),
-              "EX",
-              remainingSeconds,
-            ),
-            redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
-            redis.expire(`user_sessions:${dbSession.userId}`, remainingSeconds),
-          ]).catch(() => {});
-        }
-      }
-    }
-  } catch (err) {
-    try {
-      const dbSession = await prisma.refreshToken.findFirst({
-        where: { familyId: decoded.sid, revokedAt: null },
-      });
-      if (dbSession) {
+    const dbSession = await prisma.refreshToken.findFirst({
+      where: { familyId: decoded.sid, revokedAt: null },
+    });
+    if (dbSession) {
+      const remainingSeconds = Math.floor((dbSession.expiresAt.getTime() - Date.now()) / 1000);
+      if (remainingSeconds > 0) {
         isSessionActive = true;
+        Promise.all([
+          redis.set(
+            `refresh:${dbSession.familyId}`,
+            JSON.stringify({
+              userId: dbSession.userId,
+              device: dbSession.device,
+            }),
+            "EX",
+            remainingSeconds,
+          ),
+          redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
+          redis.expire(`user_sessions:${dbSession.userId}`, remainingSeconds),
+        ]).catch(() => {});
       }
-    } catch (dbErr) {
-      return next(new ApiError(500, "Internal Server Error"));
     }
+  } catch (dbErr) {
+    return next(new ApiError(500, "Internal Server Error"));
   }
 
   if (!isSessionActive) {
@@ -150,44 +136,30 @@ export const optionalAuth = async (
 
   let isSessionValid = false;
   try {
-    const isRedisActive = await redis.exists(`refresh:${decoded.sid}`);
-    if (isRedisActive) {
-      isSessionValid = true;
-    } else {
-      const dbSession = await prisma.refreshToken.findFirst({
-        where: { familyId: decoded.sid, revokedAt: null },
-      });
-      if (dbSession) {
-        const remainingSeconds = Math.floor((dbSession.expiresAt.getTime() - Date.now()) / 1000);
-        if (remainingSeconds > 0) {
-          isSessionValid = true;
-          Promise.all([
-            redis.set(
-              `refresh:${dbSession.familyId}`,
-              JSON.stringify({
-                userId: dbSession.userId,
-                device: dbSession.device,
-              }),
-              "EX",
-              remainingSeconds,
-            ),
-            redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
-            redis.expire(`user_sessions:${dbSession.userId}`, remainingSeconds),
-          ]).catch(() => {});
-        }
-      }
-    }
-  } catch (err) {
-    try {
-      const dbSession = await prisma.refreshToken.findFirst({
-        where: { familyId: decoded.sid, revokedAt: null },
-      });
-      if (dbSession) {
+    const dbSession = await prisma.refreshToken.findFirst({
+      where: { familyId: decoded.sid, revokedAt: null },
+    });
+    if (dbSession) {
+      const remainingSeconds = Math.floor((dbSession.expiresAt.getTime() - Date.now()) / 1000);
+      if (remainingSeconds > 0) {
         isSessionValid = true;
+        Promise.all([
+          redis.set(
+            `refresh:${dbSession.familyId}`,
+            JSON.stringify({
+              userId: dbSession.userId,
+              device: dbSession.device,
+            }),
+            "EX",
+            remainingSeconds,
+          ),
+          redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
+          redis.expire(`user_sessions:${dbSession.userId}`, remainingSeconds),
+        ]).catch(() => {});
       }
-    } catch (dbErr) {
-      return next(new ApiError(500, "Internal Server Error"));
     }
+  } catch (dbErr) {
+    return next(new ApiError(500, "Internal Server Error"));
   }
 
   if (isSessionValid) {
