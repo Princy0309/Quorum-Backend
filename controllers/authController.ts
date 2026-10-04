@@ -4,7 +4,7 @@ import prisma from '../config/prisma.js';
 import { registerSchema, loginSchema } from '../validators/authValidators.js';
 import { ApiError } from '../utils/ApiError.js';
 import { sendSuccess } from '../utils/apiResponse.js';
-import { rotateRefreshToken, revokeRefreshToken, revokeAllSessions } from '../services/tokenService.js';
+import { rotateRefreshToken, revokeRefreshToken, revokeAllSessions, revokeAccessToken } from '../services/tokenService.js';
 import { registerUser, loginUser } from '../services/authService.js';
 import { refreshCookieOptions } from '../utils/cookieOptions.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -79,6 +79,12 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
 export const logout = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const isMobile = req.headers['x-client-platform'] === 'mobile';
   const incomingToken = isMobile ? req.body?.refreshToken : req.cookies?.refreshToken;
+  
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const accessToken = authHeader.split(' ')[1];
+    await revokeAccessToken(accessToken);
+  }
 
   if (incomingToken) {
     await revokeRefreshToken(incomingToken);
@@ -92,6 +98,12 @@ export const logout = asyncHandler(async (req: Request, res: Response, next: Nex
 });
 
 export const logoutAll = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const accessToken = authHeader.split(' ')[1];
+    await revokeAccessToken(accessToken);
+  }
+
   if (req.user && req.user.id) {
     await revokeAllSessions(req.user.id);
   }

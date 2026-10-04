@@ -33,6 +33,7 @@ model RefreshToken {
   device    String    @default("unknown")
   expiresAt DateTime
   revokedAt DateTime?
+  rotationCache String?
   createdAt DateTime  @default(now())
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 

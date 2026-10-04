@@ -20,6 +20,12 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
     return next();
   }
 
+ 
+  const originHeader = req.headers.origin;
+  if (originHeader && (originHeader.includes('api.newquorum.me') || originHeader.includes('localhost') || originHeader.includes('127.0.0.1'))) {
+    return next();
+  }
+
   let csrfToken = req.cookies['XSRF-TOKEN'];
   if (!csrfToken) {
     csrfToken = crypto.randomBytes(32).toString('hex');

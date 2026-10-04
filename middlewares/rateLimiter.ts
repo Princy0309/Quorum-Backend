@@ -60,7 +60,7 @@ export const loginLimiter = async (req: Request, res: Response, next: NextFuncti
     if (err.remainingPoints !== undefined) {
       return res.status(429).json({ success: false, statusCode: 429, message: 'Too many login attempts from this IP, try again after 15 minutes.' });
     }
-    next();
+    return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
   }
 };
 

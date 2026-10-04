@@ -41,14 +41,19 @@ export const authMiddleware = async (
 
   let isSessionActive = false;
   try {
-    const isRedisActive = await redis.exists(`refresh:${decoded.sid}`);
-    if (isRedisActive) {
-      isSessionActive = true;
-    } else {
-      const dbSession = await prisma.refreshToken.findFirst({
-        where: { familyId: decoded.sid, revokedAt: null },
-      });
-      if (dbSession) {
+    const isRevoked = await redis.exists(`revoked_access:${decoded.jti}`);
+    if (isRevoked) {
+      return next(new ApiError(401, "Token revoked"));
+    }
+  } catch (err) {}
+
+  try {
+    const dbSession = await prisma.refreshToken.findFirst({
+      where: { familyId: decoded.sid, revokedAt: null },
+    });
+    if (dbSession && dbSession.userId === decoded.id) {
+      const remainingSeconds = Math.floor((dbSession.expiresAt.getTime() - Date.now()) / 1000);
+      if (remainingSeconds > 0) {
         isSessionActive = true;
         Promise.all([
           redis.set(
@@ -58,24 +63,15 @@ export const authMiddleware = async (
               device: dbSession.device,
             }),
             "EX",
-            15 * 24 * 60 * 60,
+            remainingSeconds,
           ),
           redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
-          redis.expire(`user_sessions:${dbSession.userId}`, 15 * 24 * 60 * 60),
+          redis.expire(`user_sessions:${dbSession.userId}`, remainingSeconds),
         ]).catch(() => {});
       }
     }
-  } catch (err) {
-    try {
-      const dbSession = await prisma.refreshToken.findFirst({
-        where: { familyId: decoded.sid, revokedAt: null },
-      });
-      if (dbSession) {
-        isSessionActive = true;
-      }
-    } catch (dbErr) {
-      return next(new ApiError(500, "Internal Server Error"));
-    }
+  } catch (dbErr) {
+    return next(new ApiError(500, "Internal Server Error"));
   }
 
   if (!isSessionActive) {
@@ -88,7 +84,7 @@ export const authMiddleware = async (
       return next(new ApiError(401, "User no longer exists"));
     }
     if (user.lockedUntil && user.lockedUntil > new Date()) {
-      return next(new ApiError(403, "Account is temporarily locked due to ,ultiple failed login attemots. Please try again later"));
+      return next(new ApiError(403, "Account is temporarily locked due to multiple failed login attempts. Please try again later."));
     }
     const { passwordHash, ...safeUser } = user;
     req.user = safeUser;
@@ -147,14 +143,19 @@ export const optionalAuth = async (
 
   let isSessionValid = false;
   try {
-    const isRedisActive = await redis.exists(`refresh:${decoded.sid}`);
-    if (isRedisActive) {
-      isSessionValid = true;
-    } else {
-      const dbSession = await prisma.refreshToken.findFirst({
-        where: { familyId: decoded.sid, revokedAt: null },
-      });
-      if (dbSession) {
+    const isRevoked = await redis.exists(`revoked_access:${decoded.jti}`);
+    if (isRevoked) {
+      return next();
+    }
+  } catch (err) {}
+
+  try {
+    const dbSession = await prisma.refreshToken.findFirst({
+      where: { familyId: decoded.sid, revokedAt: null },
+    });
+    if (dbSession && dbSession.userId === decoded.id) {
+      const remainingSeconds = Math.floor((dbSession.expiresAt.getTime() - Date.now()) / 1000);
+      if (remainingSeconds > 0) {
         isSessionValid = true;
         Promise.all([
           redis.set(
@@ -164,30 +165,24 @@ export const optionalAuth = async (
               device: dbSession.device,
             }),
             "EX",
-            15 * 24 * 60 * 60,
+            remainingSeconds,
           ),
           redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
-          redis.expire(`user_sessions:${dbSession.userId}`, 15 * 24 * 60 * 60),
+          redis.expire(`user_sessions:${dbSession.userId}`, remainingSeconds),
         ]).catch(() => {});
       }
     }
-  } catch (err) {
-    try {
-      const dbSession = await prisma.refreshToken.findFirst({
-        where: { familyId: decoded.sid, revokedAt: null },
-      });
-      if (dbSession) {
-        isSessionValid = true;
-      }
-    } catch (dbErr) {
-      return next(new ApiError(500, "Internal Server Error"));
-    }
+  } catch (dbErr) {
+    return next(new ApiError(500, "Internal Server Error"));
   }
 
   if (isSessionValid) {
     try {
       const user = await prisma.user.findUnique({ where: { id: decoded.id } });
       if (user) {
+        if (user.lockedUntil && user.lockedUntil > new Date()) {
+          return next(new ApiError(403, "Account is temporarily locked due to multiple failed login attempts. Please try again later."));
+        }
         const { passwordHash, ...safeUser } = user;
         req.user = safeUser;
       }

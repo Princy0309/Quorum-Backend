@@ -26,9 +26,25 @@ const swaggerDocument = {
         bearerFormat: 'JWT',
         description: 'Enter your Bearer Access Token in the format: Bearer <token>',
       },
+      CSRFAuth: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'x-xsrf-token',
+        description: 'Enter the CSRF token retrieved from /api/csrf-token for all POST, PUT, DELETE requests.',
+      },
     },
   },
   paths: {
+    '/api/csrf-token': {
+      get: {
+        tags: ['Authentication'],
+        summary: 'Get CSRF Token',
+        description: 'Retrieves a CSRF token to be included in the x-xsrf-token header of subsequent state-changing requests.',
+        responses: {
+          200: { description: 'Returns the CSRF token' },
+        },
+      },
+    },
     '/api/auth/register': {
       post: {
         tags: ['Authentication'],
@@ -44,7 +60,7 @@ const swaggerDocument = {
                 properties: {
                   name: { type: 'string', example: 'John Doe' },
                   email: { type: 'string', example: 'user@example.com' },
-                  password: { type: 'string', example: 'Password123!' },
+                  password: { type: 'string', minLength: 8, maxLength: 72, example: 'Password123!' },
                 },
               },
             },
@@ -64,6 +80,15 @@ const swaggerDocument = {
         tags: ['Authentication'],
         summary: 'Login user',
         description: 'Authenticates credentials and sets an HttpOnly, Secure refreshToken cookie for web clients. Mobile clients can pass x-client-platform: mobile header to receive refreshToken in response JSON body.',
+        parameters: [
+          {
+            name: 'x-client-platform',
+            in: 'header',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Specify "mobile" for non-browser mobile app requests',
+          },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -73,7 +98,7 @@ const swaggerDocument = {
                 required: ['email', 'password'],
                 properties: {
                   email: { type: 'string', example: 'user@example.com' },
-                  password: { type: 'string', example: 'Password123!' },
+                  password: { type: 'string', minLength: 8, maxLength: 72, example: 'Password123!' },
                 },
               },
             },
@@ -84,8 +109,8 @@ const swaggerDocument = {
             description: 'Login successful. Sets HttpOnly refreshToken cookie.',
           },
           401: { description: 'Invalid credentials' },
-          403: { description: 'Email not verified' },
-          429: { description: 'Too many failed login attempts' },
+          403: { description: 'Email not verified or Account is temporarily locked' },
+          429: { description: 'Too many failed login attempts from IP or Account' },
         },
       },
     },
@@ -121,6 +146,8 @@ const swaggerDocument = {
             description: 'Token refreshed successfully. Sets updated HttpOnly refreshToken cookie.',
           },
           401: { description: 'Invalid or expired refresh token' },
+          403: { description: 'Account is temporarily locked' },
+          429: { description: 'Too many refresh token requests' },
         },
       },
     },
@@ -151,8 +178,9 @@ const swaggerDocument = {
             },
           },
         },
+        security: [{ BearerAuth: [] }],
         responses: {
-          200: { description: 'Logged out successfully' },
+          200: { description: 'Logged out successfully. Both access token and refresh tokens are revoked.' },
         },
       },
     },
@@ -268,14 +296,14 @@ const swaggerDocument = {
                 properties: {
                   email: { type: 'string', example: 'user@example.com' },
                   otp: { type: 'string', example: '123456' },
-                  newPassword: { type: 'string', example: 'NewSecurePassword123!' },
+                  newPassword: { type: 'string', minLength: 8, maxLength: 72, example: 'NewSecurePassword123!' },
                 },
               },
             },
           },
         },
         responses: {
-          200: { description: 'Password reset successfully' },
+          200: { description: 'Password reset successfully. All active sessions have been atomically revoked.' },
           400: { description: 'Incorrect OTP or validation error' },
           404: { description: 'User not found' },
         },
@@ -285,7 +313,18 @@ const swaggerDocument = {
 };
 
 export const setupSwagger = (app: Express): void => {
-  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+  const options = {
+    swaggerOptions: {
+      requestInterceptor: (req: any) => {
+        const match = document.cookie.match(/(?:^|;\\s*)XSRF-TOKEN=([^;]*)/);
+        if (match) {
+          req.headers['x-xsrf-token'] = decodeURIComponent(match[1]);
+        }
+        return req;
+      }
+    }
+  };
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument, options));
 };
 
 export default setupSwagger;

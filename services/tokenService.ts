@@ -35,12 +35,13 @@ export interface RefreshTokenPayload {
   aud?: string;
 }
 
-export const generateAccessToken = (userId: string, sid?: string): string => {
+export const generateAccessToken = (userId: string, sid: string): string => {
   return jwt.sign({ id: userId, type: 'access', sid, jti: crypto.randomUUID() }, JWT_SECRET, {
     algorithm: 'HS256',
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
     expiresIn: env.JWT_EXPIRES_IN || '15m',
+    keyid: '1',
   });
 };
 
@@ -76,6 +77,7 @@ export const generateRefreshToken = (userId: string): string => {
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
     expiresIn: REFRESH_TTL_SECONDS,
+    keyid: '1',
   });
 };
 
@@ -204,13 +206,14 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
     throw new ApiError(401, 'Invalid or expired refresh token');
   }
 
-  const idempotencyKey = `rotate_result:${tokenHash}`;
+  if (storedToken.user.lockedUntil && storedToken.user.lockedUntil > new Date()) {
+    throw new ApiError(403, 'Account is temporarily locked due to multiple failed login attempts. Please try again later.');
+  }
 
   if (storedToken.revokedAt) {
-    const cachedResult = await redis.get(idempotencyKey);
-    if (cachedResult) {
+    if (storedToken.rotationCache) {
       try {
-        const parsed = decryptPayload(rawToken, cachedResult);
+        const parsed = decryptPayload(rawToken, storedToken.rotationCache);
         return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
       } catch (e) {
         throw new ApiError(401, 'Invalid or expired refresh token');
@@ -248,16 +251,29 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
         },
       });
 
+      const encryptedCache = encryptPayload(rawToken, {
+        accessToken,
+        refreshToken
+      });
+
+      await tx.refreshToken.update({
+        where: { id: storedToken.id },
+        data: { rotationCache: encryptedCache },
+      });
+
       return { accessToken, refreshToken, newTokenHash, device };
     });
   } catch (err: any) {
     if (err.message === 'CONCURRENT_ROTATION') {
       for (let i = 0; i < 10; i++) {
         await new Promise(resolve => setTimeout(resolve, 300));
-        const retryCache = await redis.get(idempotencyKey);
-        if (retryCache) {
+        const updatedOldToken = await prisma.refreshToken.findUnique({
+          where: { id: storedToken.id },
+          select: { rotationCache: true }
+        });
+        if (updatedOldToken?.rotationCache) {
           try {
-            const parsed = decryptPayload(rawToken, retryCache);
+            const parsed = decryptPayload(rawToken, updatedOldToken.rotationCache);
             return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
           } catch (e) {
             throw new ApiError(401, 'Invalid or expired refresh token');
@@ -271,17 +287,25 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
 
   try {
     await saveSessionToRedis(storedToken.familyId, storedToken.userId, result.device);
-    const encryptedCache = encryptPayload(rawToken, {
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken
-    });
-    await redis.set(idempotencyKey, encryptedCache, 'EX', 20);
-    
   } catch (err) {
-    console.error('Failed to update Redis during rotation. DB transaction succeeded. Client will receive tokens and can recover via DB.', err);
+    console.error('Failed to update Redis during rotation. DB transaction succeeded.', err);
   }
 
   return { accessToken: result.accessToken, refreshToken: result.refreshToken };
+};
+
+export const revokeAccessToken = async (accessToken: string): Promise<void> => {
+  try {
+    const decoded = jwt.decode(accessToken) as AccessTokenPayload | null;
+    if (decoded && decoded.jti && decoded.exp) {
+      const ttl = decoded.exp - Math.floor(Date.now() / 1000);
+      if (ttl > 0) {
+        await redis.set(`revoked_access:${decoded.jti}`, '1', 'EX', ttl);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to revoke access token in Redis:', err);
+  }
 };
 
 export const revokeRefreshToken = async (rawToken: string): Promise<void> => {
