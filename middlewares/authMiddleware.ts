@@ -49,20 +49,23 @@ export const authMiddleware = async (
         where: { familyId: decoded.sid, revokedAt: null },
       });
       if (dbSession) {
-        isSessionActive = true;
-        Promise.all([
-          redis.set(
-            `refresh:${dbSession.familyId}`,
-            JSON.stringify({
-              userId: dbSession.userId,
-              device: dbSession.device,
-            }),
-            "EX",
-            15 * 24 * 60 * 60,
-          ),
-          redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
-          redis.expire(`user_sessions:${dbSession.userId}`, 15 * 24 * 60 * 60),
-        ]).catch(() => {});
+        const remainingSeconds = Math.floor((dbSession.expiresAt.getTime() - Date.now()) / 1000);
+        if (remainingSeconds > 0) {
+          isSessionActive = true;
+          Promise.all([
+            redis.set(
+              `refresh:${dbSession.familyId}`,
+              JSON.stringify({
+                userId: dbSession.userId,
+                device: dbSession.device,
+              }),
+              "EX",
+              remainingSeconds,
+            ),
+            redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
+            redis.expire(`user_sessions:${dbSession.userId}`, remainingSeconds),
+          ]).catch(() => {});
+        }
       }
     }
   } catch (err) {
@@ -155,20 +158,23 @@ export const optionalAuth = async (
         where: { familyId: decoded.sid, revokedAt: null },
       });
       if (dbSession) {
-        isSessionValid = true;
-        Promise.all([
-          redis.set(
-            `refresh:${dbSession.familyId}`,
-            JSON.stringify({
-              userId: dbSession.userId,
-              device: dbSession.device,
-            }),
-            "EX",
-            15 * 24 * 60 * 60,
-          ),
-          redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
-          redis.expire(`user_sessions:${dbSession.userId}`, 15 * 24 * 60 * 60),
-        ]).catch(() => {});
+        const remainingSeconds = Math.floor((dbSession.expiresAt.getTime() - Date.now()) / 1000);
+        if (remainingSeconds > 0) {
+          isSessionValid = true;
+          Promise.all([
+            redis.set(
+              `refresh:${dbSession.familyId}`,
+              JSON.stringify({
+                userId: dbSession.userId,
+                device: dbSession.device,
+              }),
+              "EX",
+              remainingSeconds,
+            ),
+            redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
+            redis.expire(`user_sessions:${dbSession.userId}`, remainingSeconds),
+          ]).catch(() => {});
+        }
       }
     }
   } catch (err) {
