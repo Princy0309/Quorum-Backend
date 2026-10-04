@@ -109,8 +109,8 @@ const swaggerDocument = {
             description: 'Login successful. Sets HttpOnly refreshToken cookie.',
           },
           401: { description: 'Invalid credentials' },
-          403: { description: 'Email not verified' },
-          429: { description: 'Too many failed login attempts' },
+          403: { description: 'Email not verified or Account is temporarily locked' },
+          429: { description: 'Too many failed login attempts from IP or Account' },
         },
       },
     },
@@ -146,6 +146,8 @@ const swaggerDocument = {
             description: 'Token refreshed successfully. Sets updated HttpOnly refreshToken cookie.',
           },
           401: { description: 'Invalid or expired refresh token' },
+          403: { description: 'Account is temporarily locked' },
+          429: { description: 'Too many refresh token requests' },
         },
       },
     },
@@ -176,8 +178,9 @@ const swaggerDocument = {
             },
           },
         },
+        security: [{ BearerAuth: [] }],
         responses: {
-          200: { description: 'Logged out successfully' },
+          200: { description: 'Logged out successfully. Both access token and refresh tokens are revoked.' },
         },
       },
     },
@@ -300,7 +303,7 @@ const swaggerDocument = {
           },
         },
         responses: {
-          200: { description: 'Password reset successfully' },
+          200: { description: 'Password reset successfully. All active sessions have been atomically revoked.' },
           400: { description: 'Incorrect OTP or validation error' },
           404: { description: 'User not found' },
         },
@@ -310,7 +313,19 @@ const swaggerDocument = {
 };
 
 export const setupSwagger = (app: Express): void => {
-  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+  const options = {
+    swaggerOptions: {
+      requestInterceptor: (req: any) => {
+        // Runs in the browser context to automatically attach the CSRF token
+        const match = document.cookie.match(/(?:^|;\\s*)XSRF-TOKEN=([^;]*)/);
+        if (match) {
+          req.headers['x-xsrf-token'] = decodeURIComponent(match[1]);
+        }
+        return req;
+      }
+    }
+  };
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument, options));
 };
 
 export default setupSwagger;
