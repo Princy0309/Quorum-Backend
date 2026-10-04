@@ -40,7 +40,7 @@ export const generateAccessToken = (userId: string, sid: string): string => {
     algorithm: 'HS256',
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
-    expiresIn: env.JWT_EXPIRES_IN || '15m',
+    expiresIn: (env.JWT_EXPIRES_IN || '15m') as `${number}${'s' | 'm' | 'h' | 'd'}`,
     keyid: '1',
   });
 };

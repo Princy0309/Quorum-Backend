@@ -1,18 +1,17 @@
-import Joi from 'joi';
+import { z } from 'zod';
 
-export const passwordSchema = Joi.string()
+export const passwordSchema = z.string()
   .min(8)
   .max(72)
-  .pattern(/^[\x20-\x7E]+$/, 'only printable ASCII characters allowed')
-  .required();
+  .regex(/^[\x20-\x7E]+$/, 'only printable ASCII characters allowed');
 
-export const registerSchema = Joi.object({
-  name: Joi.string().trim().min(2).max(50).pattern(/^[\x20-\x7E]+$/, 'emojis not allowed').required(),
-  email: Joi.string().email().lowercase().trim().max(50).pattern(/^[\x21-\x7E]+$/, 'no spaces or emojis allowed').required(),
+export const registerSchema = z.object({
+  name: z.string().trim().min(2).max(50).regex(/^[\x20-\x7E]+$/, 'only printable ASCII allowed'),
+  email: z.string().email().toLowerCase().trim().max(50).regex(/^[\x21-\x7E]+$/, 'only printable ASCII allowed'),
   password: passwordSchema
 });
 
-export const loginSchema = Joi.object({
-  email: Joi.string().email().lowercase().trim().max(50).pattern(/^[\x21-\x7E]+$/, 'no spaces or emojis allowed').required(),
+export const loginSchema = z.object({
+  email: z.string().email().toLowerCase().trim().max(50).regex(/^[\x21-\x7E]+$/, 'only printable ASCII allowed'),
   password: passwordSchema
 });
