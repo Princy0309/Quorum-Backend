@@ -35,12 +35,13 @@ export interface RefreshTokenPayload {
   aud?: string;
 }
 
-export const generateAccessToken = (userId: string, sid?: string): string => {
+export const generateAccessToken = (userId: string, sid: string): string => {
   return jwt.sign({ id: userId, type: 'access', sid, jti: crypto.randomUUID() }, JWT_SECRET, {
     algorithm: 'HS256',
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
     expiresIn: env.JWT_EXPIRES_IN || '15m',
+    keyid: '1',
   });
 };
 
@@ -76,6 +77,7 @@ export const generateRefreshToken = (userId: string): string => {
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
     expiresIn: REFRESH_TTL_SECONDS,
+    keyid: '1',
   });
 };
 
@@ -286,6 +288,20 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
   }
 
   return { accessToken: result.accessToken, refreshToken: result.refreshToken };
+};
+
+export const revokeAccessToken = async (accessToken: string): Promise<void> => {
+  try {
+    const decoded = jwt.decode(accessToken) as AccessTokenPayload | null;
+    if (decoded && decoded.jti && decoded.exp) {
+      const ttl = decoded.exp - Math.floor(Date.now() / 1000);
+      if (ttl > 0) {
+        await redis.set(`revoked_access:${decoded.jti}`, '1', 'EX', ttl);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to revoke access token in Redis:', err);
+  }
 };
 
 export const revokeRefreshToken = async (rawToken: string): Promise<void> => {

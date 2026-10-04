@@ -41,10 +41,17 @@ export const authMiddleware = async (
 
   let isSessionActive = false;
   try {
+    const isRevoked = await redis.exists(`revoked_access:${decoded.jti}`);
+    if (isRevoked) {
+      return next(new ApiError(401, "Token revoked"));
+    }
+  } catch (err) {}
+
+  try {
     const dbSession = await prisma.refreshToken.findFirst({
       where: { familyId: decoded.sid, revokedAt: null },
     });
-    if (dbSession) {
+    if (dbSession && dbSession.userId === decoded.id) {
       const remainingSeconds = Math.floor((dbSession.expiresAt.getTime() - Date.now()) / 1000);
       if (remainingSeconds > 0) {
         isSessionActive = true;
@@ -136,10 +143,17 @@ export const optionalAuth = async (
 
   let isSessionValid = false;
   try {
+    const isRevoked = await redis.exists(`revoked_access:${decoded.jti}`);
+    if (isRevoked) {
+      return next();
+    }
+  } catch (err) {}
+
+  try {
     const dbSession = await prisma.refreshToken.findFirst({
       where: { familyId: decoded.sid, revokedAt: null },
     });
-    if (dbSession) {
+    if (dbSession && dbSession.userId === decoded.id) {
       const remainingSeconds = Math.floor((dbSession.expiresAt.getTime() - Date.now()) / 1000);
       if (remainingSeconds > 0) {
         isSessionValid = true;
