@@ -316,7 +316,6 @@ export const setupSwagger = (app: Express): void => {
   const options = {
     swaggerOptions: {
       requestInterceptor: (req: any) => {
-        // Runs in the browser context to automatically attach the CSRF token
         const match = document.cookie.match(/(?:^|;\\s*)XSRF-TOKEN=([^;]*)/);
         if (match) {
           req.headers['x-xsrf-token'] = decodeURIComponent(match[1]);

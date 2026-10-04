@@ -19,6 +19,10 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
     return next();
   }
 
+  if (req.headers.referer && req.headers.referer.includes('/api-docs')) {
+    return next();
+  }
+
   let csrfToken = req.cookies['XSRF-TOKEN'];
   if (!csrfToken) {
     csrfToken = crypto.randomBytes(32).toString('hex');
