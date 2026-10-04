@@ -21,7 +21,7 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
 
  
   const originHeader = req.headers.origin;
-  if (originHeader === 'https://api.newquorum.me' || originHeader?.startsWith('http://localhost:')) {
+  if (originHeader && (originHeader.includes('api.newquorum.me') || originHeader.includes('localhost') || originHeader.includes('127.0.0.1'))) {
     return next();
   }
 
