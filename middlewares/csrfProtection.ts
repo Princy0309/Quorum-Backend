@@ -19,10 +19,9 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
     return next();
   }
 
-  // Bypass CSRF for Swagger UI (safe because browsers prevent spoofing the Origin header)
-  const host = req.headers.host;
+ 
   const originHeader = req.headers.origin;
-  if (originHeader && host && originHeader.endsWith(host)) {
+  if (originHeader === 'https://api.newquorum.me' || originHeader?.startsWith('http://localhost:')) {
     return next();
   }
 
