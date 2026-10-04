@@ -145,12 +145,25 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response, ne
   if (!result.success) throw new ApiError(400, result.message);
 
   const passwordHash = await bcrypt.hash(newPassword, 10);
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { passwordHash },
-  });
+  
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    }),
+    prisma.refreshToken.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    })
+  ]);
 
-  await revokeAllSessions(user.id);
+  try {
+    const redisHashes = await redis.smembers(`user_sessions:${user.id}`);
+    if (redisHashes.length > 0) {
+      await redis.del(...redisHashes.map((h) => `refresh:${h}`));
+    }
+    await redis.del(`user_sessions:${user.id}`);
+  } catch (err) {}
 
   return sendSuccess(res, 200, 'Password reset successfully. Please log in with your new password.');
 });
