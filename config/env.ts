@@ -8,8 +8,8 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   DATABASE_URL: z.string(),
   
-  JWT_SECRET: z.string().default('quorum_default_super_secret_jwt_key_2026'),
-  JWT_REFRESH_SECRET: z.string().default('quorum_default_super_refresh_jwt_key_2026'),
+  JWT_SECRET: z.string(),
+  JWT_REFRESH_SECRET: z.string(),
   JWT_EXPIRES_IN: z.string().default('15m'),
   REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().default(7 * 24 * 60 * 60),
   JWT_ISSUER: z.string().default('quorum-api'),
@@ -27,17 +27,18 @@ const envSchema = z.object({
 const envVars = envSchema.safeParse(process.env);
 
 if (!envVars.success) {
-  console.warn(`Config validation warning: ${envVars.error.issues[0].message}`);
+  console.error('Invalid environment variables:', envVars.error.issues);
+  process.exit(1);
 }
-const data = envVars.data!;
+const data = envVars.data;
 
 
 export const env = {
   PORT: data?.PORT || 5000,
   NODE_ENV: data?.NODE_ENV || 'production',
   DATABASE_URL: data?.DATABASE_URL,
-  JWT_SECRET: data?.JWT_SECRET || 'quorum_default_super_secret_jwt_key_2026',
-  JWT_REFRESH_SECRET: data?.JWT_REFRESH_SECRET || 'quorum_default_super_refresh_jwt_key_2026',
+  JWT_SECRET: data?.JWT_SECRET ,
+  JWT_REFRESH_SECRET: data?.JWT_REFRESH_SECRET ,
   JWT_EXPIRES_IN: data?.JWT_EXPIRES_IN || '15m',
   REFRESH_TOKEN_TTL_SECONDS: data?.REFRESH_TOKEN_TTL_SECONDS || 604800,
   JWT_ISSUER: data?.JWT_ISSUER || 'quorum-api',
