@@ -208,6 +208,49 @@ const swaggerDocument = {
         },
       },
     },
+          '/api/users/onboarding': {
+        patch: {
+          tags: ['User Profile & Onboarding'],
+          summary: 'Save user onboarding use cases',
+          description: 'Saves user choices for how they want to use Quorum (Organization, Freelance, Hire & Collaborate, Community). Requires JWT Bearer authentication.',
+          security: [{ BearerAuth: [] }],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    useCases: {
+                      type: 'array',
+                      items: {
+                        type: 'string',
+                        enum: ['ORGANIZATION', 'FREELANCE', 'HIRE_COLLABORATE', 'COMMUNITY'],
+                      },
+                      example: ['ORGANIZATION', 'COMMUNITY'],
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Onboarding preferences saved successfully',
+            },
+            400: {
+              description: 'Validation error: invalid use cases',
+            },
+            401: {
+              description: 'Unauthorized: missing or invalid JWT token',
+            },
+            403: {
+              description: 'Email not verified',
+            },
+          },
+        },
+      },
+
     '/api/otp/send-verification': {
       post: {
         tags: ['OTP & Verification'],
