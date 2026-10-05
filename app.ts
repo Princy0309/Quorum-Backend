@@ -4,6 +4,8 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import expressWinston from 'express-winston';
 import helmet from 'helmet';
+import userRoutes from './routes/userRoutes.js';
+
 
 dotenv.config();
 
@@ -67,6 +69,7 @@ app.use(expressWinston.logger({
 
 app.use('/api/auth', authRoutes);
 app.use('/api/otp', otpRoutes);
+app.use('/api/user', userRoutes);
 app.get('/api/csrf-token', (req: Request, res: Response) => {
   res.json({ csrfToken: res.locals.csrfToken || req.cookies['XSRF-TOKEN'] });
 });
