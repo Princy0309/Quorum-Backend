@@ -1,10 +1,12 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import { createServer } from 'http';
 import prisma from './config/prisma.js';
 import app from './app.js';
 import { emailWorker, queueRedisConnection } from './queues/emailQueue.js';
 import redis from './config/redis.js';
+import { initSocketServer } from './sockets/index.js';
 
 let server: any;
 
@@ -13,8 +15,11 @@ const startServer = async (): Promise<void> => {
     await prisma.$connect();
     console.log('Database connected');
 
+    const httpServer = createServer(app);
+    initSocketServer(httpServer);
+
     const PORT = process.env.PORT || 5000;
-    server = app.listen(PORT, () => {
+    server = httpServer.listen(PORT, () => {
       console.log(`Quorum server running on port ${PORT}`);
     });
   } catch (err) {
