@@ -1,6 +1,7 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { Server as HttpServer } from 'http';
 import { socketAuthMiddleware, AuthenticatedSocket } from './socketAuth.js';
+import { registerMessageHandler } from './handlers/messageHandler.js';
 
 let io: SocketIOServer | null = null;
 
@@ -19,6 +20,8 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
     if (userId) {
       socket.join(`user:${userId}`);
     }
+
+    registerMessageHandler(io!, socket);
   });
 
   return io;
