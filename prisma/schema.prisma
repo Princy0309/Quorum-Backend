@@ -9,34 +9,37 @@ datasource db {
 }
 
 model User {
-  id                  String               @id @default(uuid())
-  name                String
-  email               String               @unique
-  passwordHash        String?
-  role                String               @default("member")
-  avatar              String?
-  googleId            String?              @unique
-  lastLogin           DateTime?
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  failedLoginAttempts Int                  @default(0)
-  lockedUntil         DateTime?
-  isEmailVerified     Boolean              @default(false)
-  passwordResetTokens PasswordResetToken[]
-  refreshTokens       RefreshToken[]
+  id                       String                    @id @default(uuid())
+  name                     String
+  email                    String                    @unique
+  passwordHash             String?
+  role                     String                    @default("member")
+  avatar                   String?
+  googleId                 String?                   @unique
+  lastLogin                DateTime?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  failedLoginAttempts      Int                       @default(0)
+  lockedUntil              DateTime?
+  isEmailVerified          Boolean                   @default(false)
+  passwordResetTokens      PasswordResetToken[]
+  refreshTokens            RefreshToken[]
+  conversationParticipants ConversationParticipant[]
+  messagesSent             Message[]
+  deviceTokens             DeviceToken[]
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid())
-  tokenHash String    @unique
-  userId    String
-  familyId  String    @default(uuid())
-  device    String    @default("unknown")
-  expiresAt DateTime
-  revokedAt DateTime?
+  id            String    @id @default(uuid())
+  tokenHash     String    @unique
+  userId        String
+  familyId      String    @default(uuid())
+  device        String    @default("unknown")
+  expiresAt     DateTime
+  revokedAt     DateTime?
   rotationCache String?
-  createdAt DateTime  @default(now())
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime  @default(now())
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([familyId])
@@ -53,3 +56,56 @@ model PasswordResetToken {
 
   @@index([userId])
 }
+
+model Conversation {
+  id           String                    @id @default(uuid())
+  type         String                    @default("direct")
+  directKey    String?                   @unique
+  name         String?
+  avatar       String?
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  participants ConversationParticipant[]
+  messages     Message[]
+}
+
+model ConversationParticipant {
+  id                String       @id @default(uuid())
+  conversationId    String
+  userId            String
+  joinedAt          DateTime     @default(now())
+  lastReadMessageId String?
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  senderId       String
+  content        String
+  fileUrl        String?
+  fileType       String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  platform  String   @default("web")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
