@@ -1,6 +1,6 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket } from '../socketAuth.js';
-import { saveMessage, markMessageAsRead } from '../../services/chatService.js';
+import { saveMessage, markMessageAsRead, isParticipant } from '../../services/chatService.js';
 import { sendPushToOfflineUsers } from '../../services/notificationService.js';
 import { checkSocketMessageRateLimit } from '../../middlewares/rateLimiter.js';
 import { sendMessageSchema, readMessageSchema } from '../../validators/chatValidators.js';
@@ -20,6 +20,50 @@ interface ReadMessagePayload {
 }
 
 export const registerMessageHandler = (io: SocketIOServer, socket: AuthenticatedSocket) => {
+  socket.on(
+    CHAT_EVENTS.CONVERSATION_JOIN,
+    async (
+      payload: { conversationId: string },
+      callback?: (response: { success: boolean; error?: string }) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId || !payload?.conversationId) {
+          if (callback) callback({ success: false, error: 'Invalid parameters' });
+          return;
+        }
+
+        const valid = await isParticipant(userId, payload.conversationId);
+        if (!valid) {
+          if (callback) callback({ success: false, error: 'User is not a participant in this conversation' });
+          return;
+        }
+
+        socket.join(`conversation:${payload.conversationId}`);
+        if (callback) callback({ success: true });
+      } catch (err: any) {
+        if (callback) callback({ success: false, error: err.message });
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.CONVERSATION_LEAVE,
+    (
+      payload: { conversationId: string },
+      callback?: (response: { success: boolean; error?: string }) => void
+    ) => {
+      try {
+        if (payload?.conversationId) {
+          socket.leave(`conversation:${payload.conversationId}`);
+        }
+        if (callback) callback({ success: true });
+      } catch (err: any) {
+        if (callback) callback({ success: false, error: err.message });
+      }
+    }
+  );
+
   socket.on(
     CHAT_EVENTS.MESSAGE_SEND,
     async (
@@ -55,6 +99,8 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           fileType
         );
 
+        io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
+
         participants.forEach((p) => {
           io.to(`user:${p.userId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
         });
@@ -68,7 +114,6 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         ).catch((err) => {
           logger.error('Background FCM notification dispatch error', { error: err.message });
         });
-
 
         if (callback) {
           callback({ success: true, data: message });
@@ -104,14 +149,10 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
 
         const result = await markMessageAsRead(userId, conversationId, messageId);
 
-        result.participants.forEach((p) => {
-          if (p.userId !== userId) {
-            io.to(`user:${p.userId}`).emit(CHAT_EVENTS.MESSAGE_READ, {
-              conversationId: result.conversationId,
-              userId: result.userId,
-              messageId: result.messageId
-            });
-          }
+        io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_READ, {
+          conversationId: result.conversationId,
+          userId: result.userId,
+          messageId: result.messageId
         });
 
         if (callback) {

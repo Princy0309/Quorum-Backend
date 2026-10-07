@@ -115,6 +115,28 @@ export const isParticipant = async (userId: string, conversationId: string): Pro
   return !!participant;
 };
 
+export const getCoParticipantUserIds = async (userId: string): Promise<string[]> => {
+  const userConversations = await prisma.conversationParticipant.findMany({
+    where: { userId },
+    select: { conversationId: true }
+  });
+
+  if (userConversations.length === 0) return [];
+
+  const conversationIds = userConversations.map((c) => c.conversationId);
+
+  const coParticipants = await prisma.conversationParticipant.findMany({
+    where: {
+      conversationId: { in: conversationIds },
+      userId: { not: userId }
+    },
+    select: { userId: true },
+    distinct: ['userId']
+  });
+
+  return coParticipants.map((p) => p.userId);
+};
+
 export const saveMessage = async (
   senderId: string,
   conversationId: string,
