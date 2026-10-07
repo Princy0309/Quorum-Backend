@@ -104,3 +104,23 @@ export const otpLimiter = (req: Request, res: Response, next: NextFunction): voi
       res.status(429).json({ success: false, statusCode: 429, message: 'Too many OTP requests, try again after 15 minutes.' });
     });
 };
+
+export const chatRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'chat_api_v1',
+  points: 30,
+  duration: 60
+});
+
+export const chatLimiter = (req: Request, res: Response, next: NextFunction): void => {
+  const key = req.user?.id || req.ip || '127.0.0.1';
+  chatRateLimiter.consume(key)
+    .then(() => next())
+    .catch((err) => {
+      if (err instanceof Error) {
+        return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
+      }
+      res.status(429).json({ success: false, statusCode: 429, message: 'Too many requests, please slow down.' });
+    });
+};
+
