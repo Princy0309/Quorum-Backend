@@ -1,6 +1,7 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket } from '../socketAuth.js';
 import { saveMessage, markMessageAsRead } from '../../services/chatService.js';
+import { sendPushToOfflineUsers } from '../../services/notificationService.js';
 import { CHAT_EVENTS } from '../../utils/constants.js';
 
 interface SendMessagePayload {
@@ -51,6 +52,14 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         participants.forEach((p) => {
           io.to(`user:${p.userId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
         });
+
+        const recipientUserIds = participants.map((p) => p.userId).filter((id) => id !== senderId);
+        sendPushToOfflineUsers(
+          recipientUserIds,
+          `New message from ${message.sender.name}`,
+          content || 'Sent an attachment',
+          { conversationId, messageId: message.id }
+        ).catch(() => {});
 
         if (callback) {
           callback({ success: true, data: message });
@@ -105,4 +114,5 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
     }
   );
 };
+
 
