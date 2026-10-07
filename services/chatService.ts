@@ -34,42 +34,70 @@ export const getOrCreateDirectConversation = async (userId: string, targetUserId
       },
       messages: {
         take: 1,
-        orderBy: { createdAt: 'desc' }
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
       }
     }
   });
 
   if (!conversation) {
-    conversation = await prisma.conversation.create({
-      data: {
-        type: 'direct',
-        directKey,
-        participants: {
-          create: [
-            { userId },
-            { userId: targetUserId }
-          ]
-        }
-      },
-      include: {
-        participants: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-                avatar: true
-              }
-            }
+    try {
+      conversation = await prisma.conversation.create({
+        data: {
+          type: 'direct',
+          directKey,
+          participants: {
+            create: [
+              { userId },
+              { userId: targetUserId }
+            ]
           }
         },
-        messages: {
-          take: 1,
-          orderBy: { createdAt: 'desc' }
+        include: {
+          participants: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  avatar: true
+                }
+              }
+            }
+          },
+          messages: {
+            take: 1,
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+          }
         }
+      });
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        conversation = await prisma.conversation.findUnique({
+          where: { directKey },
+          include: {
+            participants: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    avatar: true
+                  }
+                }
+              }
+            },
+            messages: {
+              take: 1,
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+            }
+          }
+        });
+      } else {
+        throw err;
       }
-    });
+    }
   }
 
   return conversation;
@@ -148,7 +176,7 @@ export const getConversationMessages = async (
     where: { conversationId },
     take: queryLimit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    orderBy: { createdAt: 'desc' },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     include: {
       sender: {
         select: {
@@ -177,20 +205,13 @@ export const getConversationMessages = async (
 };
 
 export const getUserConversations = async (userId: string) => {
-  const userParticipants = await prisma.conversationParticipant.findMany({
-    where: { userId },
-    select: {
-      conversationId: true,
-      lastReadMessageId: true
-    }
-  });
-
-  const conversationIds = userParticipants.map((p) => p.conversationId);
-  const participantMap = new Map(userParticipants.map((p) => [p.conversationId, p.lastReadMessageId]));
-
   const conversations = await prisma.conversation.findMany({
-    where: { id: { in: conversationIds } },
-    orderBy: { updatedAt: 'desc' },
+    where: {
+      participants: {
+        some: { userId }
+      }
+    },
+    orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
     include: {
       participants: {
         include: {
@@ -206,7 +227,7 @@ export const getUserConversations = async (userId: string) => {
       },
       messages: {
         take: 1,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           sender: {
             select: {
@@ -220,51 +241,33 @@ export const getUserConversations = async (userId: string) => {
     }
   });
 
-  const conversationsWithUnread = await Promise.all(
-    conversations.map(async (conv) => {
-      const lastReadId = participantMap.get(conv.id);
-      let unreadCount = 0;
+  if (conversations.length === 0) {
+    return [];
+  }
 
-      if (lastReadId) {
-        const lastReadMsg = await prisma.message.findUnique({
-          where: { id: lastReadId },
-          select: { createdAt: true }
-        });
+  const unreadCounts = await prisma.$queryRaw<Array<{ conversationId: string; unreadCount: number }>>`
+    SELECT 
+      cp."conversationId",
+      COUNT(m.id)::int AS "unreadCount"
+    FROM "ConversationParticipant" cp
+    LEFT JOIN "Message" last_read ON last_read.id = cp."lastReadMessageId"
+    LEFT JOIN "Message" m ON m."conversationId" = cp."conversationId"
+      AND m."senderId" != cp."userId"
+      AND (last_read.id IS NULL OR m."createdAt" > last_read."createdAt")
+    WHERE cp."userId" = ${userId}
+    GROUP BY cp."conversationId"
+  `;
 
-        if (lastReadMsg) {
-          unreadCount = await prisma.message.count({
-            where: {
-              conversationId: conv.id,
-              senderId: { not: userId },
-              createdAt: { gt: lastReadMsg.createdAt }
-            }
-          });
-        } else {
-          unreadCount = await prisma.message.count({
-            where: {
-              conversationId: conv.id,
-              senderId: { not: userId }
-            }
-          });
-        }
-      } else {
-        unreadCount = await prisma.message.count({
-          where: {
-            conversationId: conv.id,
-            senderId: { not: userId }
-          }
-        });
-      }
+  const unreadMap = new Map<string, number>();
+  for (const row of unreadCounts) {
+    unreadMap.set(row.conversationId, Number(row.unreadCount));
+  }
 
-      return {
-        ...conv,
-        lastMessage: conv.messages[0] || null,
-        unreadCount
-      };
-    })
-  );
-
-  return conversationsWithUnread;
+  return conversations.map((conv) => ({
+    ...conv,
+    lastMessage: conv.messages[0] || null,
+    unreadCount: unreadMap.get(conv.id) || 0
+  }));
 };
 
 export const markMessageAsRead = async (
@@ -365,7 +368,7 @@ export const searchConversationMessages = async (
   const [messages, total] = await Promise.all([
     prisma.message.findMany({
       where: whereClause,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       skip,
       take: queryLimit,
       include: {
