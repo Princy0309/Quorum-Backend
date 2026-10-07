@@ -3,14 +3,13 @@ import { AuthenticatedSocket } from '../socketAuth.js';
 import { isParticipant } from '../../services/chatService.js';
 import { typingSchema } from '../../validators/chatValidators.js';
 import { CHAT_EVENTS } from '../../utils/constants.js';
-import prisma from '../../config/prisma.js';
 
 interface TypingPayload {
   conversationId: string;
 }
 
 export const registerTypingHandler = (io: SocketIOServer, socket: AuthenticatedSocket) => {
-  socket.on(CHAT_EVENTS.TYPING_START, async (payload: TypingPayload) => {
+  const handleTypingEvent = async (event: string, payload: TypingPayload) => {
     try {
       const userId = socket.data.user?.id;
       if (!userId) return;
@@ -19,53 +18,27 @@ export const registerTypingHandler = (io: SocketIOServer, socket: AuthenticatedS
       if (error) return;
 
       const { conversationId } = value;
+      const room = `conversation:${conversationId}`;
 
-      const validParticipant = await isParticipant(userId, conversationId);
-      if (!validParticipant) return;
+      if (!socket.rooms.has(room)) {
+        const validParticipant = await isParticipant(userId, conversationId);
+        if (!validParticipant) return;
+        socket.join(room);
+      }
 
-      const participants = await prisma.conversationParticipant.findMany({
-        where: { conversationId },
-        select: { userId: true }
-      });
-
-      participants.forEach((p) => {
-        if (p.userId !== userId) {
-          io.to(`user:${p.userId}`).emit(CHAT_EVENTS.TYPING_START, {
-            conversationId,
-            userId
-          });
-        }
+      socket.to(room).emit(event, {
+        conversationId,
+        userId
       });
     } catch (err) {}
+  };
+
+  socket.on(CHAT_EVENTS.TYPING_START, (payload: TypingPayload) => {
+    handleTypingEvent(CHAT_EVENTS.TYPING_START, payload);
   });
 
-  socket.on(CHAT_EVENTS.TYPING_STOP, async (payload: TypingPayload) => {
-    try {
-      const userId = socket.data.user?.id;
-      if (!userId) return;
-
-      const { error, value } = typingSchema.validate(payload);
-      if (error) return;
-
-      const { conversationId } = value;
-
-      const validParticipant = await isParticipant(userId, conversationId);
-      if (!validParticipant) return;
-
-      const participants = await prisma.conversationParticipant.findMany({
-        where: { conversationId },
-        select: { userId: true }
-      });
-
-      participants.forEach((p) => {
-        if (p.userId !== userId) {
-          io.to(`user:${p.userId}`).emit(CHAT_EVENTS.TYPING_STOP, {
-            conversationId,
-            userId
-          });
-        }
-      });
-    } catch (err) {}
+  socket.on(CHAT_EVENTS.TYPING_STOP, (payload: TypingPayload) => {
+    handleTypingEvent(CHAT_EVENTS.TYPING_STOP, payload);
   });
 };
 

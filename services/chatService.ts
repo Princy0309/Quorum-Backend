@@ -34,7 +34,7 @@ export const getOrCreateDirectConversation = async (userId: string, targetUserId
       },
       messages: {
         take: 1,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+        orderBy: [{ seq: 'desc' }, { id: 'desc' }]
       }
     }
   });
@@ -67,7 +67,7 @@ export const getOrCreateDirectConversation = async (userId: string, targetUserId
           },
           messages: {
             take: 1,
-            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+            orderBy: [{ seq: 'desc' }, { id: 'desc' }]
           }
         }
       });
@@ -90,7 +90,7 @@ export const getOrCreateDirectConversation = async (userId: string, targetUserId
             },
             messages: {
               take: 1,
-              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+              orderBy: [{ seq: 'desc' }, { id: 'desc' }]
             }
           }
         });
@@ -127,13 +127,22 @@ export const saveMessage = async (
     throw new ApiError(403, 'User is not a participant in this conversation');
   }
 
+  const updatedConversation = await prisma.conversation.update({
+    where: { id: conversationId },
+    data: {
+      updatedAt: new Date(),
+      lastSeq: { increment: 1 }
+    }
+  });
+
   const message = await prisma.message.create({
     data: {
       conversationId,
       senderId,
       content,
       fileUrl,
-      fileType
+      fileType,
+      seq: updatedConversation.lastSeq
     },
     include: {
       sender: {
@@ -144,11 +153,6 @@ export const saveMessage = async (
         }
       }
     }
-  });
-
-  await prisma.conversation.update({
-    where: { id: conversationId },
-    data: { updatedAt: new Date() }
   });
 
   const participants = await prisma.conversationParticipant.findMany({
@@ -176,7 +180,7 @@ export const getConversationMessages = async (
     where: { conversationId },
     take: queryLimit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    orderBy: [{ seq: 'desc' }, { id: 'desc' }],
     include: {
       sender: {
         select: {
@@ -227,7 +231,7 @@ export const getUserConversations = async (userId: string) => {
       },
       messages: {
         take: 1,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        orderBy: [{ seq: 'desc' }, { id: 'desc' }],
         include: {
           sender: {
             select: {
@@ -250,10 +254,9 @@ export const getUserConversations = async (userId: string) => {
       cp."conversationId",
       COUNT(m.id)::int AS "unreadCount"
     FROM "ConversationParticipant" cp
-    LEFT JOIN "Message" last_read ON last_read.id = cp."lastReadMessageId"
     LEFT JOIN "Message" m ON m."conversationId" = cp."conversationId"
       AND m."senderId" != cp."userId"
-      AND (last_read.id IS NULL OR m."createdAt" > last_read."createdAt")
+      AND m."seq" > cp."lastReadSeq"
     WHERE cp."userId" = ${userId}
     GROUP BY cp."conversationId"
   `;
@@ -299,19 +302,12 @@ export const markMessageAsRead = async (
     throw new ApiError(404, 'Message not found in this conversation');
   }
 
-  if (participant.lastReadMessageId) {
-    const currentReadMsg = await prisma.message.findUnique({
-      where: { id: participant.lastReadMessageId },
-      select: { createdAt: true }
+  if (participant.lastReadSeq >= targetMessage.seq) {
+    const participants = await prisma.conversationParticipant.findMany({
+      where: { conversationId },
+      select: { userId: true }
     });
-
-    if (currentReadMsg && currentReadMsg.createdAt >= targetMessage.createdAt) {
-      const participants = await prisma.conversationParticipant.findMany({
-        where: { conversationId },
-        select: { userId: true }
-      });
-      return { conversationId, userId, messageId: participant.lastReadMessageId, participants };
-    }
+    return { conversationId, userId, messageId: participant.lastReadMessageId, participants };
   }
 
   await prisma.conversationParticipant.update({
@@ -322,7 +318,8 @@ export const markMessageAsRead = async (
       }
     },
     data: {
-      lastReadMessageId: messageId
+      lastReadMessageId: messageId,
+      lastReadSeq: targetMessage.seq
     }
   });
 
@@ -333,8 +330,6 @@ export const markMessageAsRead = async (
 
   return { conversationId, userId, messageId, participants };
 };
-
-
 
 export const searchConversationMessages = async (
   userId: string,
@@ -368,7 +363,7 @@ export const searchConversationMessages = async (
   const [messages, total] = await Promise.all([
     prisma.message.findMany({
       where: whereClause,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ seq: 'desc' }, { id: 'desc' }],
       skip,
       take: queryLimit,
       include: {

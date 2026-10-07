@@ -5,6 +5,7 @@ import { registerMessageHandler } from './handlers/messageHandler.js';
 import { registerTypingHandler } from './handlers/typingHandler.js';
 import { registerPresenceHandler } from './handlers/presenceHandler.js';
 import env from '../config/env.js';
+import prisma from '../config/prisma.js';
 
 let io: SocketIOServer | null = null;
 
@@ -39,10 +40,20 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
 
   io.use(socketAuthMiddleware);
 
-  io.on('connection', (socket: AuthenticatedSocket) => {
+  io.on('connection', async (socket: AuthenticatedSocket) => {
     const userId = socket.data.user?.id;
     if (userId) {
       socket.join(`user:${userId}`);
+
+      try {
+        const userParticipants = await prisma.conversationParticipant.findMany({
+          where: { userId },
+          select: { conversationId: true }
+        });
+        userParticipants.forEach((p) => {
+          socket.join(`conversation:${p.conversationId}`);
+        });
+      } catch (err) {}
     }
 
     registerMessageHandler(io!, socket);
