@@ -272,9 +272,43 @@ export const markMessageAsRead = async (
   conversationId: string,
   messageId: string
 ) => {
-  const participantExists = await isParticipant(userId, conversationId);
-  if (!participantExists) {
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: {
+      conversationId_userId: {
+        conversationId,
+        userId
+      }
+    }
+  });
+
+  if (!participant) {
     throw new ApiError(403, 'User is not a participant in this conversation');
+  }
+
+  const targetMessage = await prisma.message.findFirst({
+    where: {
+      id: messageId,
+      conversationId
+    }
+  });
+
+  if (!targetMessage) {
+    throw new ApiError(404, 'Message not found in this conversation');
+  }
+
+  if (participant.lastReadMessageId) {
+    const currentReadMsg = await prisma.message.findUnique({
+      where: { id: participant.lastReadMessageId },
+      select: { createdAt: true }
+    });
+
+    if (currentReadMsg && currentReadMsg.createdAt >= targetMessage.createdAt) {
+      const participants = await prisma.conversationParticipant.findMany({
+        where: { conversationId },
+        select: { userId: true }
+      });
+      return { conversationId, userId, messageId: participant.lastReadMessageId, participants };
+    }
   }
 
   await prisma.conversationParticipant.update({
@@ -296,6 +330,8 @@ export const markMessageAsRead = async (
 
   return { conversationId, userId, messageId, participants };
 };
+
+
 
 export const searchConversationMessages = async (
   userId: string,

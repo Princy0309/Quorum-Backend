@@ -124,3 +124,21 @@ export const chatLimiter = (req: Request, res: Response, next: NextFunction): vo
     });
 };
 
+export const socketMessageRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'socket_msg_v1',
+  points: 10,
+  duration: 5,
+  blockDuration: 5
+});
+
+export const checkSocketMessageRateLimit = async (userId: string): Promise<boolean> => {
+  try {
+    await socketMessageRateLimiter.consume(userId);
+    return true;
+  } catch (err) {
+    return false;
+  }
+};
+
+

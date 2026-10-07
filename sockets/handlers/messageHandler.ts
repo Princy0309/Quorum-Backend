@@ -2,6 +2,8 @@ import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket } from '../socketAuth.js';
 import { saveMessage, markMessageAsRead } from '../../services/chatService.js';
 import { sendPushToOfflineUsers } from '../../services/notificationService.js';
+import { checkSocketMessageRateLimit } from '../../middlewares/rateLimiter.js';
+import { sendMessageSchema, readMessageSchema } from '../../validators/chatValidators.js';
 import { CHAT_EVENTS } from '../../utils/constants.js';
 
 interface SendMessagePayload {
@@ -30,16 +32,19 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           return;
         }
 
-        const { conversationId, content, fileUrl, fileType } = payload || {};
-        if (!conversationId || typeof conversationId !== 'string') {
-          if (callback) callback({ success: false, error: 'conversationId string is required' });
+        const allowed = await checkSocketMessageRateLimit(senderId);
+        if (!allowed) {
+          if (callback) callback({ success: false, error: 'Rate limit exceeded. Please wait before sending more messages.' });
           return;
         }
 
-        if ((!content || typeof content !== 'string' || !content.trim()) && !fileUrl) {
-          if (callback) callback({ success: false, error: 'Message content or fileUrl is required' });
+        const { error, value } = sendMessageSchema.validate(payload);
+        if (error) {
+          if (callback) callback({ success: false, error: error.details[0].message });
           return;
         }
+
+        const { conversationId, content, fileUrl, fileType } = value;
 
         const { message, participants } = await saveMessage(
           senderId,
@@ -85,11 +90,13 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           return;
         }
 
-        const { conversationId, messageId } = payload || {};
-        if (!conversationId || typeof conversationId !== 'string' || !messageId || typeof messageId !== 'string') {
-          if (callback) callback({ success: false, error: 'conversationId and messageId are required' });
+        const { error, value } = readMessageSchema.validate(payload);
+        if (error) {
+          if (callback) callback({ success: false, error: error.details[0].message });
           return;
         }
+
+        const { conversationId, messageId } = value;
 
         const result = await markMessageAsRead(userId, conversationId, messageId);
 
@@ -114,5 +121,6 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
     }
   );
 };
+
 
 
