@@ -11,6 +11,7 @@ import setupSwagger from './config/swagger.js';
 import authRoutes from './routes/authRoutes.js';
 import otpRoutes from './routes/otpRoutes.js';
 import dmRoutes from './routes/dmRoutes.js';
+import conversationRoutes from './routes/conversationRoutes.js';
 import errorHandler from './middlewares/errorHandler.js';
 import verifyCSRF from './middlewares/csrfProtection.js';
 import logger from './utils/logger.js';
@@ -68,6 +69,7 @@ app.use(expressWinston.logger({
 app.use('/api/auth', authRoutes);
 app.use('/api/otp', otpRoutes);
 app.use('/api/dm', dmRoutes);
+app.use('/api/conversations', conversationRoutes);
 app.get('/api/csrf-token', (req: Request, res: Response) => {
   res.json({ csrfToken: res.locals.csrfToken || req.cookies['XSRF-TOKEN'] });
 });

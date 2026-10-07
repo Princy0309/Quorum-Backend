@@ -131,3 +131,49 @@ export const saveMessage = async (
   return { message, participants };
 };
 
+export const getConversationMessages = async (
+  userId: string,
+  conversationId: string,
+  cursor?: string,
+  limit: number = 20
+) => {
+  const participantExists = await isParticipant(userId, conversationId);
+  if (!participantExists) {
+    throw new ApiError(403, 'User is not a participant in this conversation');
+  }
+
+  const queryLimit = Math.min(Math.max(limit, 1), 50);
+
+  const messages = await prisma.message.findMany({
+    where: { conversationId },
+    take: queryLimit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    orderBy: { createdAt: 'desc' },
+    include: {
+      sender: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      }
+    }
+  });
+
+  let hasNextPage = false;
+  let nextCursor: string | null = null;
+
+  if (messages.length > queryLimit) {
+    hasNextPage = true;
+    const nextItem = messages.pop();
+    nextCursor = nextItem ? nextItem.id : null;
+  }
+
+  return {
+    messages,
+    nextCursor,
+    hasNextPage
+  };
+};
+
+
