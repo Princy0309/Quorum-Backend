@@ -297,6 +297,63 @@ export const markMessageAsRead = async (
   return { conversationId, userId, messageId, participants };
 };
 
+export const searchConversationMessages = async (
+  userId: string,
+  conversationId: string,
+  query: string,
+  page: number = 1,
+  limit: number = 20
+) => {
+  const participantExists = await isParticipant(userId, conversationId);
+  if (!participantExists) {
+    throw new ApiError(403, 'User is not a participant in this conversation');
+  }
+
+  const sanitizedQuery = query ? query.trim() : '';
+  if (!sanitizedQuery) {
+    return { messages: [], total: 0, page, totalPages: 0 };
+  }
+
+  const queryPage = Math.max(page, 1);
+  const queryLimit = Math.min(Math.max(limit, 1), 50);
+  const skip = (queryPage - 1) * queryLimit;
+
+  const whereClause = {
+    conversationId,
+    content: {
+      contains: sanitizedQuery,
+      mode: 'insensitive' as const
+    }
+  };
+
+  const [messages, total] = await Promise.all([
+    prisma.message.findMany({
+      where: whereClause,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: queryLimit,
+      include: {
+        sender: {
+          select: {
+            id: true,
+            name: true,
+            avatar: true
+          }
+        }
+      }
+    }),
+    prisma.message.count({ where: whereClause })
+  ]);
+
+  return {
+    messages,
+    total,
+    page: queryPage,
+    totalPages: Math.ceil(total / queryLimit)
+  };
+};
+
+
 
 
 
