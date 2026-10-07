@@ -176,4 +176,96 @@ export const getConversationMessages = async (
   };
 };
 
+export const getUserConversations = async (userId: string) => {
+  const userParticipants = await prisma.conversationParticipant.findMany({
+    where: { userId },
+    select: {
+      conversationId: true,
+      lastReadMessageId: true
+    }
+  });
+
+  const conversationIds = userParticipants.map((p) => p.conversationId);
+  const participantMap = new Map(userParticipants.map((p) => [p.conversationId, p.lastReadMessageId]));
+
+  const conversations = await prisma.conversation.findMany({
+    where: { id: { in: conversationIds } },
+    orderBy: { updatedAt: 'desc' },
+    include: {
+      participants: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              avatar: true
+            }
+          }
+        }
+      },
+      messages: {
+        take: 1,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true
+            }
+          }
+        }
+      }
+    }
+  });
+
+  const conversationsWithUnread = await Promise.all(
+    conversations.map(async (conv) => {
+      const lastReadId = participantMap.get(conv.id);
+      let unreadCount = 0;
+
+      if (lastReadId) {
+        const lastReadMsg = await prisma.message.findUnique({
+          where: { id: lastReadId },
+          select: { createdAt: true }
+        });
+
+        if (lastReadMsg) {
+          unreadCount = await prisma.message.count({
+            where: {
+              conversationId: conv.id,
+              senderId: { not: userId },
+              createdAt: { gt: lastReadMsg.createdAt }
+            }
+          });
+        } else {
+          unreadCount = await prisma.message.count({
+            where: {
+              conversationId: conv.id,
+              senderId: { not: userId }
+            }
+          });
+        }
+      } else {
+        unreadCount = await prisma.message.count({
+          where: {
+            conversationId: conv.id,
+            senderId: { not: userId }
+          }
+        });
+      }
+
+      return {
+        ...conv,
+        lastMessage: conv.messages[0] || null,
+        unreadCount
+      };
+    })
+  );
+
+  return conversationsWithUnread;
+};
+
+
 

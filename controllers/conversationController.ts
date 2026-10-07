@@ -1,6 +1,23 @@
 import { Request, Response, NextFunction } from 'express';
-import { getConversationMessages } from '../services/chatService.js';
+import { getConversationMessages, getUserConversations } from '../services/chatService.js';
 import { ApiError } from '../utils/ApiError.js';
+
+export const getUserConversationsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const conversations = await getUserConversations(userId);
+    res.status(200).json({
+      success: true,
+      data: conversations
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 
 export const getConversationMessagesController = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -28,3 +45,4 @@ export const getConversationMessagesController = async (req: Request, res: Respo
     next(err);
   }
 };
+
