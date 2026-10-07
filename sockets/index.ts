@@ -3,6 +3,7 @@ import { Server as HttpServer } from 'http';
 import { socketAuthMiddleware, AuthenticatedSocket } from './socketAuth.js';
 import { registerMessageHandler } from './handlers/messageHandler.js';
 import { registerTypingHandler } from './handlers/typingHandler.js';
+import { registerPresenceHandler } from './handlers/presenceHandler.js';
 
 let io: SocketIOServer | null = null;
 
@@ -24,6 +25,7 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
 
     registerMessageHandler(io!, socket);
     registerTypingHandler(io!, socket);
+    registerPresenceHandler(io!, socket);
   });
 
   return io;
