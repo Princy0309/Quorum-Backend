@@ -5,6 +5,7 @@ import { sendPushToOfflineUsers } from '../../services/notificationService.js';
 import { checkSocketMessageRateLimit } from '../../middlewares/rateLimiter.js';
 import { sendMessageSchema, readMessageSchema } from '../../validators/chatValidators.js';
 import { CHAT_EVENTS } from '../../utils/constants.js';
+import logger from '../../utils/logger.js';
 
 interface SendMessagePayload {
   conversationId: string;
@@ -64,7 +65,10 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           `New message from ${message.sender.name}`,
           content || 'Sent an attachment',
           { conversationId, messageId: message.id }
-        ).catch(() => {});
+        ).catch((err) => {
+          logger.error('Background FCM notification dispatch error', { error: err.message });
+        });
+
 
         if (callback) {
           callback({ success: true, data: message });

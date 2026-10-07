@@ -1,3 +1,33 @@
+import { getApps, initializeApp, cert } from 'firebase-admin/app';
+import { getMessaging, Messaging } from 'firebase-admin/messaging';
+import logger from '../utils/logger.js';
+
+let firebaseMessaging: Messaging | null = null;
+
+const initFirebaseAdmin = () => {
+  if (getApps().length > 0) {
+    return getMessaging();
+  }
+
+  const serviceAccountRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!serviceAccountRaw) {
+    return null;
+  }
+
+  try {
+    const serviceAccount = JSON.parse(serviceAccountRaw);
+    initializeApp({
+      credential: cert(serviceAccount)
+    });
+    return getMessaging();
+  } catch (err: any) {
+    logger.error('Failed to initialize Firebase Admin SDK', { error: err.message });
+    return null;
+  }
+};
+
+firebaseMessaging = initFirebaseAdmin();
+
 export interface PushPayload {
   tokens: string[];
   title: string;
@@ -5,28 +35,66 @@ export interface PushPayload {
   data?: Record<string, string>;
 }
 
-export const sendFCMNotification = async (payload: PushPayload) => {
-  const { tokens, title, body, data } = payload;
-  if (!tokens || tokens.length === 0) return;
+export interface SendFCMResult {
+  successCount: number;
+  failureCount: number;
+  invalidTokens: string[];
+}
 
-  const firebaseServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (!firebaseServiceAccount) {
-    return;
+export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCMResult> => {
+  const { tokens, title, body, data } = payload;
+  if (!tokens || tokens.length === 0) {
+    return { successCount: 0, failureCount: 0, invalidTokens: [] };
+  }
+
+  if (!firebaseMessaging) {
+    firebaseMessaging = initFirebaseAdmin();
+  }
+
+  if (!firebaseMessaging) {
+    logger.warn('Firebase Messaging is not initialized; skipping push notification dispatch');
+    return { successCount: 0, failureCount: tokens.length, invalidTokens: [] };
   }
 
   try {
-    const response = await fetch('https://fcm.googleapis.com/fcm/send', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `key=${firebaseServiceAccount}`
+    const response = await firebaseMessaging.sendEachForMulticast({
+      tokens,
+      notification: {
+        title,
+        body
       },
-      body: JSON.stringify({
-        registration_ids: tokens,
-        notification: { title, body },
-        data
-      })
+      data: data || {}
     });
-    await response.json();
-  } catch (err) {}
+
+    const invalidTokens: string[] = [];
+    response.responses.forEach((res, idx) => {
+      if (!res.success && res.error) {
+        const code = res.error.code;
+        logger.error('FCM message delivery failed for token', {
+          token: tokens[idx],
+          code: res.error.code,
+          message: res.error.message
+        });
+
+        if (
+          code === 'messaging/invalid-registration-token' ||
+          code === 'messaging/registration-token-not-registered'
+        ) {
+          invalidTokens.push(tokens[idx]);
+        }
+      }
+    });
+
+    return {
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+      invalidTokens
+    };
+  } catch (err: any) {
+    logger.error('Unhandled error during FCM multicast dispatch', { error: err.message });
+    return { successCount: 0, failureCount: tokens.length, invalidTokens: [] };
+  }
 };
+
+
+
