@@ -1,6 +1,6 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket } from '../socketAuth.js';
-import { saveMessage } from '../../services/chatService.js';
+import { saveMessage, markMessageAsRead } from '../../services/chatService.js';
 import { CHAT_EVENTS } from '../../utils/constants.js';
 
 interface SendMessagePayload {
@@ -8,6 +8,11 @@ interface SendMessagePayload {
   content: string;
   fileUrl?: string;
   fileType?: string;
+}
+
+interface ReadMessagePayload {
+  conversationId: string;
+  messageId: string;
 }
 
 export const registerMessageHandler = (io: SocketIOServer, socket: AuthenticatedSocket) => {
@@ -57,4 +62,47 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
       }
     }
   );
+
+  socket.on(
+    CHAT_EVENTS.MESSAGE_READ,
+    async (
+      payload: ReadMessagePayload,
+      callback?: (response: { success: boolean; data?: any; error?: string }) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId) {
+          if (callback) callback({ success: false, error: 'Unauthorized socket' });
+          return;
+        }
+
+        const { conversationId, messageId } = payload || {};
+        if (!conversationId || typeof conversationId !== 'string' || !messageId || typeof messageId !== 'string') {
+          if (callback) callback({ success: false, error: 'conversationId and messageId are required' });
+          return;
+        }
+
+        const result = await markMessageAsRead(userId, conversationId, messageId);
+
+        result.participants.forEach((p) => {
+          if (p.userId !== userId) {
+            io.to(`user:${p.userId}`).emit(CHAT_EVENTS.MESSAGE_READ, {
+              conversationId: result.conversationId,
+              userId: result.userId,
+              messageId: result.messageId
+            });
+          }
+        });
+
+        if (callback) {
+          callback({ success: true, data: { conversationId, messageId } });
+        }
+      } catch (err: any) {
+        if (callback) {
+          callback({ success: false, error: err.message || 'Failed to mark message as read' });
+        }
+      }
+    }
+  );
 };
+

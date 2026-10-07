@@ -267,5 +267,36 @@ export const getUserConversations = async (userId: string) => {
   return conversationsWithUnread;
 };
 
+export const markMessageAsRead = async (
+  userId: string,
+  conversationId: string,
+  messageId: string
+) => {
+  const participantExists = await isParticipant(userId, conversationId);
+  if (!participantExists) {
+    throw new ApiError(403, 'User is not a participant in this conversation');
+  }
+
+  await prisma.conversationParticipant.update({
+    where: {
+      conversationId_userId: {
+        conversationId,
+        userId
+      }
+    },
+    data: {
+      lastReadMessageId: messageId
+    }
+  });
+
+  const participants = await prisma.conversationParticipant.findMany({
+    where: { conversationId },
+    select: { userId: true }
+  });
+
+  return { conversationId, userId, messageId, participants };
+};
+
+
 
 
