@@ -59,8 +59,10 @@
     "nodemailer": "^10.0.10",
     "prisma": "^6.19.3",
     "rate-limiter-flexible": "^11.2.1",
+    "socket.io": "^4.8.4",
     "swagger-ui-express": "^5.0.1",
     "tsx": "^4.23.15",
+    "werift": "^0.25.0",
     "winston": "^3.19.0",
     "zod": "^4.6.5"
   }
