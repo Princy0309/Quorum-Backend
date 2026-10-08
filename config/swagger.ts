@@ -6,7 +6,7 @@ const swaggerDocument = {
   info: {
     title: 'Quorum Backend API Documentation',
     version: '1.0.0',
-    description: 'Interactive API documentation for Quorum Authentication, OTP verification, and session management.',
+    description: 'Interactive API documentation for Quorum Authentication, OTP verification, User Search, Conversations, Direct Messaging, and Session Management.',
   },
   servers: [
     {
@@ -208,48 +208,85 @@ const swaggerDocument = {
         },
       },
     },
-          '/api/users/onboarding': {
-        patch: {
-          tags: ['User Profile & Onboarding'],
-          summary: 'Save user onboarding use cases',
-          description: 'Saves user choices for how they want to use Quorum (Organization, Freelance, Hire & Collaborate, Community). Requires JWT Bearer authentication.',
-          security: [{ BearerAuth: [] }],
-          requestBody: {
+    '/api/users/search': {
+      get: {
+        tags: ['User Profile & Search'],
+        summary: 'Search users by name or email',
+        description: 'Performs a case-insensitive search across user names and email addresses. Automatically excludes the requesting user and supports limit/page pagination.',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'q',
+            in: 'query',
             required: false,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    useCases: {
-                      type: 'array',
-                      items: {
-                        type: 'string',
-                        enum: ['ORGANIZATION', 'FREELANCE', 'HIRE_COLLABORATE', 'COMMUNITY'],
-                      },
-                      example: ['ORGANIZATION', 'COMMUNITY'],
+            schema: { type: 'string' },
+            description: 'Search term for name or email (e.g., "john" or "john@example.com")',
+          },
+          {
+            name: 'page',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 1 },
+            description: 'Page number for pagination',
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 100 },
+            description: 'Number of user results per page',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Matching users retrieved successfully with pagination details',
+          },
+          401: { description: 'Unauthorized' },
+        },
+      },
+    },
+    '/api/users/onboarding': {
+      patch: {
+        tags: ['User Profile & Search'],
+        summary: 'Save user onboarding use cases',
+        description: 'Saves user choices for how they want to use Quorum (Organization, Freelance, Hire & Collaborate, Community). Requires JWT Bearer authentication.',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  useCases: {
+                    type: 'array',
+                    items: {
+                      type: 'string',
+                      enum: ['ORGANIZATION', 'FREELANCE', 'HIRE_COLLABORATE', 'COMMUNITY'],
                     },
+                    example: ['ORGANIZATION', 'COMMUNITY'],
                   },
                 },
               },
             },
           },
-          responses: {
-            200: {
-              description: 'Onboarding preferences saved successfully',
-            },
-            400: {
-              description: 'Validation error: invalid use cases',
-            },
-            401: {
-              description: 'Unauthorized: missing or invalid JWT token',
-            },
-            403: {
-              description: 'Email not verified',
-            },
+        },
+        responses: {
+          200: {
+            description: 'Onboarding preferences saved successfully',
+          },
+          400: {
+            description: 'Validation error: invalid use cases',
+          },
+          401: {
+            description: 'Unauthorized: missing or invalid JWT token',
+          },
+          403: {
+            description: 'Email not verified',
           },
         },
       },
+    },
 
     '/api/otp/send-verification': {
       post: {

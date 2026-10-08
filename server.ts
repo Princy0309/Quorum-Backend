@@ -6,7 +6,7 @@ import prisma from './config/prisma.js';
 import app from './app.js';
 import { emailWorker, queueRedisConnection } from './queues/emailQueue.js';
 import redis from './config/redis.js';
-import { initSocketServer } from './sockets/index.js';
+import { initSocketServer } from './sockets/socketServer.js';
 
 let server: any;
 

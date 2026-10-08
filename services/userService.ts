@@ -33,4 +33,56 @@ export const saveUserOnboarding = async (userId: string, useCases: UseCase[]) =>
     });
 
     return updateUser;
-}
+};
+
+export const searchUsers = async (
+  currentUserId: string,
+  query: string = '',
+  page: number = 1,
+  limit: number = 20
+) => {
+  const pageNum = Math.max(1, Number(page) || 1);
+  const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
+  const skip = (pageNum - 1) * limitNum;
+  const trimmed = query.trim();
+
+  const whereCondition: any = {
+    id: { not: currentUserId },
+  };
+
+  if (trimmed) {
+    whereCondition.OR = [
+      { name: { contains: trimmed, mode: 'insensitive' } },
+      { email: { contains: trimmed, mode: 'insensitive' } },
+    ];
+  }
+
+  const [users, totalCount] = await Promise.all([
+    prisma.user.findMany({
+      where: whereCondition,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        avatar: true,
+        createdAt: true,
+      },
+      skip,
+      take: limitNum,
+      orderBy: { name: 'asc' },
+    }),
+    prisma.user.count({
+      where: whereCondition,
+    }),
+  ]);
+
+  return {
+    users,
+    pagination: {
+      page: pageNum,
+      limit: limitNum,
+      totalCount,
+      totalPages: Math.ceil(totalCount / limitNum),
+    },
+  };
+};
