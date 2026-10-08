@@ -141,4 +141,21 @@ export const checkSocketMessageRateLimit = async (userId: string): Promise<boole
   }
 };
 
+export const socketTypingRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'socket_typing_v1',
+  points: 15,
+  duration: 5,
+  blockDuration: 3
+});
+
+export const checkSocketTypingRateLimit = async (userId: string): Promise<boolean> => {
+  try {
+    await socketTypingRateLimiter.consume(userId);
+    return true;
+  } catch (err) {
+    return false;
+  }
+};
+
 

@@ -2,6 +2,7 @@ import redis from '../config/redis.js';
 import { generateOTP } from '../utils/generateOTP.js';
 import { hashToken } from '../utils/hashToken.js';
 import { addEmailToQueue } from '../queues/emailQueue.js';
+import logger from '../utils/logger.js';
 
 const OTP_TTL_SECONDS = parseInt(process.env.OTP_TTL_SECONDS || '600', 10);
 
@@ -18,7 +19,9 @@ export const storeAndSendOTP = async (
       if (parsed.createdAt && Date.now() - parsed.createdAt < 30 * 1000) {
         return false;
       }
-    } catch (e) {}
+    } catch (e: any) {
+      logger.error('Failed to parse existing OTP record from Redis', { redisKey, error: e.message });
+    }
   }
 
   const { code, codeHash } = generateOTP();
