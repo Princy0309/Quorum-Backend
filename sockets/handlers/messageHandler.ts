@@ -9,6 +9,7 @@ import logger from '../../utils/logger.js';
 
 interface SendMessagePayload {
   conversationId: string;
+  clientMessageId?: string;
   content: string;
   fileUrl?: string;
   fileType?: string;
@@ -89,15 +90,23 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           return;
         }
 
-        const { conversationId, content, fileUrl, fileType } = value;
+        const { conversationId, clientMessageId, content, fileUrl, fileType } = value;
 
-        const { message, participants } = await saveMessage(
+        const { message, participants, isDuplicate } = await saveMessage(
           senderId,
           conversationId,
           content ? content.trim() : '',
           fileUrl,
-          fileType
+          fileType,
+          clientMessageId
         );
+
+        if (isDuplicate) {
+          if (callback) {
+            callback({ success: true, data: message });
+          }
+          return;
+        }
 
         io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
 

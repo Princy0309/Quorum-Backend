@@ -142,7 +142,8 @@ export const saveMessage = async (
   conversationId: string,
   content: string,
   fileUrl?: string,
-  fileType?: string
+  fileType?: string,
+  clientMessageId?: string
 ) => {
   return await prisma.$transaction(async (tx) => {
     const participant = await tx.conversationParticipant.findUnique({
@@ -158,6 +159,29 @@ export const saveMessage = async (
       throw new ApiError(403, 'User is not a participant in this conversation');
     }
 
+    if (clientMessageId) {
+      const existingMessage = await tx.message.findUnique({
+        where: { clientMessageId },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true
+            }
+          }
+        }
+      });
+
+      if (existingMessage) {
+        const participants = await tx.conversationParticipant.findMany({
+          where: { conversationId },
+          select: { userId: true }
+        });
+        return { message: existingMessage, participants, isDuplicate: true };
+      }
+    }
+
     const updatedConversation = await tx.conversation.update({
       where: { id: conversationId },
       data: {
@@ -166,32 +190,60 @@ export const saveMessage = async (
       }
     });
 
-    const message = await tx.message.create({
-      data: {
-        conversationId,
-        senderId,
-        content,
-        fileUrl,
-        fileType,
-        seq: updatedConversation.lastSeq
-      },
-      include: {
-        sender: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true
+    let message;
+    try {
+      message = await tx.message.create({
+        data: {
+          conversationId,
+          senderId,
+          content,
+          fileUrl,
+          fileType,
+          clientMessageId,
+          seq: updatedConversation.lastSeq
+        },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true
+            }
           }
         }
+      });
+    } catch (err: any) {
+      if (err?.code === 'P2002' && clientMessageId) {
+        const existingMessage = await tx.message.findUnique({
+          where: { clientMessageId },
+          include: {
+            sender: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true
+              }
+            }
+          }
+        });
+
+        if (existingMessage) {
+          const participants = await tx.conversationParticipant.findMany({
+            where: { conversationId },
+            select: { userId: true }
+          });
+          return { message: existingMessage, participants, isDuplicate: true };
+        }
       }
-    });
+      throw err;
+    }
 
     const participants = await tx.conversationParticipant.findMany({
       where: { conversationId },
       select: { userId: true }
     });
 
-    return { message, participants };
+    return { message, participants, isDuplicate: false };
   });
 };
 

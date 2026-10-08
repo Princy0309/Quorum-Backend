@@ -2,6 +2,7 @@ import Joi from 'joi';
 
 export const sendMessageSchema = Joi.object({
   conversationId: Joi.string().trim().max(100).required(),
+  clientMessageId: Joi.string().trim().max(100).optional(),
   content: Joi.string().trim().max(5000).allow(''),
   fileUrl: Joi.string().uri({ scheme: ['http', 'https'] }).max(2048).allow(null, ''),
   fileType: Joi.string().valid('image', 'video', 'audio', 'file').allow(null, '')
