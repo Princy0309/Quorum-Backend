@@ -161,14 +161,23 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
 
         const result = await markMessageAsRead(userId, conversationId, messageId);
 
-        io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_READ, {
-          conversationId: result.conversationId,
-          userId: result.userId,
-          messageId: result.messageId
-        });
+        if (result.updated) {
+          io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_READ, {
+            conversationId: result.conversationId,
+            userId: result.userId,
+            messageId: result.messageId
+          });
+        }
 
         if (callback) {
-          callback({ success: true, data: { conversationId, messageId } });
+          callback({
+            success: true,
+            data: {
+              conversationId: result.conversationId,
+              messageId: result.messageId,
+              updated: result.updated
+            }
+          });
         }
       } catch (err: any) {
         if (callback) {

@@ -60,10 +60,10 @@ export const searchConversationMessagesController = async (req: Request, res: Re
     }
 
     const q = typeof req.query.q === 'string' ? req.query.q : '';
-    const page = typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : 1;
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
     const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 20;
 
-    const result = await searchConversationMessages(userId, conversationId, q, page, limit);
+    const result = await searchConversationMessages(userId, conversationId, q, cursor, limit);
 
     res.status(200).json({
       success: true,

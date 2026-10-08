@@ -433,7 +433,13 @@ export const markMessageAsRead = async (
       where: { conversationId },
       select: { userId: true }
     });
-    return { conversationId, userId, messageId: participant.lastReadMessageId, participants };
+    return {
+      conversationId,
+      userId,
+      messageId: participant.lastReadMessageId || messageId,
+      updated: false,
+      participants
+    };
   }
 
   await prisma.conversationParticipant.update({
@@ -454,14 +460,14 @@ export const markMessageAsRead = async (
     select: { userId: true }
   });
 
-  return { conversationId, userId, messageId, participants };
+  return { conversationId, userId, messageId, updated: true, participants };
 };
 
 export const searchConversationMessages = async (
   userId: string,
   conversationId: string,
   query: string,
-  page: number = 1,
+  cursor?: string,
   limit: number = 20
 ) => {
   const participantExists = await isParticipant(userId, conversationId);
@@ -471,12 +477,10 @@ export const searchConversationMessages = async (
 
   const sanitizedQuery = query ? query.trim() : '';
   if (!sanitizedQuery) {
-    return { messages: [], total: 0, page, totalPages: 0 };
+    return { messages: [], nextCursor: null, hasNextPage: false };
   }
 
-  const queryPage = Math.max(page, 1);
   const queryLimit = Math.min(Math.max(limit, 1), 50);
-  const skip = (queryPage - 1) * queryLimit;
 
   const whereClause = {
     conversationId,
@@ -486,30 +490,35 @@ export const searchConversationMessages = async (
     }
   };
 
-  const [messages, total] = await Promise.all([
-    prisma.message.findMany({
-      where: whereClause,
-      orderBy: [{ seq: 'desc' }, { id: 'desc' }],
-      skip,
-      take: queryLimit,
-      include: {
-        sender: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true
-          }
+  const messages = await prisma.message.findMany({
+    where: whereClause,
+    orderBy: [{ seq: 'desc' }, { id: 'desc' }],
+    take: queryLimit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    include: {
+      sender: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
         }
       }
-    }),
-    prisma.message.count({ where: whereClause })
-  ]);
+    }
+  });
+
+  let hasNextPage = false;
+  let nextCursor: string | null = null;
+
+  if (messages.length > queryLimit) {
+    hasNextPage = true;
+    const nextItem = messages.pop();
+    nextCursor = nextItem ? nextItem.id : null;
+  }
 
   return {
     messages,
-    total,
-    page: queryPage,
-    totalPages: Math.ceil(total / queryLimit)
+    nextCursor,
+    hasNextPage
   };
 };
 
