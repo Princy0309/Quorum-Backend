@@ -1,11 +1,17 @@
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "rhel-openssl-3.0.x", "debian-openssl-3.0.x"]
-}
-
+    binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x", "rhel-openssl-3.0.x"]
+ }
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+enum UseCase {
+  ORGANIZATION
+  FREELANCE
+  HIRE_COLLABORATE
+  COMMUNITY
 }
 
 model User {
@@ -22,6 +28,8 @@ model User {
   failedLoginAttempts      Int                       @default(0)
   lockedUntil              DateTime?
   isEmailVerified          Boolean                   @default(false)
+  isOnboarded              Boolean                   @default(false)
+  useCases                 UseCase[]
   passwordResetTokens      PasswordResetToken[]
   refreshTokens            RefreshToken[]
   conversationParticipants ConversationParticipant[]

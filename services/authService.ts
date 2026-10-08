@@ -46,15 +46,19 @@ export const registerUser = async (name: string, email: string, passwordUnHashed
   
   if (existingUser) {
     if (existingUser.isEmailVerified) {
-      return { isNew: false, isVerified: true };
+      throw new ApiError(409, 'Email already registered. Please log in.');
     }
+    const updatedUser = await prisma.user.update({
+      where: { id: existingUser.id },
+      data: { name, passwordHash },
+    });
     try {
-      await storeAndSendOTP(existingUser.email, `otp:verify:${existingUser.id}`, 'verification', { name, passwordHash });
+      await storeAndSendOTP(updatedUser.email, `otp:verify:${updatedUser.id}`, 'verification');
     } catch (err) {
       console.error('Failed to send OTP during registration (existing unverified):', err);
     }
 
-    return { isNew: false, isVerified: false };
+    return { user: updatedUser, isNew: false, isVerified: false };
   }
 
   let user;
@@ -64,7 +68,7 @@ export const registerUser = async (name: string, email: string, passwordUnHashed
     });
   } catch (err: any) {
     if (err.code === 'P2002') {
-      return { isNew: false, isVerified: false };
+      throw new ApiError(409, 'Email already registered. Please log in.');
     }
     throw err;
   }
@@ -75,7 +79,7 @@ export const registerUser = async (name: string, email: string, passwordUnHashed
     console.error('Failed to send OTP during registration:', err);
   }
 
-  return { isNew: true, isVerified: false };
+  return { user, isNew: true, isVerified: false };
 };
 
 export const loginUser = async (email: string, password: string, ip: string, req: Request) => {

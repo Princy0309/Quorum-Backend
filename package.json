@@ -46,6 +46,7 @@
   "dependencies": {
     "@prisma/client": "^6.19.3",
     "@socket.io/redis-adapter": "^8.3.0",
+    "@types/joi": "^17.2.2",
     "bcryptjs": "^3.0.3",
     "bullmq": "^6.3.11",
     "cookie-parser": "^1.4.7",
@@ -64,6 +65,8 @@
     "rate-limiter-flexible": "^11.2.1",
     "socket.io": "^4.8.4",
     "swagger-ui-express": "^5.0.1",
-    "winston": "^3.19.0"
+    "tsx": "^4.23.15",
+    "winston": "^3.19.0",
+    "zod": "^4.6.5"
   }
 }

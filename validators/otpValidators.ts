@@ -1,23 +1,20 @@
-import Joi from 'joi';
+import { z } from 'zod';
 import { passwordSchema } from './authValidators.js';
 
-export const verifyEmailSchema = Joi.object({
-  email: Joi.string().email().optional(),
-  otp: Joi.alternatives().try(
-    Joi.string().length(6),
-    Joi.number().integer().min(100000).max(999999)
-  ).required(),
-}).unknown(true);
+export const verifyEmailSchema = z.object({
+  email: z.string().email().optional(),
+  otp: z.string().length(6),
+    
+  
+}).passthrough();
 
-export const sendResetSchema = Joi.object({
-  email: Joi.string().email().max(100).required(),
-}).unknown(true);
+export const sendResetSchema = z.object({
+  email: z.string().email().max(100),
+}).passthrough();
 
-export const resetPasswordSchema = Joi.object({
-  email: Joi.string().email().max(100).required(),
-  otp: Joi.alternatives().try(
-    Joi.string().length(6),
-    Joi.number().integer().min(100000).max(999999)
-  ).required(),
+export const resetPasswordSchema = z.object({
+  email: z.string().email().max(100),
+  otp: z.string().length(6),
+
   newPassword: passwordSchema,
-}).unknown(true);
+}).passthrough();

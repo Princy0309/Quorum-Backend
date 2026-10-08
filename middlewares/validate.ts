@@ -1,14 +1,14 @@
 import { Request, Response, NextFunction } from 'express';
-import { Schema } from 'joi';
+import { ZodSchema } from 'zod';
 import { ApiError } from '../utils/ApiError.js';
 
-export const validate = (schema: Schema) => {
+export const validate = (schema: ZodSchema) => {
   return (req: Request, res: Response, next: NextFunction) => {
-    const { error, value } = schema.validate(req.body);
-    if (error) {
-      return next(new ApiError(400, error.details[0].message));
+    const result = schema.safeParse(req.body);
+    if (!result.success) {
+      return next(new ApiError(400, result.error.issues[0].message));
     }
-    req.body = value;
+    req.body = result.data;
     next();
   };
 };

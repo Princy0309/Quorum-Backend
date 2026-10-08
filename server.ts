@@ -11,30 +11,39 @@ import { initSocketServer } from './sockets/index.js';
 let server: any;
 
 const startServer = async (): Promise<void> => {
-  try {
-    await prisma.$connect();
-    console.log('Database connected');
+  const PORT = Number(process.env.PORT || 5000);
+  
+  const httpServer = createServer(app);
+  initSocketServer(httpServer);
 
-    const httpServer = createServer(app);
-    initSocketServer(httpServer);
+  server = httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`Quorum server running on port ${PORT}`);
+  });
 
-    const PORT = process.env.PORT || 5000;
-    server = httpServer.listen(PORT, () => {
-      console.log(`Quorum server running on port ${PORT}`);
-    });
-  } catch (err) {
-    console.error('Failed to connect to the database or start server:', err);
-    process.exit(1);
+  const maxRetries = 10;
+  for (let i = 1; i <= maxRetries; i++) {
+    try {
+      await prisma.$connect();
+      console.log('Database connected successfully');
+      break;
+    } catch (err) {
+      console.warn(`Database connection attempt ${i}/${maxRetries} failed. Retrying in 2s...`);
+      if (i === maxRetries) {
+        console.error('Could not connect to database after maximum retries:', err);
+      } else {
+        await new Promise((res) => setTimeout(res, 2000));
+      }
+    }
   }
 };
 
 const gracefulShutdown = async (signal: string) => {
   console.log(`Received ${signal}. Shutting down gracefully...`);
-  
+
   if (server) {
     server.close(async () => {
       console.log('HTTP server closed.');
-      
+
       try {
         await emailWorker.close();
         console.log('Email worker closed.');

@@ -1,4 +1,5 @@
 import Joi from 'joi';
+import { z } from 'zod';
 
 const isTrustedMediaUrl = (value: string, helpers: Joi.CustomHelpers) => {
   if (!value) return value;
@@ -49,11 +50,11 @@ export const typingSchema = Joi.object({
   conversationId: Joi.string().trim().max(100).required()
 });
 
-export const registerDeviceTokenSchema = Joi.object({
-  token: Joi.string().trim().min(10).max(500).required(),
-  platform: Joi.string().trim().valid('web', 'android', 'ios').default('web')
+export const registerDeviceTokenSchema = z.object({
+  token: z.string().trim().min(10).max(500),
+  platform: z.enum(['web', 'android', 'ios']).default('web')
 });
 
-export const unregisterDeviceTokenSchema = Joi.object({
-  token: Joi.string().trim().min(10).max(500).required()
+export const unregisterDeviceTokenSchema = z.object({
+  token: z.string().trim().min(10).max(500)
 });
