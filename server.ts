@@ -1,22 +1,25 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import { createServer } from 'http';
 import prisma from './config/prisma.js';
 import app from './app.js';
 import { emailWorker, queueRedisConnection } from './queues/emailQueue.js';
 import redis from './config/redis.js';
+import { initSocketServer } from './sockets/socketServer.js';
 
 let server: any;
 
 const startServer = async (): Promise<void> => {
   const PORT = process.env.PORT || 5000;
   
+  const httpServer = createServer(app);
+  initSocketServer(httpServer);
 
-  server = app.listen(Number(PORT), '0.0.0.0', () => {
+  server = httpServer.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Quorum server running on port ${PORT}`);
   });
 
-  
   const maxRetries = 10;
   for (let i = 1; i <= maxRetries; i++) {
     try {
