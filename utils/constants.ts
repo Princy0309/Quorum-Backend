@@ -7,5 +7,6 @@ export const CHAT_EVENTS = {
   PRESENCE_ONLINE: 'presence:online',
   PRESENCE_OFFLINE: 'presence:offline',
   CONVERSATION_JOIN: 'conversation:join',
-  CONVERSATION_LEAVE: 'conversation:leave'
+  CONVERSATION_LEAVE: 'conversation:leave',
+  CONVERSATION_UPDATE: 'conversation:update'
 } as const;

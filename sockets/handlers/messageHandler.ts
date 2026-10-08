@@ -102,7 +102,10 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
 
         participants.forEach((p) => {
-          io.to(`user:${p.userId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
+          io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+            conversationId,
+            lastMessage: message
+          });
         });
 
         const recipientUserIds = participants.map((p) => p.userId).filter((id) => id !== senderId);

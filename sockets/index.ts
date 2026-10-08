@@ -40,20 +40,10 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
 
   io.use(socketAuthMiddleware);
 
-  io.on('connection', async (socket: AuthenticatedSocket) => {
+  io.on('connection', (socket: AuthenticatedSocket) => {
     const userId = socket.data.user?.id;
     if (userId) {
       socket.join(`user:${userId}`);
-
-      try {
-        const userParticipants = await prisma.conversationParticipant.findMany({
-          where: { userId },
-          select: { conversationId: true }
-        });
-        userParticipants.forEach((p) => {
-          socket.join(`conversation:${p.conversationId}`);
-        });
-      } catch (err) {}
     }
 
     registerMessageHandler(io!, socket);

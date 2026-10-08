@@ -144,45 +144,55 @@ export const saveMessage = async (
   fileUrl?: string,
   fileType?: string
 ) => {
-  const participantExists = await isParticipant(senderId, conversationId);
-  if (!participantExists) {
-    throw new ApiError(403, 'User is not a participant in this conversation');
-  }
-
-  const updatedConversation = await prisma.conversation.update({
-    where: { id: conversationId },
-    data: {
-      updatedAt: new Date(),
-      lastSeq: { increment: 1 }
-    }
-  });
-
-  const message = await prisma.message.create({
-    data: {
-      conversationId,
-      senderId,
-      content,
-      fileUrl,
-      fileType,
-      seq: updatedConversation.lastSeq
-    },
-    include: {
-      sender: {
-        select: {
-          id: true,
-          name: true,
-          avatar: true
+  return await prisma.$transaction(async (tx) => {
+    const participant = await tx.conversationParticipant.findUnique({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId: senderId
         }
       }
+    });
+
+    if (!participant) {
+      throw new ApiError(403, 'User is not a participant in this conversation');
     }
-  });
 
-  const participants = await prisma.conversationParticipant.findMany({
-    where: { conversationId },
-    select: { userId: true }
-  });
+    const updatedConversation = await tx.conversation.update({
+      where: { id: conversationId },
+      data: {
+        updatedAt: new Date(),
+        lastSeq: { increment: 1 }
+      }
+    });
 
-  return { message, participants };
+    const message = await tx.message.create({
+      data: {
+        conversationId,
+        senderId,
+        content,
+        fileUrl,
+        fileType,
+        seq: updatedConversation.lastSeq
+      },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            name: true,
+            avatar: true
+          }
+        }
+      }
+    });
+
+    const participants = await tx.conversationParticipant.findMany({
+      where: { conversationId },
+      select: { userId: true }
+    });
+
+    return { message, participants };
+  });
 };
 
 export const getConversationMessages = async (
