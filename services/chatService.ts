@@ -137,6 +137,47 @@ export const getCoParticipantUserIds = async (userId: string): Promise<string[]>
   return coParticipants.map((p) => p.userId);
 };
 
+export const deriveFileTypeFromUrl = (fileUrl?: string, clientType?: string): string | undefined => {
+  if (!fileUrl) return undefined;
+
+  try {
+    const parsed = new URL(fileUrl);
+    const pathname = parsed.pathname.toLowerCase();
+
+    if (pathname.includes('/image/upload/') || pathname.includes('/images/')) {
+      return 'image';
+    }
+    if (pathname.includes('/video/upload/') || pathname.includes('/videos/')) {
+      return 'video';
+    }
+    if (pathname.includes('/audio/upload/') || pathname.includes('/audios/')) {
+      return 'audio';
+    }
+
+    const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.tiff', '.heic'];
+    const videoExts = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v', '.flv'];
+    const audioExts = ['.mp3', '.wav', '.ogg', '.aac', '.flac', '.m4a', '.opus'];
+
+    if (imageExts.some((ext) => pathname.endsWith(ext))) {
+      return 'image';
+    }
+    if (videoExts.some((ext) => pathname.endsWith(ext))) {
+      return 'video';
+    }
+    if (audioExts.some((ext) => pathname.endsWith(ext))) {
+      return 'audio';
+    }
+
+    if (clientType && ['image', 'video', 'audio', 'file'].includes(clientType)) {
+      return clientType;
+    }
+
+    return 'file';
+  } catch (err) {
+    return clientType || 'file';
+  }
+};
+
 export const saveMessage = async (
   senderId: string,
   conversationId: string,
@@ -145,6 +186,7 @@ export const saveMessage = async (
   fileType?: string,
   clientMessageId?: string
 ) => {
+  const derivedType = deriveFileTypeFromUrl(fileUrl, fileType);
   return await prisma.$transaction(async (tx) => {
     const participant = await tx.conversationParticipant.findUnique({
       where: {
@@ -198,7 +240,7 @@ export const saveMessage = async (
           senderId,
           content,
           fileUrl,
-          fileType,
+          fileType: derivedType,
           clientMessageId,
           seq: updatedConversation.lastSeq
         },

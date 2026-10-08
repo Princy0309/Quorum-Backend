@@ -1,6 +1,6 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket } from '../socketAuth.js';
-import { setUserOnline, setUserOffline } from '../../services/presenceService.js';
+import { setUserOnline, setUserOffline, refreshUserPresence } from '../../services/presenceService.js';
 import { getCoParticipantUserIds } from '../../services/chatService.js';
 import { CHAT_EVENTS } from '../../utils/constants.js';
 
@@ -16,7 +16,13 @@ export const registerPresenceHandler = async (io: SocketIOServer, socket: Authen
     });
   }
 
+  const heartbeatInterval = setInterval(() => {
+    refreshUserPresence(userId).catch(() => {});
+  }, 25000);
+
   socket.on('disconnect', async () => {
+    clearInterval(heartbeatInterval);
+
     const isLastDisconnect = await setUserOffline(userId, socket.id);
     if (isLastDisconnect) {
       const contacts = await getCoParticipantUserIds(userId);
