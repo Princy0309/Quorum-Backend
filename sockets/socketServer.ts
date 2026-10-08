@@ -2,7 +2,8 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import { verifyAccessToken } from '../services/tokenService.js';
 import prisma from '../config/prisma.js';
-import { handleJoinMeeting, handleLeaveMeeting } from './meetingPresence.js';
+import { handleJoinMeeting, handleLeaveMeeting, handleDisconnectCleanup } from './meetingPresence.js';
+import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.js';
 
 export interface AuthenticatedSocket extends Socket {
   data: {
@@ -80,8 +81,17 @@ export const initSocketServer = (httpServer: HTTPServer): SocketIOServer => {
       handleLeaveMeeting(ioServer!, socket, data?.meetingCode);
     });
 
+    socket.on('meeting:admit-participant', (data: { meetingCode: string; targetUserId: string }) => {
+      handleAdmitParticipant(ioServer!, socket, data);
+    });
+
+    socket.on('meeting:reject-participant', (data: { meetingCode: string; targetUserId: string }) => {
+      handleRejectParticipant(ioServer!, socket, data);
+    });
+
     socket.on('disconnect', () => {
       console.log(`Socket disconnected: ${socket.id}`);
+      handleDisconnectCleanup(ioServer!, socket);
     });
   });
 

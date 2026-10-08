@@ -61,7 +61,7 @@ export const getOrCreateMeetingState = async (meetingCode: string, userId: strin
 export const handleJoinMeeting = async (io: Server, socket: Socket, meetingCode: string) => {
   const user = socket.data.user;
   if (!user || !user.id) {
-    socket.emit('meeting:error', { message: 'Unauthorized' });
+    socket.emit('meeting:error', { message: 'Unauthorized: Authentication required' });
     return;
   }
 
@@ -78,6 +78,27 @@ export const handleJoinMeeting = async (io: Server, socket: Socket, meetingCode:
     roomState.hostUserId = user.id;
   }
 
+  if (!isHost && roomState.waitingRoomEnabled) {
+    const waitingUser: WaitingUser = {
+      userId: user.id,
+      name: user.name || 'Guest',
+      socketId: socket.id,
+    };
+    roomState.waitingRoom.set(user.id, waitingUser);
+    socketToMeetingMap.set(socket.id, normalizedCode);
+
+    socket.emit('meeting:waiting-room', {
+      message: 'You are in the waiting room. Please wait for the host to admit you.',
+      meetingCode: normalizedCode,
+    });
+
+    const hostParticipant = Array.from(roomState.participants.values()).find((p) => p.role === 'host');
+    if (hostParticipant) {
+      io.to(hostParticipant.socketId).emit('meeting:guest-waiting', { user: waitingUser });
+    }
+    return;
+  }
+
   const participantRole: 'host' | 'participant' = isHost ? 'host' : 'participant';
   const participant: Participant = {
     userId: user.id,
@@ -92,11 +113,13 @@ export const handleJoinMeeting = async (io: Server, socket: Socket, meetingCode:
   socket.join(normalizedCode);
 
   const activeParticipants = Array.from(roomState.participants.values());
+  const waitingUsersList = Array.from(roomState.waitingRoom.values());
 
   socket.emit('meeting:joined', {
     meetingCode: normalizedCode,
     role: participantRole,
     participants: activeParticipants,
+    waitingRoom: isHost ? waitingUsersList : [],
   });
 
   socket.to(normalizedCode).emit('meeting:participant-joined', {
@@ -139,5 +162,12 @@ export const handleLeaveMeeting = (io: Server, socket: Socket, meetingCode: stri
 
   if (roomState.participants.size === 0 && roomState.waitingRoom.size === 0) {
     meetingRooms.delete(meetingCode);
+  }
+};
+
+export const handleDisconnectCleanup = (io: Server, socket: Socket) => {
+  const meetingCode = socketToMeetingMap.get(socket.id);
+  if (meetingCode) {
+    handleLeaveMeeting(io, socket, meetingCode);
   }
 };
