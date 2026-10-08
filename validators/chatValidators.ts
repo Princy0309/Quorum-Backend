@@ -15,3 +15,12 @@ export const readMessageSchema = Joi.object({
 export const typingSchema = Joi.object({
   conversationId: Joi.string().trim().max(100).required()
 });
+
+export const registerDeviceTokenSchema = Joi.object({
+  token: Joi.string().trim().min(10).max(500).required(),
+  platform: Joi.string().trim().valid('web', 'android', 'ios').default('web')
+});
+
+export const unregisterDeviceTokenSchema = Joi.object({
+  token: Joi.string().trim().min(10).max(500).required()
+});

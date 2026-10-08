@@ -1,5 +1,10 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
+import { validate } from '../middlewares/validate.js';
+import {
+  registerDeviceTokenSchema,
+  unregisterDeviceTokenSchema
+} from '../validators/chatValidators.js';
 import {
   registerDeviceController,
   unregisterDeviceController
@@ -7,7 +12,7 @@ import {
 
 const router = Router();
 
-router.post('/', authMiddleware, registerDeviceController);
-router.delete('/', authMiddleware, unregisterDeviceController);
+router.post('/', authMiddleware, validate(registerDeviceTokenSchema), registerDeviceController);
+router.delete('/', authMiddleware, validate(unregisterDeviceTokenSchema), unregisterDeviceController);
 
 export default router;

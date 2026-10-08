@@ -69,16 +69,21 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
     const invalidTokens: string[] = [];
     response.responses.forEach((res, idx) => {
       if (!res.success && res.error) {
-        const code = res.error.code;
+        const code = res.error.code || '';
+        const msg = res.error.message || '';
         logger.error('FCM message delivery failed for token', {
           token: tokens[idx],
-          code: res.error.code,
-          message: res.error.message
+          code,
+          message: msg
         });
 
         if (
           code === 'messaging/invalid-registration-token' ||
-          code === 'messaging/registration-token-not-registered'
+          code === 'messaging/registration-token-not-registered' ||
+          code === 'messaging/invalid-argument' ||
+          msg.includes('not registered') ||
+          msg.includes('invalid') ||
+          msg.includes('NotRegistered')
         ) {
           invalidTokens.push(tokens[idx]);
         }

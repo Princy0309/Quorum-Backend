@@ -9,13 +9,8 @@ export const registerDeviceController = async (req: Request, res: Response, next
       throw new ApiError(401, 'Unauthorized');
     }
 
-    const { token, platform } = req.body || {};
-    if (!token || typeof token !== 'string') {
-      throw new ApiError(400, 'device token is required');
-    }
-
-    const platformStr = typeof platform === 'string' ? platform : 'web';
-    const deviceToken = await registerDeviceToken(userId, token, platformStr);
+    const { token, platform } = req.body;
+    const deviceToken = await registerDeviceToken(userId, token, platform);
 
     res.status(200).json({
       success: true,
@@ -33,11 +28,7 @@ export const unregisterDeviceController = async (req: Request, res: Response, ne
       throw new ApiError(401, 'Unauthorized');
     }
 
-    const { token } = req.body || {};
-    if (!token || typeof token !== 'string') {
-      throw new ApiError(400, 'device token is required');
-    }
-
+    const { token } = req.body;
     await unregisterDeviceToken(userId, token);
 
     res.status(200).json({
