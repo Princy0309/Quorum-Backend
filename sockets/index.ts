@@ -6,6 +6,8 @@ import { registerTypingHandler } from './handlers/typingHandler.js';
 import { registerPresenceHandler } from './handlers/presenceHandler.js';
 import env from '../config/env.js';
 import prisma from '../config/prisma.js';
+import redis from '../config/redis.js';
+import { createAdapter } from '@socket.io/redis-adapter';
 
 let io: SocketIOServer | null = null;
 
@@ -37,6 +39,10 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
       credentials: true
     }
   });
+
+  const pubClient = redis;
+  const subClient = redis.duplicate();
+  io.adapter(createAdapter(pubClient, subClient));
 
   io.use(socketAuthMiddleware);
 

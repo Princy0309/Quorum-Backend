@@ -41,6 +41,8 @@ export interface SendFCMResult {
   invalidTokens: string[];
 }
 
+const FCM_BATCH_SIZE = 500;
+
 export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCMResult> => {
   const { tokens, title, body, data } = payload;
   if (!tokens || tokens.length === 0) {
@@ -56,49 +58,61 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
     return { successCount: 0, failureCount: tokens.length, invalidTokens: [] };
   }
 
-  try {
-    const response = await firebaseMessaging.sendEachForMulticast({
-      tokens,
-      notification: {
-        title,
-        body
-      },
-      data: data || {}
-    });
+  let successCount = 0;
+  let failureCount = 0;
+  const invalidTokens: string[] = [];
 
-    const invalidTokens: string[] = [];
-    response.responses.forEach((res, idx) => {
-      if (!res.success && res.error) {
-        const code = res.error.code || '';
-        const msg = res.error.message || '';
-        logger.error('FCM message delivery failed for token', {
-          token: tokens[idx],
-          code,
-          message: msg
-        });
+  for (let i = 0; i < tokens.length; i += FCM_BATCH_SIZE) {
+    const batchTokens = tokens.slice(i, i + FCM_BATCH_SIZE);
 
-        if (
-          code === 'messaging/invalid-registration-token' ||
-          code === 'messaging/registration-token-not-registered' ||
-          code === 'messaging/invalid-argument' ||
-          msg.includes('not registered') ||
-          msg.includes('invalid') ||
-          msg.includes('NotRegistered')
-        ) {
-          invalidTokens.push(tokens[idx]);
+    try {
+      const response = await firebaseMessaging.sendEachForMulticast({
+        tokens: batchTokens,
+        notification: {
+          title,
+          body
+        },
+        data: data || {}
+      });
+
+      successCount += response.successCount;
+      failureCount += response.failureCount;
+
+      response.responses.forEach((res, idx) => {
+        if (!res.success && res.error) {
+          const code = res.error.code || '';
+          const msg = res.error.message || '';
+          const targetToken = batchTokens[idx] || '';
+          const maskedToken = targetToken.length > 10 ? `***${targetToken.slice(-6)}` : '***';
+          logger.error('FCM message delivery failed for token', {
+            token: maskedToken,
+            code,
+            message: msg
+          });
+
+          if (
+            code === 'messaging/invalid-registration-token' ||
+            code === 'messaging/registration-token-not-registered' ||
+            code === 'messaging/invalid-argument' ||
+            msg.includes('not registered') ||
+            msg.includes('invalid') ||
+            msg.includes('NotRegistered')
+          ) {
+            invalidTokens.push(targetToken);
+          }
         }
-      }
-    });
-
-    return {
-      successCount: response.successCount,
-      failureCount: response.failureCount,
-      invalidTokens
-    };
-  } catch (err: any) {
-    logger.error('Unhandled error during FCM multicast dispatch', { error: err.message });
-    return { successCount: 0, failureCount: tokens.length, invalidTokens: [] };
+      });
+    } catch (err: any) {
+      logger.error('Unhandled error during FCM multicast batch dispatch', { error: err.message, batchSize: batchTokens.length });
+      failureCount += batchTokens.length;
+    }
   }
+
+  return {
+    successCount,
+    failureCount,
+    invalidTokens
+  };
 };
 
 

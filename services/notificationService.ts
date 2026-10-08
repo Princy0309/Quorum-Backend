@@ -1,6 +1,6 @@
 import prisma from '../config/prisma.js';
 import { sendFCMNotification } from '../config/firebase.js';
-import { getUserPresence } from './presenceService.js';
+import { getMultipleUserPresences } from './presenceService.js';
 import logger from '../utils/logger.js';
 
 export const registerDeviceToken = async (userId: string, token: string, platform: string = 'web') => {
@@ -23,14 +23,10 @@ export const sendPushToOfflineUsers = async (
   body: string,
   payloadData?: Record<string, string>
 ) => {
-  const offlineUserIds: string[] = [];
+  if (!recipientUserIds || recipientUserIds.length === 0) return;
 
-  for (const userId of recipientUserIds) {
-    const presence = await getUserPresence(userId);
-    if (!presence.isOnline) {
-      offlineUserIds.push(userId);
-    }
-  }
+  const presenceMap = await getMultipleUserPresences(recipientUserIds);
+  const offlineUserIds = recipientUserIds.filter((id) => !presenceMap.get(id)?.isOnline);
 
   if (offlineUserIds.length === 0) return;
 

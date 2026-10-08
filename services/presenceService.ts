@@ -62,3 +62,32 @@ export const getUserPresence = async (userId: string) => {
     return { isOnline: false };
   }
 };
+
+export const getMultipleUserPresences = async (userIds: string[]) => {
+  if (!userIds || userIds.length === 0) {
+    return new Map<string, { isOnline: boolean; lastSeen?: Date }>();
+  }
+
+  const keys = userIds.map((id) => `presence:${id}`);
+  const results = await redis.mget(...keys);
+
+  const presenceMap = new Map<string, { isOnline: boolean; lastSeen?: Date }>();
+
+  results.forEach((val, idx) => {
+    const userId = userIds[idx];
+    if (!val) {
+      presenceMap.set(userId, { isOnline: false });
+    } else if (val === 'online') {
+      presenceMap.set(userId, { isOnline: true });
+    } else {
+      try {
+        const parsed = JSON.parse(val);
+        presenceMap.set(userId, { isOnline: false, lastSeen: parsed.lastSeen });
+      } catch (err) {
+        presenceMap.set(userId, { isOnline: false });
+      }
+    }
+  });
+
+  return presenceMap;
+};
