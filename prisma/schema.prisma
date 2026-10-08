@@ -14,6 +14,12 @@ enum UseCase {
   COMMUNITY
 }
 
+enum MeetingStatus {
+  ACTIVE
+  ENDED
+
+}
+
 model User {
   id                  String               @id @default(uuid())
   name                String
@@ -32,6 +38,7 @@ model User {
   useCases          UseCase[]
   passwordResetTokens PasswordResetToken[]
   refreshTokens       RefreshToken[]
+  hostedMeetings      Meeting[]
 }
 
 model RefreshToken {
@@ -60,4 +67,17 @@ model PasswordResetToken {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+model Meeting {
+  id          String        @id @default(uuid())
+  code        String        @unique
+  hostId      String
+  waitingRoom Boolean       @default(true)
+  status      MeetingStatus @default(ACTIVE)
+  admitted    String[]      @default([])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  host        User          @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  @@index([code])
 }
