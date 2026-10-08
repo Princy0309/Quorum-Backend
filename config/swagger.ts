@@ -309,6 +309,202 @@ const swaggerDocument = {
         },
       },
     },
+    '/api/conversations': {
+      get: {
+        tags: ['Conversations'],
+        summary: 'Get user conversations',
+        description: 'Retrieves all conversations for the authenticated user, ordered by last activity, including unread message counts and last message preview.',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          200: { description: 'Conversations retrieved successfully' },
+          401: { description: 'Unauthorized' }
+        }
+      }
+    },
+    '/api/conversations/{id}/messages': {
+      get: {
+        tags: ['Conversations'],
+        summary: 'Get conversation messages',
+        description: 'Fetches paginated message history for a specific conversation using cursor-based pagination.',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Conversation UUID'
+          },
+          {
+            name: 'cursor',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Message ID cursor for fetching older messages'
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+            description: 'Number of messages to retrieve per page'
+          }
+        ],
+        responses: {
+          200: { description: 'Messages retrieved successfully' },
+          401: { description: 'Unauthorized' },
+          403: { description: 'Forbidden, not a conversation participant' },
+          404: { description: 'Conversation not found' }
+        }
+      }
+    },
+    '/api/conversations/{id}/search': {
+      get: {
+        tags: ['Conversations'],
+        summary: 'Search conversation messages',
+        description: 'Performs full-text keyword search across messages in a conversation using cursor-based pagination.',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Conversation UUID'
+          },
+          {
+            name: 'q',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Search query keyword'
+          },
+          {
+            name: 'cursor',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Message ID cursor for pagination'
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+            description: 'Number of matching messages to retrieve'
+          }
+        ],
+        responses: {
+          200: { description: 'Search results retrieved successfully' },
+          401: { description: 'Unauthorized' },
+          403: { description: 'Forbidden, not a conversation participant' }
+        }
+      }
+    },
+    '/api/dm': {
+      post: {
+        tags: ['Direct Messaging'],
+        summary: 'Create or get direct message conversation',
+        description: 'Initiates or retrieves a 1-on-1 direct message conversation with another registered user.',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['targetUserId'],
+                properties: {
+                  targetUserId: { type: 'string', example: 'uuid-user-id' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Direct message conversation retrieved or created successfully' },
+          400: { description: 'Cannot message yourself or invalid target user ID' },
+          401: { description: 'Unauthorized' },
+          404: { description: 'Target user not found' }
+        }
+      }
+    },
+    '/api/devices': {
+      post: {
+        tags: ['Push Notifications & Devices'],
+        summary: 'Register FCM device token',
+        description: 'Registers an FCM device registration token for offline push notifications.',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['token'],
+                properties: {
+                  token: { type: 'string', example: 'fcm-registration-token-123' },
+                  platform: { type: 'string', enum: ['web', 'android', 'ios'], default: 'web' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Device token registered successfully' },
+          401: { description: 'Unauthorized' }
+        }
+      },
+      delete: {
+        tags: ['Push Notifications & Devices'],
+        summary: 'Unregister FCM device token',
+        description: 'Removes an FCM device registration token upon logout or device unregistration.',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['token'],
+                properties: {
+                  token: { type: 'string', example: 'fcm-registration-token-123' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Device token unregistered successfully' },
+          401: { description: 'Unauthorized' }
+        }
+      }
+    },
+    '/api/uploads/sign': {
+      post: {
+        tags: ['Media & Uploads'],
+        summary: 'Generate signed media upload signature',
+        description: 'Generates a secure timestamped signature for uploading media files directly to Cloudinary.',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  folder: { type: 'string', example: 'avatars' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Upload signature generated successfully' },
+          401: { description: 'Unauthorized' }
+        }
+      }
+    }
   },
 };
 
