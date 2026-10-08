@@ -3,6 +3,7 @@ import { updateOnboarding, searchUsersController } from '../controllers/userCont
 import { authMiddleware, requireEmailVerified } from '../middlewares/authMiddleware.js';
 import { validate } from '../middlewares/validate.js';
 import { onboardingSchema } from '../validators/userValidators.js';
+import { searchLimiter } from '../middlewares/rateLimiter.js';
 
 const router = Router();
 
@@ -14,7 +15,7 @@ router.patch(
   updateOnboarding
 );
 
-router.get('/search', authMiddleware, searchUsersController);
-router.get('/', authMiddleware, searchUsersController);
+router.get('/search', authMiddleware, searchLimiter, searchUsersController);
+router.get('/', authMiddleware, searchLimiter, searchUsersController);
 
 export default router;

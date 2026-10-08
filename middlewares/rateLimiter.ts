@@ -41,6 +41,14 @@ export const registerRateLimiter = new RateLimiterRedis({
   blockDuration: 15 * 60,
 });
 
+export const searchRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'search_v1',
+  points: 30,
+  duration: 60,
+  blockDuration: 60,
+});
+
 export const loginLimiter = async (req: Request, res: Response, next: NextFunction): Promise<any> => {
   try {
     const ip = req.ip || '127.0.0.1';
@@ -83,6 +91,18 @@ export const registerLimiter = (req: Request, res: Response, next: NextFunction)
         return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
       }
       res.status(429).json({ success: false, statusCode: 429, message: 'Too many registration attempts, try again later.' });
+    });
+};
+
+export const searchLimiter = (req: Request, res: Response, next: NextFunction): void => {
+  const key = (req.user as any)?.id || req.ip || '127.0.0.1';
+  searchRateLimiter.consume(key)
+    .then(() => next())
+    .catch((err) => {
+      if (err instanceof Error) {
+        return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
+      }
+      res.status(429).json({ success: false, statusCode: 429, message: 'Too many search requests, please slow down.' });
     });
 };
 
