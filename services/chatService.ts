@@ -299,10 +299,24 @@ export const getConversationMessages = async (
 
   const queryLimit = Math.min(Math.max(limit, 1), 50);
 
+  let cursorSeq: number | null = null;
+  if (cursor) {
+    const cursorMsg = await prisma.message.findUnique({
+      where: { id: cursor },
+      select: { seq: true }
+    });
+    if (cursorMsg) {
+      cursorSeq = cursorMsg.seq;
+    }
+  }
+
   const messages = await prisma.message.findMany({
-    where: { conversationId },
+    where: {
+      conversationId,
+      ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
+    },
     take: queryLimit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    ...(cursor && cursorSeq === null ? { cursor: { id: cursor }, skip: 1 } : {}),
     orderBy: [{ seq: 'desc' }, { id: 'desc' }],
     include: {
       sender: {
@@ -487,19 +501,31 @@ export const searchConversationMessages = async (
 
   const queryLimit = Math.min(Math.max(limit, 1), 50);
 
+  let cursorSeq: number | null = null;
+  if (cursor) {
+    const cursorMsg = await prisma.message.findUnique({
+      where: { id: cursor },
+      select: { seq: true }
+    });
+    if (cursorMsg) {
+      cursorSeq = cursorMsg.seq;
+    }
+  }
+
   const whereClause = {
     conversationId,
     content: {
       contains: sanitizedQuery,
       mode: 'insensitive' as const
-    }
+    },
+    ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
   };
 
   const messages = await prisma.message.findMany({
     where: whereClause,
     orderBy: [{ seq: 'desc' }, { id: 'desc' }],
     take: queryLimit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    ...(cursor && cursorSeq === null ? { cursor: { id: cursor }, skip: 1 } : {}),
     include: {
       sender: {
         select: {
