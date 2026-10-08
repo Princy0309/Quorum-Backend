@@ -2,6 +2,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import { verifyAccessToken } from '../services/tokenService.js';
 import prisma from '../config/prisma.js';
+import { handleJoinMeeting, handleLeaveMeeting } from './meetingPresence.js';
 
 export interface AuthenticatedSocket extends Socket {
   data: {
@@ -70,6 +71,14 @@ export const initSocketServer = (httpServer: HTTPServer): SocketIOServer => {
 
   ioServer.on('connection', (socket) => {
     console.log(`Socket connected: ${socket.id} (User: ${socket.data.user?.id})`);
+
+    socket.on('meeting:join', (data: { meetingCode: string }) => {
+      handleJoinMeeting(ioServer!, socket, data?.meetingCode);
+    });
+
+    socket.on('meeting:leave', (data: { meetingCode: string }) => {
+      handleLeaveMeeting(ioServer!, socket, data?.meetingCode);
+    });
 
     socket.on('disconnect', () => {
       console.log(`Socket disconnected: ${socket.id}`);
