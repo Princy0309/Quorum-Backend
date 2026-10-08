@@ -1,9 +1,16 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
+import { verifyAccessToken } from '../services/tokenService.js';
+import prisma from '../config/prisma.js';
 
 export interface AuthenticatedSocket extends Socket {
   data: {
-    user?: any;
+    user: {
+      id: string;
+      name: string;
+      email: string;
+      role: string;
+    };
   };
 }
 
@@ -24,8 +31,45 @@ export const initSocketServer = (httpServer: HTTPServer): SocketIOServer => {
     },
   });
 
-  ioServer.on('connection', (socket: Socket) => {
-    console.log(`Socket connected: ${socket.id}`);
+  ioServer.use(async (socket, next) => {
+    try {
+      const rawToken =
+        socket.handshake.auth?.token ||
+        socket.handshake.headers?.authorization;
+
+      if (!rawToken || typeof rawToken !== 'string') {
+        return next(new Error('Authentication error: Missing token'));
+      }
+
+      const token = rawToken.startsWith('Bearer ')
+        ? rawToken.slice(7).trim()
+        : rawToken.trim();
+
+      const payload = verifyAccessToken(token);
+
+      const user = await prisma.user.findUnique({
+        where: { id: payload.id },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+        },
+      });
+
+      if (!user) {
+        return next(new Error('Authentication error: User not found'));
+      }
+
+      socket.data.user = user;
+      next();
+    } catch (err: any) {
+      next(new Error('Authentication error: Invalid token'));
+    }
+  });
+
+  ioServer.on('connection', (socket) => {
+    console.log(`Socket connected: ${socket.id} (User: ${socket.data.user?.id})`);
 
     socket.on('disconnect', () => {
       console.log(`Socket disconnected: ${socket.id}`);
