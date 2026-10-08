@@ -5,6 +5,8 @@ import dotenv from 'dotenv';
 import expressWinston from 'express-winston';
 import helmet from 'helmet';
 import userRoutes from './routes/userRoutes.js';
+import meetingRoutes from './routes/meetingRoutes.js';
+
 
 
 dotenv.config();
@@ -58,6 +60,7 @@ app.use(express.json({limit: "10kb"}));
 app.use(cookieParser());
 app.use(verifyCSRF);
 
+
 app.use(expressWinston.logger({
   winstonInstance: logger,
   meta: true,
@@ -71,6 +74,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/otp', otpRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/meetings', meetingRoutes);
 app.get('/api/csrf-token', (req: Request, res: Response) => {
   res.json({ csrfToken: res.locals.csrfToken || req.cookies['XSRF-TOKEN'] });
 });
