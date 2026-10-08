@@ -203,7 +203,13 @@ export const saveMessage = async (
 
     if (clientMessageId) {
       const existingMessage = await tx.message.findUnique({
-        where: { clientMessageId },
+        where: {
+          conversationId_senderId_clientMessageId: {
+            conversationId,
+            senderId,
+            clientMessageId
+          }
+        },
         include: {
           sender: {
             select: {
@@ -257,7 +263,13 @@ export const saveMessage = async (
     } catch (err: any) {
       if (err?.code === 'P2002' && clientMessageId) {
         const existingMessage = await tx.message.findUnique({
-          where: { clientMessageId },
+          where: {
+            conversationId_senderId_clientMessageId: {
+              conversationId,
+              senderId,
+              clientMessageId
+            }
+          },
           include: {
             sender: {
               select: {

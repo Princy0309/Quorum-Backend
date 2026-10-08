@@ -22,7 +22,7 @@ export const registerPresenceHandler = async (io: SocketIOServer, socket: Authen
   }
 
   const heartbeatInterval = setInterval(() => {
-    refreshUserPresence(userId).catch((err: any) => {
+    refreshUserPresence(userId, socket.id).catch((err: any) => {
       logger.error('Failed to refresh presence TTL during heartbeat', { userId, error: err.message });
     });
   }, 25000);

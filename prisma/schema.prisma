@@ -91,7 +91,7 @@ model Message {
   content         String
   fileUrl         String?
   fileType        String?
-  clientMessageId String?      @unique
+  clientMessageId String?
   seq             Int          @default(0)
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
@@ -99,6 +99,7 @@ model Message {
   sender          User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
   @@unique([conversationId, seq])
+  @@unique([conversationId, senderId, clientMessageId])
   @@index([conversationId, seq])
 }
 

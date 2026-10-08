@@ -1,48 +1,76 @@
 import redis from '../config/redis.js';
 
 const PRESENCE_TTL_SECONDS = 60;
+const STALE_SOCKET_THRESHOLD_MS = 60 * 1000;
 
-export const setUserOnline = async (userId: string, socketId: string): Promise<boolean> => {
-  const key = `user_sockets:${userId}`;
-  const presenceKey = `presence:${userId}`;
+const pruneStaleSockets = async (userId: string): Promise<number> => {
+  const hashKey = `presence_sockets:${userId}`;
+  const allSockets = await redis.hgetall(hashKey);
+  const now = Date.now();
+  const staleSocketIds: string[] = [];
+  let activeCount = 0;
 
-  await redis.sadd(key, socketId);
-  await redis.expire(key, PRESENCE_TTL_SECONDS);
+  for (const [socketId, timestampStr] of Object.entries(allSockets)) {
+    const timestamp = parseInt(timestampStr, 10);
+    if (isNaN(timestamp) || now - timestamp > STALE_SOCKET_THRESHOLD_MS) {
+      staleSocketIds.push(socketId);
+    } else {
+      activeCount++;
+    }
+  }
 
-  const count = await redis.scard(key);
-  await redis.set(presenceKey, 'online', 'EX', PRESENCE_TTL_SECONDS);
+  if (staleSocketIds.length > 0) {
+    await redis.hdel(hashKey, ...staleSocketIds);
+  }
 
-  return count === 1;
+  return activeCount;
 };
 
-export const refreshUserPresence = async (userId: string): Promise<void> => {
-  const key = `user_sockets:${userId}`;
+export const setUserOnline = async (userId: string, socketId: string): Promise<boolean> => {
+  const hashKey = `presence_sockets:${userId}`;
   const presenceKey = `presence:${userId}`;
 
-  const currentPresence = await redis.get(presenceKey);
-  if (currentPresence === 'online') {
-    await redis.expire(key, PRESENCE_TTL_SECONDS);
-    await redis.expire(presenceKey, PRESENCE_TTL_SECONDS);
+  const activeCountBefore = await pruneStaleSockets(userId);
+
+  await redis.hset(hashKey, socketId, Date.now().toString());
+  await redis.expire(hashKey, PRESENCE_TTL_SECONDS * 2);
+  await redis.set(presenceKey, 'online', 'EX', PRESENCE_TTL_SECONDS);
+
+  return activeCountBefore === 0;
+};
+
+export const refreshUserPresence = async (userId: string, socketId: string): Promise<void> => {
+  const hashKey = `presence_sockets:${userId}`;
+  const presenceKey = `presence:${userId}`;
+
+  await redis.hset(hashKey, socketId, Date.now().toString());
+  await redis.expire(hashKey, PRESENCE_TTL_SECONDS * 2);
+
+  const activeCount = await pruneStaleSockets(userId);
+
+  if (activeCount > 0) {
+    await redis.set(presenceKey, 'online', 'EX', PRESENCE_TTL_SECONDS);
+  } else {
+    await redis.set(presenceKey, JSON.stringify({ status: 'offline', lastSeen: new Date() }), 'EX', 86400 * 30);
   }
 };
 
 export const setUserOffline = async (userId: string, socketId: string): Promise<boolean> => {
-  const key = `user_sockets:${userId}`;
+  const hashKey = `presence_sockets:${userId}`;
   const presenceKey = `presence:${userId}`;
 
-  await redis.srem(key, socketId);
-  const count = await redis.scard(key);
+  await redis.hdel(hashKey, socketId);
+  const activeCount = await pruneStaleSockets(userId);
 
-  if (count === 0) {
-    await redis.del(key);
+  if (activeCount === 0) {
+    await redis.del(hashKey);
     await redis.set(presenceKey, JSON.stringify({ status: 'offline', lastSeen: new Date() }), 'EX', 86400 * 30);
     return true;
   } else {
-    await redis.expire(key, PRESENCE_TTL_SECONDS);
-    await redis.expire(presenceKey, PRESENCE_TTL_SECONDS);
+    await redis.expire(hashKey, PRESENCE_TTL_SECONDS * 2);
+    await redis.set(presenceKey, 'online', 'EX', PRESENCE_TTL_SECONDS);
+    return false;
   }
-
-  return false;
 };
 
 export const getUserPresence = async (userId: string) => {
