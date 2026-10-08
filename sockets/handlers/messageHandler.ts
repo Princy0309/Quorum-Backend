@@ -165,7 +165,9 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_READ, {
             conversationId: result.conversationId,
             userId: result.userId,
-            messageId: result.messageId
+            lastReadSeq: result.lastReadSeq,
+            lastReadMessageId: result.lastReadMessageId,
+            messageId: result.lastReadMessageId
           });
         }
 
@@ -174,7 +176,10 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
             success: true,
             data: {
               conversationId: result.conversationId,
-              messageId: result.messageId,
+              userId: result.userId,
+              lastReadSeq: result.lastReadSeq,
+              lastReadMessageId: result.lastReadMessageId,
+              messageId: result.lastReadMessageId,
               updated: result.updated
             }
           });

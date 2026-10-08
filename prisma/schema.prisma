@@ -30,16 +30,17 @@ model User {
 }
 
 model RefreshToken {
-  id            String    @id @default(uuid())
-  tokenHash     String    @unique
-  userId        String
-  familyId      String    @default(uuid())
-  device        String    @default("unknown")
-  expiresAt     DateTime
-  revokedAt     DateTime?
-  rotationCache String?
-  createdAt     DateTime  @default(now())
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                     String    @id @default(uuid())
+  tokenHash              String    @unique
+  userId                 String
+  familyId               String    @default(uuid())
+  device                 String    @default("unknown")
+  expiresAt              DateTime
+  revokedAt              DateTime?
+  rotationCache          String?
+  rotationCacheExpiresAt DateTime?
+  createdAt              DateTime  @default(now())
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([familyId])

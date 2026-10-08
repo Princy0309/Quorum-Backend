@@ -416,63 +416,71 @@ export const markMessageAsRead = async (
   conversationId: string,
   messageId: string
 ) => {
-  const participant = await prisma.conversationParticipant.findUnique({
-    where: {
-      conversationId_userId: {
-        conversationId,
-        userId
+  return await prisma.$transaction(async (tx) => {
+    const participant = await tx.conversationParticipant.findUnique({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId
+        }
       }
+    });
+
+    if (!participant) {
+      throw new ApiError(403, 'User is not a participant in this conversation');
     }
-  });
 
-  if (!participant) {
-    throw new ApiError(403, 'User is not a participant in this conversation');
-  }
+    const targetMessage = await tx.message.findFirst({
+      where: {
+        id: messageId,
+        conversationId
+      }
+    });
 
-  const targetMessage = await prisma.message.findFirst({
-    where: {
-      id: messageId,
-      conversationId
+    if (!targetMessage) {
+      throw new ApiError(404, 'Message not found in this conversation');
     }
-  });
 
-  if (!targetMessage) {
-    throw new ApiError(404, 'Message not found in this conversation');
-  }
+    const updateResult = await tx.conversationParticipant.updateMany({
+      where: {
+        conversationId,
+        userId,
+        lastReadSeq: { lt: targetMessage.seq }
+      },
+      data: {
+        lastReadMessageId: messageId,
+        lastReadSeq: targetMessage.seq
+      }
+    });
 
-  if (participant.lastReadSeq >= targetMessage.seq) {
-    const participants = await prisma.conversationParticipant.findMany({
+    const isUpdated = updateResult.count > 0;
+
+    const currentParticipant = isUpdated
+      ? { lastReadSeq: targetMessage.seq, lastReadMessageId: messageId }
+      : (await tx.conversationParticipant.findUnique({
+          where: {
+            conversationId_userId: {
+              conversationId,
+              userId
+            }
+          }
+        })) || participant;
+
+    const participants = await tx.conversationParticipant.findMany({
       where: { conversationId },
       select: { userId: true }
     });
+
     return {
       conversationId,
       userId,
-      messageId: participant.lastReadMessageId || messageId,
-      updated: false,
+      lastReadSeq: currentParticipant.lastReadSeq,
+      lastReadMessageId: currentParticipant.lastReadMessageId || messageId,
+      messageId: currentParticipant.lastReadMessageId || messageId,
+      updated: isUpdated,
       participants
     };
-  }
-
-  await prisma.conversationParticipant.update({
-    where: {
-      conversationId_userId: {
-        conversationId,
-        userId
-      }
-    },
-    data: {
-      lastReadMessageId: messageId,
-      lastReadSeq: targetMessage.seq
-    }
   });
-
-  const participants = await prisma.conversationParticipant.findMany({
-    where: { conversationId },
-    select: { userId: true }
-  });
-
-  return { conversationId, userId, messageId, updated: true, participants };
 };
 
 export const searchConversationMessages = async (
