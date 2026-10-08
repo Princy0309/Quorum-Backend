@@ -93,10 +93,9 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
           if (
             code === 'messaging/invalid-registration-token' ||
             code === 'messaging/registration-token-not-registered' ||
-            code === 'messaging/invalid-argument' ||
             msg.includes('not registered') ||
-            msg.includes('invalid') ||
-            msg.includes('NotRegistered')
+            msg.includes('NotRegistered') ||
+            msg.includes('invalid registration token')
           ) {
             invalidTokens.push(targetToken);
           }

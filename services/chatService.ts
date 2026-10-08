@@ -116,28 +116,17 @@ export const isParticipant = async (userId: string, conversationId: string): Pro
 };
 
 export const getCoParticipantUserIds = async (userId: string): Promise<string[]> => {
-  const userConversations = await prisma.conversationParticipant.findMany({
-    where: { userId },
-    select: { conversationId: true }
-  });
-
-  if (userConversations.length === 0) return [];
-
-  const conversationIds = userConversations.map((c) => c.conversationId);
-
-  const coParticipants = await prisma.conversationParticipant.findMany({
-    where: {
-      conversationId: { in: conversationIds },
-      userId: { not: userId }
-    },
-    select: { userId: true },
-    distinct: ['userId']
-  });
-
-  return coParticipants.map((p) => p.userId);
+  const results: { userId: string }[] = await prisma.$queryRaw`
+    SELECT DISTINCT cp2."userId"
+    FROM "ConversationParticipant" cp1
+    JOIN "ConversationParticipant" cp2 ON cp1."conversationId" = cp2."conversationId"
+    WHERE cp1."userId" = ${userId}
+      AND cp2."userId" <> ${userId}
+  `;
+  return results.map((row) => row.userId);
 };
 
-export const deriveFileTypeFromUrl = (fileUrl?: string, clientType?: string): string | undefined => {
+export const deriveFileTypeFromUrl = (fileUrl?: string): string | undefined => {
   if (!fileUrl) return undefined;
 
   try {
@@ -154,9 +143,9 @@ export const deriveFileTypeFromUrl = (fileUrl?: string, clientType?: string): st
       return 'audio';
     }
 
-    const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.tiff', '.heic'];
-    const videoExts = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v', '.flv'];
-    const audioExts = ['.mp3', '.wav', '.ogg', '.aac', '.flac', '.m4a', '.opus'];
+    const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.tiff', '.heic', '.avif'];
+    const videoExts = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v', '.flv', '.3gp', '.wmv'];
+    const audioExts = ['.mp3', '.wav', '.ogg', '.aac', '.flac', '.m4a', '.opus', '.wma', '.m4b'];
 
     if (imageExts.some((ext) => pathname.endsWith(ext))) {
       return 'image';
@@ -168,13 +157,9 @@ export const deriveFileTypeFromUrl = (fileUrl?: string, clientType?: string): st
       return 'audio';
     }
 
-    if (clientType && ['image', 'video', 'audio', 'file'].includes(clientType)) {
-      return clientType;
-    }
-
     return 'file';
   } catch (err) {
-    return clientType || 'file';
+    return 'file';
   }
 };
 
@@ -186,7 +171,7 @@ export const saveMessage = async (
   fileType?: string,
   clientMessageId?: string
 ) => {
-  const derivedType = deriveFileTypeFromUrl(fileUrl, fileType);
+  const derivedType = deriveFileTypeFromUrl(fileUrl);
   return await prisma.$transaction(async (tx) => {
     const participant = await tx.conversationParticipant.findUnique({
       where: {

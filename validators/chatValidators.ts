@@ -7,6 +7,7 @@ const isTrustedMediaUrl = (value: string, helpers: Joi.CustomHelpers) => {
     'res.cloudinary.com',
     'cloudinary.com',
     's3.amazonaws.com',
+    'amazonaws.com',
     'storage.googleapis.com'
   ];
 

@@ -26,9 +26,7 @@ export const registerTypingHandler = (io: SocketIOServer, socket: AuthenticatedS
       const room = `conversation:${conversationId}`;
 
       if (!socket.rooms.has(room)) {
-        const validParticipant = await isParticipant(userId, conversationId);
-        if (!validParticipant) return;
-        socket.join(room);
+        return;
       }
 
       socket.to(room).emit(event, {
