@@ -4,6 +4,7 @@ import {
   addGroupParticipants,
   removeGroupParticipant,
   updateGroupConversation,
+  transferGroupOwnership,
   getConversationMessages,
   getUserConversations
 } from '../services/chatService.js';
@@ -83,19 +84,33 @@ describe('Group Chat Features', () => {
     expect(updated.name).toBe('Renamed Group');
   });
 
-  it('should enforce owner permissions for kicking members, but allow self-leaving', async () => {
-    const group = await createGroupConversation(userA.id, 'Kick Test', [userB.id, userC.id]);
+  it('should prevent owner from leaving without transferring ownership', async () => {
+    const group = await createGroupConversation(userA.id, 'Owner Leaving Test', [userB.id, userC.id]);
 
-    await expect(removeGroupParticipant(userB.id, group.id, userC.id)).rejects.toThrow(ApiError);
+    await expect(removeGroupParticipant(userA.id, group.id, userA.id)).rejects.toThrow(ApiError);
+    await expect(removeGroupParticipant(userA.id, group.id, userA.id)).rejects.toThrow('Group owner must transfer ownership before leaving the group');
 
-    const kickResult = await removeGroupParticipant(userA.id, group.id, userD.id).catch((e) => e);
-    expect(kickResult).toBeInstanceOf(ApiError);
+    const transferred = await transferGroupOwnership(userA.id, group.id, userB.id);
+    expect(transferred.ownerId).toBe(userB.id);
 
-    const ownerKickResult = await removeGroupParticipant(userA.id, group.id, userC.id);
-    expect(ownerKickResult.success).toBe(true);
+    const leaveResult = await removeGroupParticipant(userA.id, group.id, userA.id);
+    expect(leaveResult.success).toBe(true);
+  });
 
-    const selfLeaveResult = await removeGroupParticipant(userB.id, group.id, userB.id);
-    expect(selfLeaveResult.success).toBe(true);
+  it('should deny management operations for legacy groups without an owner', async () => {
+    const legacyGroup = await prisma.conversation.create({
+      data: {
+        type: 'group',
+        name: 'Legacy No Owner',
+        ownerId: null,
+        participants: {
+          create: [{ userId: userB.id }, { userId: userC.id }]
+        }
+      }
+    });
+
+    await expect(updateGroupConversation(userB.id, legacyGroup.id, { name: 'New Name' })).rejects.toThrow(ApiError);
+    await expect(addGroupParticipants(userB.id, legacyGroup.id, [userD.id])).rejects.toThrow(ApiError);
   });
 
   it('should update conversation updatedAt timestamp when membership changes', async () => {
@@ -114,3 +129,4 @@ describe('Group Chat Features', () => {
     await expect(getConversationMessages(userB.id, group.id)).rejects.toThrow(ApiError);
   });
 });
+

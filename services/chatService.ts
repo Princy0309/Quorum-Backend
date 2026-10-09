@@ -592,42 +592,44 @@ export const createGroupConversation = async (
 ) => {
   const uniqueUserIds = Array.from(new Set([creatorId, ...participantIds]));
 
-  const existingUsers = await prisma.user.findMany({
-    where: { id: { in: uniqueUserIds } },
-    select: { id: true }
-  });
+  const conversation = await prisma.$transaction(async (tx) => {
+    const existingUsers = await tx.user.findMany({
+      where: { id: { in: uniqueUserIds } },
+      select: { id: true }
+    });
 
-  if (existingUsers.length !== uniqueUserIds.length) {
-    throw new ApiError(400, 'One or more participant user IDs are invalid');
-  }
+    if (existingUsers.length !== uniqueUserIds.length) {
+      throw new ApiError(400, 'One or more participant user IDs are invalid');
+    }
 
-  const conversation = await prisma.conversation.create({
-    data: {
-      type: 'group',
-      name: name.trim(),
-      avatar: avatar || null,
-      ownerId: creatorId,
-      participants: {
-        create: uniqueUserIds.map((userId) => ({ userId }))
-      }
-    },
-    include: {
-      participants: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true
-            }
-          }
+    return await tx.conversation.create({
+      data: {
+        type: 'group',
+        name: name.trim(),
+        avatar: avatar || null,
+        ownerId: creatorId,
+        participants: {
+          create: uniqueUserIds.map((userId) => ({ userId }))
         }
       },
-      messages: {
-        take: 1,
-        orderBy: [{ seq: 'desc' }, { id: 'desc' }]
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true
+              }
+            }
+          }
+        },
+        messages: {
+          take: 1,
+          orderBy: [{ seq: 'desc' }, { id: 'desc' }]
+        }
       }
-    }
+    });
   });
 
   notifyConversationUpdate(uniqueUserIds, conversation);
@@ -640,79 +642,83 @@ export const addGroupParticipants = async (
   conversationId: string,
   participantIds: string[]
 ) => {
-  const conversation = await prisma.conversation.findUnique({
-    where: { id: conversationId },
-    include: {
-      participants: true
+  const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
+    const conversation = await tx.conversation.findUnique({
+      where: { id: conversationId },
+      include: {
+        participants: true
+      }
+    });
+
+    if (!conversation) {
+      throw new ApiError(404, 'Conversation not found');
     }
-  });
 
-  if (!conversation) {
-    throw new ApiError(404, 'Conversation not found');
-  }
+    if (conversation.type !== 'group') {
+      throw new ApiError(400, 'Cannot add participants to a direct conversation');
+    }
 
-  if (conversation.type !== 'group') {
-    throw new ApiError(400, 'Cannot add participants to a direct conversation');
-  }
+    const isUserMember = conversation.participants.some((p) => p.userId === userId);
+    if (!isUserMember) {
+      throw new ApiError(403, 'You are not a member of this conversation');
+    }
 
-  const isUserMember = conversation.participants.some((p) => p.userId === userId);
-  if (!isUserMember) {
-    throw new ApiError(403, 'You are not a member of this conversation');
-  }
+    if (!conversation.ownerId || conversation.ownerId !== userId) {
+      throw new ApiError(403, 'Only the group owner can add new participants');
+    }
 
-  if (conversation.ownerId && conversation.ownerId !== userId) {
-    throw new ApiError(403, 'Only the group owner can add new participants');
-  }
+    const existingParticipantIds = new Set(conversation.participants.map((p) => p.userId));
+    const newParticipantIds = Array.from(new Set(participantIds)).filter((id) => !existingParticipantIds.has(id));
 
-  const existingParticipantIds = new Set(conversation.participants.map((p) => p.userId));
-  const newParticipantIds = Array.from(new Set(participantIds)).filter((id) => !existingParticipantIds.has(id));
+    if (newParticipantIds.length === 0) {
+      throw new ApiError(400, 'All specified users are already participants in this group');
+    }
 
-  if (newParticipantIds.length === 0) {
-    throw new ApiError(400, 'All specified users are already participants in this group');
-  }
+    const existingUsers = await tx.user.findMany({
+      where: { id: { in: newParticipantIds } },
+      select: { id: true }
+    });
 
-  const existingUsers = await prisma.user.findMany({
-    where: { id: { in: newParticipantIds } },
-    select: { id: true }
-  });
+    if (existingUsers.length !== newParticipantIds.length) {
+      throw new ApiError(400, 'One or more specified participant user IDs do not exist');
+    }
 
-  if (existingUsers.length !== newParticipantIds.length) {
-    throw new ApiError(400, 'One or more specified participant user IDs do not exist');
-  }
+    await tx.conversationParticipant.createMany({
+      data: newParticipantIds.map((pId) => ({
+        conversationId,
+        userId: pId
+      })),
+      skipDuplicates: true
+    });
 
-  await prisma.conversationParticipant.createMany({
-    data: newParticipantIds.map((pId) => ({
-      conversationId,
-      userId: pId
-    })),
-    skipDuplicates: true
-  });
-
-  const updated = await prisma.conversation.update({
-    where: { id: conversationId },
-    data: {
-      updatedAt: new Date()
-    },
-    include: {
-      participants: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true
+    const updatedConv = await tx.conversation.update({
+      where: { id: conversationId },
+      data: {
+        updatedAt: new Date()
+      },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true
+              }
             }
           }
+        },
+        messages: {
+          take: 1,
+          orderBy: [{ seq: 'desc' }, { id: 'desc' }]
         }
-      },
-      messages: {
-        take: 1,
-        orderBy: [{ seq: 'desc' }, { id: 'desc' }]
       }
-    }
+    });
+
+    const allParticipantIds = updatedConv.participants.map((p) => p.userId);
+    return { updated: updatedConv, allParticipantIds };
   });
 
-  const allParticipantIds = updated.participants.map((p) => p.userId);
   notifyConversationUpdate(allParticipantIds, updated);
 
   return updated;
@@ -723,86 +729,100 @@ export const removeGroupParticipant = async (
   conversationId: string,
   targetUserId: string
 ) => {
-  const conversation = await prisma.conversation.findUnique({
-    where: { id: conversationId },
-    include: {
-      participants: true
-    }
-  });
-
-  if (!conversation) {
-    throw new ApiError(404, 'Conversation not found');
-  }
-
-  if (conversation.type !== 'group') {
-    throw new ApiError(400, 'Cannot remove participants from a direct conversation');
-  }
-
-  const isUserMember = conversation.participants.some((p) => p.userId === userId);
-  if (!isUserMember) {
-    throw new ApiError(403, 'You are not a member of this conversation');
-  }
-
-  const isTargetMember = conversation.participants.some((p) => p.userId === targetUserId);
-  if (!isTargetMember) {
-    throw new ApiError(404, 'Target user is not a participant in this conversation');
-  }
-
-  const isSelfRemoval = userId === targetUserId;
-  if (!isSelfRemoval && conversation.ownerId && conversation.ownerId !== userId) {
-    throw new ApiError(403, 'Only the group owner can remove other participants');
-  }
-
-  await prisma.conversationParticipant.delete({
-    where: {
-      conversationId_userId: {
-        conversationId,
-        userId: targetUserId
+  const result = await prisma.$transaction(async (tx) => {
+    const conversation = await tx.conversation.findUnique({
+      where: { id: conversationId },
+      include: {
+        participants: true
       }
+    });
+
+    if (!conversation) {
+      throw new ApiError(404, 'Conversation not found');
     }
+
+    if (conversation.type !== 'group') {
+      throw new ApiError(400, 'Cannot remove participants from a direct conversation');
+    }
+
+    const isUserMember = conversation.participants.some((p) => p.userId === userId);
+    if (!isUserMember) {
+      throw new ApiError(403, 'You are not a member of this conversation');
+    }
+
+    const isTargetMember = conversation.participants.some((p) => p.userId === targetUserId);
+    if (!isTargetMember) {
+      throw new ApiError(404, 'Target user is not a participant in this conversation');
+    }
+
+    const isSelfRemoval = userId === targetUserId;
+    if (!isSelfRemoval && (!conversation.ownerId || conversation.ownerId !== userId)) {
+      throw new ApiError(403, 'Only the group owner can remove other participants');
+    }
+
+    if (conversation.ownerId === targetUserId && conversation.participants.length > 1) {
+      throw new ApiError(400, 'Group owner must transfer ownership before leaving the group');
+    }
+
+    await tx.conversationParticipant.delete({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId: targetUserId
+        }
+      }
+    });
+
+    const remainingParticipants = await tx.conversationParticipant.findMany({
+      where: { conversationId },
+      select: { userId: true }
+    });
+
+    if (remainingParticipants.length === 0) {
+      await tx.conversation.delete({
+        where: { id: conversationId }
+      });
+      return { conversationDeleted: true, remainingUserIds: [] };
+    }
+
+    const updatedConv = await tx.conversation.update({
+      where: { id: conversationId },
+      data: {
+        updatedAt: new Date()
+      },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true
+              }
+            }
+          }
+        },
+        messages: {
+          take: 1,
+          orderBy: [{ seq: 'desc' }, { id: 'desc' }]
+        }
+      }
+    });
+
+    return {
+      conversationDeleted: false,
+      updated: updatedConv,
+      remainingUserIds: remainingParticipants.map((p) => p.userId)
+    };
   });
 
   safeEjectUserFromRoom(conversationId, targetUserId, userId);
 
-  const remainingParticipants = await prisma.conversationParticipant.findMany({
-    where: { conversationId },
-    select: { userId: true }
-  });
-
-  if (remainingParticipants.length === 0) {
-    await prisma.conversation.delete({
-      where: { id: conversationId }
-    });
-    return { success: true, conversationDeleted: true };
+  if (!result.conversationDeleted && result.updated) {
+    notifyConversationUpdate(result.remainingUserIds, result.updated);
   }
 
-  const updated = await prisma.conversation.update({
-    where: { id: conversationId },
-    data: {
-      updatedAt: new Date()
-    },
-    include: {
-      participants: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true
-            }
-          }
-        }
-      },
-      messages: {
-        take: 1,
-        orderBy: [{ seq: 'desc' }, { id: 'desc' }]
-      }
-    }
-  });
-
-  notifyConversationUpdate(remainingParticipants.map((p) => p.userId), updated);
-
-  return { success: true, conversationDeleted: false };
+  return { success: true, conversationDeleted: result.conversationDeleted };
 };
 
 export const updateGroupConversation = async (
@@ -810,64 +830,144 @@ export const updateGroupConversation = async (
   conversationId: string,
   updates: { name?: string; avatar?: string | null }
 ) => {
-  const conversation = await prisma.conversation.findUnique({
-    where: { id: conversationId },
-    include: {
-      participants: true
+  const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
+    const conversation = await tx.conversation.findUnique({
+      where: { id: conversationId },
+      include: {
+        participants: true
+      }
+    });
+
+    if (!conversation) {
+      throw new ApiError(404, 'Conversation not found');
     }
-  });
 
-  if (!conversation) {
-    throw new ApiError(404, 'Conversation not found');
-  }
+    if (conversation.type !== 'group') {
+      throw new ApiError(400, 'Cannot modify direct conversation details');
+    }
 
-  if (conversation.type !== 'group') {
-    throw new ApiError(400, 'Cannot modify direct conversation details');
-  }
+    const isUserMember = conversation.participants.some((p) => p.userId === userId);
+    if (!isUserMember) {
+      throw new ApiError(403, 'You are not a member of this conversation');
+    }
 
-  const isUserMember = conversation.participants.some((p) => p.userId === userId);
-  if (!isUserMember) {
-    throw new ApiError(403, 'You are not a member of this conversation');
-  }
+    if (!conversation.ownerId || conversation.ownerId !== userId) {
+      throw new ApiError(403, 'Only the group owner can update group details');
+    }
 
-  if (conversation.ownerId && conversation.ownerId !== userId) {
-    throw new ApiError(403, 'Only the group owner can update group details');
-  }
+    const dataToUpdate: any = {};
+    if (updates.name !== undefined) {
+      dataToUpdate.name = updates.name.trim();
+    }
+    if (updates.avatar !== undefined) {
+      dataToUpdate.avatar = updates.avatar;
+    }
+    dataToUpdate.updatedAt = new Date();
 
-  const dataToUpdate: any = {};
-  if (updates.name !== undefined) {
-    dataToUpdate.name = updates.name.trim();
-  }
-  if (updates.avatar !== undefined) {
-    dataToUpdate.avatar = updates.avatar;
-  }
-
-  const updated = await prisma.conversation.update({
-    where: { id: conversationId },
-    data: dataToUpdate,
-    include: {
-      participants: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true
+    const updatedConv = await tx.conversation.update({
+      where: { id: conversationId },
+      data: dataToUpdate,
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true
+              }
             }
           }
+        },
+        messages: {
+          take: 1,
+          orderBy: [{ seq: 'desc' }, { id: 'desc' }]
         }
-      },
-      messages: {
-        take: 1,
-        orderBy: [{ seq: 'desc' }, { id: 'desc' }]
       }
-    }
+    });
+
+    const allParticipantIds = updatedConv.participants.map((p) => p.userId);
+    return { updated: updatedConv, allParticipantIds };
   });
 
-  notifyConversationUpdate(updated.participants.map((p) => p.userId), updated);
+  notifyConversationUpdate(allParticipantIds, updated);
 
   return updated;
 };
+
+export const transferGroupOwnership = async (
+  userId: string,
+  conversationId: string,
+  newOwnerId: string
+) => {
+  const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
+    const conversation = await tx.conversation.findUnique({
+      where: { id: conversationId },
+      include: {
+        participants: true
+      }
+    });
+
+    if (!conversation) {
+      throw new ApiError(404, 'Conversation not found');
+    }
+
+    if (conversation.type !== 'group') {
+      throw new ApiError(400, 'Cannot transfer ownership of a direct conversation');
+    }
+
+    const isUserMember = conversation.participants.some((p) => p.userId === userId);
+    if (!isUserMember) {
+      throw new ApiError(403, 'You are not a member of this conversation');
+    }
+
+    if (!conversation.ownerId || conversation.ownerId !== userId) {
+      throw new ApiError(403, 'Only the group owner can transfer ownership');
+    }
+
+    const isNewOwnerMember = conversation.participants.some((p) => p.userId === newOwnerId);
+    if (!isNewOwnerMember) {
+      throw new ApiError(400, 'Target user is not a participant in this group');
+    }
+
+    if (newOwnerId === userId) {
+      throw new ApiError(400, 'User is already the group owner');
+    }
+
+    const updatedConv = await tx.conversation.update({
+      where: { id: conversationId },
+      data: {
+        ownerId: newOwnerId,
+        updatedAt: new Date()
+      },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true
+              }
+            }
+          }
+        },
+        messages: {
+          take: 1,
+          orderBy: [{ seq: 'desc' }, { id: 'desc' }]
+        }
+      }
+    });
+
+    const allParticipantIds = updatedConv.participants.map((p) => p.userId);
+    return { updated: updatedConv, allParticipantIds };
+  });
+
+  notifyConversationUpdate(allParticipantIds, updated);
+
+  return updated;
+};
+
 
 
 

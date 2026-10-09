@@ -72,3 +72,8 @@ export const updateGroupSchema = Joi.object({
   name: Joi.string().trim().min(1).max(100).optional(),
   avatar: Joi.string().uri({ scheme: ['https'] }).max(2048).custom(isTrustedMediaUrl).allow(null).optional()
 }).or('name', 'avatar');
+
+export const transferOwnershipSchema = Joi.object({
+  newOwnerId: Joi.string().trim().max(100).required()
+});
+
