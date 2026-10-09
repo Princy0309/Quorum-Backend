@@ -8,6 +8,9 @@ export interface PeerSession {
   pc: RTCPeerConnection;
   isMuted: boolean;
   tracks: Map<string, MediaStreamTrack>;
+  isNegotiating: boolean;
+  pendingRenegotiation: boolean;
+  onRenegotiationOffer?: (targetSocketId: string, offer: any) => void;
 }
 
 export class PeerConnectionManager {
@@ -19,6 +22,31 @@ export class PeerConnectionManager {
 
   public getSession(meetingCode: string, socketId: string): PeerSession | undefined {
     return this.sessions.get(this.getSessionKey(meetingCode, socketId));
+  }
+
+  public async triggerRenegotiation(meetingCode: string, socketId: string): Promise<void> {
+    const session = this.getSession(meetingCode, socketId);
+    if (!session || session.pc.signalingState === 'closed') {
+      return;
+    }
+
+    if (session.isNegotiating || session.pc.signalingState !== 'stable') {
+      session.pendingRenegotiation = true;
+      return;
+    }
+
+    session.isNegotiating = true;
+    try {
+      const offer = await session.pc.createOffer();
+      await session.pc.setLocalDescription(offer);
+      session.onRenegotiationOffer?.(session.socketId, {
+        type: offer.type,
+        sdp: offer.sdp,
+      });
+    } catch (err) {
+      session.isNegotiating = false;
+      console.error('Failed to trigger renegotiation:', err);
+    }
   }
 
   public async createPublisherConnection(
@@ -41,6 +69,9 @@ export class PeerConnectionManager {
       pc,
       isMuted: false,
       tracks: new Map(),
+      isNegotiating: false,
+      pendingRenegotiation: false,
+      onRenegotiationOffer,
     };
     this.sessions.set(this.getSessionKey(meetingCode, socketId), session);
 
@@ -62,19 +93,27 @@ export class PeerConnectionManager {
         peer.tracks.set(trackId, track);
       }
 
+      if (track.kind === 'audio') {
+        const originalApply = track.applyIncomingRtp.bind(track);
+        track.applyIncomingRtp = (packet: any, extensions: any) => {
+          if (session.isMuted) {
+            return;
+          }
+          originalApply(packet, extensions);
+        };
+      }
+
       const otherSessions = Array.from(this.sessions.values()).filter(
         (s) => s.meetingCode === meetingCode && s.socketId !== socketId
       );
 
       for (const otherSession of otherSessions) {
         try {
-          otherSession.pc.addTrack(track);
-          const renegotiatedOffer = await otherSession.pc.createOffer();
-          await otherSession.pc.setLocalDescription(renegotiatedOffer);
-          onRenegotiationOffer(otherSession.socketId, {
-            type: renegotiatedOffer.type,
-            sdp: renegotiatedOffer.sdp,
-          });
+          const alreadyAdded = otherSession.pc.getSenders().some((s) => s.track?.uuid === track.uuid);
+          if (!alreadyAdded) {
+            otherSession.pc.addTrack(track);
+            await this.triggerRenegotiation(meetingCode, otherSession.socketId);
+          }
         } catch (err) {
           console.error('Failed to forward track and renegotiate with peer:', err);
         }
@@ -101,20 +140,30 @@ export class PeerConnectionManager {
     );
 
     await pc.setRemoteDescription(new RTCSessionDescription(offer.sdp, offer.type));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
 
     const existingPeers = roomBroker.getPeers(meetingCode).filter((p) => p.socketId !== socketId);
+    let hasExistingTracks = false;
     for (const peer of existingPeers) {
       for (const track of peer.tracks.values()) {
-        try {
-          pc.addTrack(track);
-        } catch (err) {
-          console.error('Failed to add existing track to new peer:', err);
+        const alreadyAdded = pc.getSenders().some((s) => s.track?.uuid === track.uuid);
+        if (!alreadyAdded) {
+          try {
+            pc.addTrack(track);
+            hasExistingTracks = true;
+          } catch (err) {
+            console.error('Failed to add existing track to new peer:', err);
+          }
         }
       }
     }
 
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+    if (hasExistingTracks) {
+      setTimeout(() => {
+        this.triggerRenegotiation(meetingCode, socketId);
+      }, 100);
+    }
 
     return {
       type: answer.type,
@@ -128,6 +177,12 @@ export class PeerConnectionManager {
       throw new Error('Peer connection session not found');
     }
     await session.pc.setRemoteDescription(new RTCSessionDescription(answer.sdp, answer.type));
+    session.isNegotiating = false;
+
+    if (session.pendingRenegotiation) {
+      session.pendingRenegotiation = false;
+      await this.triggerRenegotiation(meetingCode, socketId);
+    }
   }
 
   public async handleIceCandidate(meetingCode: string, socketId: string, candidate: any): Promise<void> {
@@ -145,6 +200,12 @@ export class PeerConnectionManager {
 
     for (const session of matchingSessions) {
       session.isMuted = isMuted;
+      for (const track of session.tracks.values()) {
+        if (track.kind === 'audio') {
+          track.muted = isMuted;
+          track.enabled = !isMuted;
+        }
+      }
     }
   }
 

@@ -76,7 +76,7 @@ export const registerSfuSignalingHandler = (io: SocketIOServer, socket: Socket) 
           user.id,
           payload.offer,
           (candidate) => {
-            socket.emit('sfu:ice-candidate', { candidate });
+            socket.emit('sfu:ice-candidate', { meetingCode: normalizedCode, candidate });
           },
           (targetSocketId, offer) => {
             io.to(targetSocketId).emit('sfu:renegotiate-offer', {
