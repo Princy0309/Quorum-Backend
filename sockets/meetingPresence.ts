@@ -235,6 +235,7 @@ export const handleLeaveMeeting = (
     }
 
     socket.leave(normalizedCode);
+    roomBroker.removePeer(normalizedCode, socket.id);
 
     const participant = roomState.participants.get(user.id);
     if (participant) {
@@ -242,7 +243,7 @@ export const handleLeaveMeeting = (
 
         if (participant.socketIds.size === 0) {
             roomState.participants.delete(user.id);
-            roomBroker.removePeer(normalizedCode, user.id);
+            roomBroker.removePeersByUser(normalizedCode, user.id);
 
             const activeParticipants = formatParticipants(roomState.participants);
             io.to(normalizedCode).emit('meeting:participant-left', {

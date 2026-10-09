@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { meetingRooms, formatParticipants, ParticipantDTO, SocketAckResponse } from './meetingPresence.js';
+import { meetingRooms, formatParticipants, socketToMeetingsMap, ParticipantDTO, SocketAckResponse } from './meetingPresence.js';
 
 export const handleAdmitParticipant = (
   io: Server,
@@ -81,6 +81,10 @@ export const handleAdmitParticipant = (
     role: admittedParticipant.role,
     joinedAt: admittedParticipant.joinedAt,
   };
+
+  const socketMeetings = socketToMeetingsMap.get(waitingUser.socketId) || new Set();
+  socketMeetings.add(normalizedCode);
+  socketToMeetingsMap.set(waitingUser.socketId, socketMeetings);
 
   targetSocket.join(normalizedCode);
   targetSocket.emit('meeting:admitted', {

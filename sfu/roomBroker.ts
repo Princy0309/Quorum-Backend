@@ -17,13 +17,32 @@ class RoomBroker {
 
   public addPeer(meetingCode: string, peer: SfuPeer): void {
     const room = this.getOrCreateRoom(meetingCode);
-    room.peers.set(peer.userId, peer);
+    room.peers.set(peer.socketId, peer);
   }
 
-  public removePeer(meetingCode: string, userId: string): void {
+  public getPeer(meetingCode: string, socketId: string): SfuPeer | undefined {
+    const room = this.rooms.get(meetingCode);
+    return room?.peers.get(socketId);
+  }
+
+  public removePeer(meetingCode: string, socketId: string): void {
     const room = this.rooms.get(meetingCode);
     if (room) {
-      room.peers.delete(userId);
+      room.peers.delete(socketId);
+      if (room.peers.size === 0) {
+        this.rooms.delete(meetingCode);
+      }
+    }
+  }
+
+  public removePeersByUser(meetingCode: string, userId: string): void {
+    const room = this.rooms.get(meetingCode);
+    if (room) {
+      for (const [socketId, peer] of room.peers.entries()) {
+        if (peer.userId === userId) {
+          room.peers.delete(socketId);
+        }
+      }
       if (room.peers.size === 0) {
         this.rooms.delete(meetingCode);
       }
