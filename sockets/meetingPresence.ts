@@ -1,5 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import prisma from '../config/prisma.js';
+import { MeetingStatus } from '@prisma/client';
+import { getMeeting } from '../services/meetingService.js';
 
 export interface Participant {
   userId: string;
@@ -26,24 +28,35 @@ export interface MeetingRoomState {
 export const meetingRooms = new Map<string, MeetingRoomState>();
 export const socketToMeetingMap = new Map<string, string>();
 
-export const getOrCreateMeetingState = async (meetingCode: string, userId: string): Promise<MeetingRoomState> => {
+export const getOrCreateMeetingState = async (meetingCode: string, userId: string): Promise<MeetingRoomState | null> => {
   let state = meetingRooms.get(meetingCode);
   if (!state) {
     let hostUserId = userId;
     let waitingRoomEnabled = true;
 
     try {
-      const dbMeeting = await prisma.$queryRaw<Array<{ hostId?: string; hostUserId?: string; waitingRoom?: boolean }>>`
-        SELECT * FROM "Meeting" WHERE "code" = ${meetingCode} OR "id" = ${meetingCode} LIMIT 1
-      `;
-      if (dbMeeting && dbMeeting.length > 0) {
-        const meeting = dbMeeting[0];
-        hostUserId = meeting.hostId || meeting.hostUserId || userId;
-        if (typeof meeting.waitingRoom === 'boolean') {
-          waitingRoomEnabled = meeting.waitingRoom;
-        }
+      const meeting = await getMeeting(meetingCode);
+      if (meeting) {
+        hostUserId = meeting.hostId;
+        waitingRoomEnabled = meeting.waitingRoom;
       }
-    } catch (e) {
+    } catch (err) {
+      try {
+        const dbMeeting = await prisma.meeting.findFirst({
+          where: {
+            code: meetingCode,
+            status: MeetingStatus.ACTIVE,
+          },
+        });
+        if (dbMeeting) {
+          hostUserId = dbMeeting.hostId;
+          waitingRoomEnabled = dbMeeting.waitingRoom;
+        } else {
+          return null;
+        }
+      } catch (e) {
+        return null;
+      }
     }
 
     state = {
@@ -72,6 +85,11 @@ export const handleJoinMeeting = async (io: Server, socket: Socket, meetingCode:
 
   const normalizedCode = meetingCode.trim();
   const roomState = await getOrCreateMeetingState(normalizedCode, user.id);
+
+  if (!roomState) {
+    socket.emit('meeting:error', { message: 'Meeting not found or already ended' });
+    return;
+  }
 
   const isHost = roomState.hostUserId === user.id || roomState.participants.size === 0;
   if (isHost && roomState.hostUserId !== user.id) {
