@@ -297,6 +297,59 @@ export const closeMeetingRoom = (meetingCode: string) => {
     }
 };
 
+export const handleEndMeeting = async (
+    io: Server,
+    socket: Socket,
+    payload: { meetingCode: string },
+    ack?: (res: SocketAckResponse) => void
+) => {
+    const user = socket.data.user;
+    if (!user || !user.id) {
+        const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
+        socket.emit('meeting:error', err);
+        ack?.({ success: false, ...err });
+        return;
+    }
+
+    const { meetingCode } = payload || {};
+    const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+    if (!normalizedCode) {
+        const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code is required' };
+        socket.emit('meeting:error', err);
+        ack?.({ success: false, ...err });
+        return;
+    }
+
+    const roomState = meetingRooms.get(normalizedCode);
+    if (!roomState) {
+        const err = { code: 'MEETING_NOT_FOUND', message: 'Meeting room not found' };
+        socket.emit('meeting:error', err);
+        ack?.({ success: false, ...err });
+        return;
+    }
+
+    if (roomState.hostUserId !== user.id) {
+        const err = { code: 'NOT_MEETING_HOST', message: 'Only the host can end this meeting' };
+        socket.emit('meeting:error', err);
+        ack?.({ success: false, ...err });
+        return;
+    }
+
+    try {
+        await prisma.meeting.updateMany({
+            where: { code: normalizedCode, status: MeetingStatus.ACTIVE },
+            data: { status: MeetingStatus.ENDED },
+        });
+
+        closeMeetingRoom(normalizedCode);
+        ack?.({ success: true, message: 'Meeting ended successfully' });
+    } catch (err: any) {
+        const errorPayload = { code: 'SERVER_ERROR', message: 'Failed to end meeting' };
+        socket.emit('meeting:error', errorPayload);
+        ack?.({ success: false, ...errorPayload });
+    }
+};
+
 export const handleDisconnectCleanup = (io: Server, socket: Socket) => {
     const socketMeetings = socketToMeetingsMap.get(socket.id);
     if (socketMeetings) {
@@ -306,3 +359,4 @@ export const handleDisconnectCleanup = (io: Server, socket: Socket) => {
         });
     }
 };
+

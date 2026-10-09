@@ -3,9 +3,10 @@ import { Server as HTTPServer } from 'http';
 import { verifyAccessToken } from '../services/tokenService.js';
 import prisma from '../config/prisma.js';
 import env from '../config/env.js';
-import { handleJoinMeeting, handleLeaveMeeting, handleDisconnectCleanup } from './meetingPresence.js';
+import { handleJoinMeeting, handleLeaveMeeting, handleEndMeeting, handleDisconnectCleanup } from './meetingPresence.js';
 import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.js';
 import { handleToggleMic, handleToggleCam, handleSendMeetingMessage } from './meetingControls.js';
+import { registerSfuSignalingHandler } from './sfuSignaling.js';
 
 export interface AuthenticatedSocket extends Socket {
   data: {
@@ -126,6 +127,12 @@ export const initSocketServer = (httpServer: HTTPServer): SocketIOServer => {
     socket.on('meeting:send-message', (data: { meetingCode: string; content: string }, ack?: (res: any) => void) => {
       handleSendMeetingMessage(ioServer!, socket, data, ack);
     });
+
+    socket.on('meeting:end', (data: { meetingCode: string }, ack?: (res: any) => void) => {
+      handleEndMeeting(ioServer!, socket, data, ack);
+    });
+
+    registerSfuSignalingHandler(ioServer!, socket);
 
     socket.on('disconnect', () => {
       console.log(`Socket disconnected: ${socket.id}`);
