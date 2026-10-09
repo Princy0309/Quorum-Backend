@@ -77,6 +77,12 @@ export const registerSfuSignalingHandler = (io: SocketIOServer, socket: Socket) 
           payload.offer,
           (candidate) => {
             socket.emit('sfu:ice-candidate', { candidate });
+          },
+          (targetSocketId, offer) => {
+            io.to(targetSocketId).emit('sfu:renegotiate-offer', {
+              meetingCode: normalizedCode,
+              offer,
+            });
           }
         );
 
@@ -95,13 +101,23 @@ export const registerSfuSignalingHandler = (io: SocketIOServer, socket: Socket) 
       ack?: (res: any) => void
     ) => {
       const user = socket.data.user;
-      if (!user || !user.id || !payload?.answer) {
-        ack?.({ success: false, code: 'INVALID_PAYLOAD', message: 'Answer required' });
+      if (!user || !user.id || !payload?.meetingCode || !payload?.answer) {
+        ack?.({ success: false, code: 'INVALID_PAYLOAD', message: 'Meeting code and answer required' });
+        return;
+      }
+
+      const normalizedCode = payload.meetingCode.trim();
+      if (!validateParticipant(normalizedCode)) {
+        ack?.({
+          success: false,
+          code: 'NOT_ACTIVE_PARTICIPANT',
+          message: 'You must be an active admitted participant to negotiate media',
+        });
         return;
       }
 
       try {
-        await peerConnectionManager.handleAnswer(socket.id, payload.answer);
+        await peerConnectionManager.handleAnswer(normalizedCode, socket.id, payload.answer);
         ack?.({ success: true });
       } catch (err: any) {
         console.error('Failed to handle SFU answer:', err);
@@ -117,13 +133,23 @@ export const registerSfuSignalingHandler = (io: SocketIOServer, socket: Socket) 
       ack?: (res: any) => void
     ) => {
       const user = socket.data.user;
-      if (!user || !user.id || !payload?.candidate) {
-        ack?.({ success: false, code: 'INVALID_PAYLOAD', message: 'Candidate required' });
+      if (!user || !user.id || !payload?.meetingCode || !payload?.candidate) {
+        ack?.({ success: false, code: 'INVALID_PAYLOAD', message: 'Meeting code and candidate required' });
+        return;
+      }
+
+      const normalizedCode = payload.meetingCode.trim();
+      if (!validateParticipant(normalizedCode)) {
+        ack?.({
+          success: false,
+          code: 'NOT_ACTIVE_PARTICIPANT',
+          message: 'You must be an active admitted participant to exchange ICE candidates',
+        });
         return;
       }
 
       try {
-        await peerConnectionManager.handleIceCandidate(socket.id, payload.candidate);
+        await peerConnectionManager.handleIceCandidate(normalizedCode, socket.id, payload.candidate);
         ack?.({ success: true });
       } catch (err: any) {
         console.error('Failed to handle SFU ICE candidate:', err);
@@ -133,6 +159,6 @@ export const registerSfuSignalingHandler = (io: SocketIOServer, socket: Socket) 
   );
 
   socket.on('disconnect', () => {
-    peerConnectionManager.closeConnection(socket.id);
+    peerConnectionManager.closeAllSocketConnections(socket.id);
   });
 };

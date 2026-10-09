@@ -38,7 +38,7 @@ app.use(cors({
   origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
     if (!origin) return callback(null, true);
 
-    const isAllowedDomain = allowedOrigins.includes(origin) || origin.includes('newquorum.me');
+    const isAllowedDomain = allowedOrigins.includes(origin);
     const isLocalDev = env.NODE_ENV !== 'production' && (
       origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')
     );

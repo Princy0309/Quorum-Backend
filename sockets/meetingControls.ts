@@ -1,5 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { meetingRooms, SocketAckResponse } from './meetingPresence.js';
+import { peerConnectionManager } from '../sfu/peerConnection.js';
 
 export const handleToggleMic = (
   io: Server,
@@ -102,6 +103,8 @@ export const handleMuteParticipant = (
       mutedBy: user.id,
     });
   });
+
+  peerConnectionManager.setPeerMuteStatus(normalizedCode, targetUserId.trim(), true);
 
   io.to(normalizedCode).emit('meeting:participant-mic-status', {
     userId: targetUserId.trim(),

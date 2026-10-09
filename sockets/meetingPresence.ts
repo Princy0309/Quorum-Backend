@@ -3,6 +3,7 @@ import prisma from '../config/prisma.js';
 import { MeetingStatus } from '@prisma/client';
 import { getIO } from './socketServer.js';
 import { roomBroker } from '../sfu/roomBroker.js';
+import { peerConnectionManager } from '../sfu/peerConnection.js';
 
 export interface Participant {
     userId: string;
@@ -236,6 +237,7 @@ export const handleLeaveMeeting = (
 
     socket.leave(normalizedCode);
     roomBroker.removePeer(normalizedCode, socket.id);
+    peerConnectionManager.closeConnection(normalizedCode, socket.id);
 
     const participant = roomState.participants.get(user.id);
     if (participant) {
@@ -289,6 +291,7 @@ export const closeMeetingRoom = (meetingCode: string) => {
 
     meetingRooms.delete(normalizedCode);
     roomBroker.closeRoom(normalizedCode);
+    peerConnectionManager.closeRoomConnections(normalizedCode);
 
     for (const [socketId, meetings] of socketToMeetingsMap.entries()) {
         meetings.delete(normalizedCode);

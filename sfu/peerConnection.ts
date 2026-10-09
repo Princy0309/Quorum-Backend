@@ -1,31 +1,48 @@
 import { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, MediaStreamTrack } from 'werift';
 import { roomBroker } from './roomBroker.js';
 
-interface PeerSession {
+export interface PeerSession {
   socketId: string;
   userId: string;
   meetingCode: string;
   pc: RTCPeerConnection;
+  isMuted: boolean;
+  tracks: Map<string, MediaStreamTrack>;
 }
 
 export class PeerConnectionManager {
   private sessions: Map<string, PeerSession> = new Map();
 
-  public getSession(socketId: string): PeerSession | undefined {
-    return this.sessions.get(socketId);
+  private getSessionKey(meetingCode: string, socketId: string): string {
+    return `${meetingCode.trim()}:${socketId.trim()}`;
+  }
+
+  public getSession(meetingCode: string, socketId: string): PeerSession | undefined {
+    return this.sessions.get(this.getSessionKey(meetingCode, socketId));
   }
 
   public async createPublisherConnection(
     meetingCode: string,
     socketId: string,
     userId: string,
-    onIceCandidate: (candidate: any) => void
+    onIceCandidate: (candidate: any) => void,
+    onRenegotiationOffer: (targetSocketId: string, offer: any) => void
   ): Promise<RTCPeerConnection> {
-    this.closeConnection(socketId);
+    this.closeConnection(meetingCode, socketId);
 
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     });
+
+    const session: PeerSession = {
+      socketId,
+      userId,
+      meetingCode,
+      pc,
+      isMuted: false,
+      tracks: new Map(),
+    };
+    this.sessions.set(this.getSessionKey(meetingCode, socketId), session);
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -33,11 +50,13 @@ export class PeerConnectionManager {
       }
     };
 
-    pc.ontrack = (event) => {
+    pc.ontrack = async (event) => {
       const track = event.track;
       if (!track) return;
 
       const trackId = track.id || `${socketId}-${Date.now()}`;
+      session.tracks.set(trackId, track);
+
       const peer = roomBroker.getPeer(meetingCode, socketId);
       if (peer) {
         peer.tracks.set(trackId, track);
@@ -47,22 +66,20 @@ export class PeerConnectionManager {
         (s) => s.meetingCode === meetingCode && s.socketId !== socketId
       );
 
-      for (const session of otherSessions) {
+      for (const otherSession of otherSessions) {
         try {
-          session.pc.addTrack(track);
+          otherSession.pc.addTrack(track);
+          const renegotiatedOffer = await otherSession.pc.createOffer();
+          await otherSession.pc.setLocalDescription(renegotiatedOffer);
+          onRenegotiationOffer(otherSession.socketId, {
+            type: renegotiatedOffer.type,
+            sdp: renegotiatedOffer.sdp,
+          });
         } catch (err) {
-          console.error('Failed to forward track to peer:', err);
+          console.error('Failed to forward track and renegotiate with peer:', err);
         }
       }
     };
-
-    const session: PeerSession = {
-      socketId,
-      userId,
-      meetingCode,
-      pc,
-    };
-    this.sessions.set(socketId, session);
 
     return pc;
   }
@@ -72,9 +89,16 @@ export class PeerConnectionManager {
     socketId: string,
     userId: string,
     offer: any,
-    onIceCandidate: (candidate: any) => void
+    onIceCandidate: (candidate: any) => void,
+    onRenegotiationOffer: (targetSocketId: string, offer: any) => void
   ): Promise<any> {
-    const pc = await this.createPublisherConnection(meetingCode, socketId, userId, onIceCandidate);
+    const pc = await this.createPublisherConnection(
+      meetingCode,
+      socketId,
+      userId,
+      onIceCandidate,
+      onRenegotiationOffer
+    );
 
     await pc.setRemoteDescription(new RTCSessionDescription(offer.sdp, offer.type));
 
@@ -98,34 +122,67 @@ export class PeerConnectionManager {
     };
   }
 
-  public async handleAnswer(socketId: string, answer: any): Promise<void> {
-    const session = this.sessions.get(socketId);
-    if (!session) return;
+  public async handleAnswer(meetingCode: string, socketId: string, answer: any): Promise<void> {
+    const session = this.getSession(meetingCode, socketId);
+    if (!session) {
+      throw new Error('Peer connection session not found');
+    }
     await session.pc.setRemoteDescription(new RTCSessionDescription(answer.sdp, answer.type));
   }
 
-  public async handleIceCandidate(socketId: string, candidate: any): Promise<void> {
-    const session = this.sessions.get(socketId);
-    if (!session || !candidate) return;
+  public async handleIceCandidate(meetingCode: string, socketId: string, candidate: any): Promise<void> {
+    const session = this.getSession(meetingCode, socketId);
+    if (!session || !candidate) {
+      throw new Error('Peer connection session not found');
+    }
     await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
   }
 
-  public closeConnection(socketId: string): void {
-    const session = this.sessions.get(socketId);
+  public setPeerMuteStatus(meetingCode: string, userId: string, isMuted: boolean): void {
+    const matchingSessions = Array.from(this.sessions.values()).filter(
+      (s) => s.meetingCode === meetingCode && s.userId === userId
+    );
+
+    for (const session of matchingSessions) {
+      session.isMuted = isMuted;
+    }
+  }
+
+  public closeConnection(meetingCode: string, socketId: string): void {
+    const key = this.getSessionKey(meetingCode, socketId);
+    const session = this.sessions.get(key);
     if (session) {
       try {
         session.pc.close();
       } catch (err) {
         console.error('Failed to close RTCPeerConnection:', err);
       }
-      this.sessions.delete(socketId);
+      this.sessions.delete(key);
+    }
+  }
+
+  public closeAllSocketConnections(socketId: string): void {
+    for (const [key, session] of this.sessions.entries()) {
+      if (session.socketId === socketId) {
+        try {
+          session.pc.close();
+        } catch (err) {
+          console.error('Failed to close RTCPeerConnection:', err);
+        }
+        this.sessions.delete(key);
+      }
     }
   }
 
   public closeRoomConnections(meetingCode: string): void {
-    for (const [socketId, session] of this.sessions.entries()) {
+    for (const [key, session] of this.sessions.entries()) {
       if (session.meetingCode === meetingCode) {
-        this.closeConnection(socketId);
+        try {
+          session.pc.close();
+        } catch (err) {
+          console.error('Failed to close RTCPeerConnection:', err);
+        }
+        this.sessions.delete(key);
       }
     }
   }
