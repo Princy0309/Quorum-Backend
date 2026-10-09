@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import prisma from '../config/prisma.js';
 import { MeetingStatus } from '@prisma/client';
 import { getIO } from './socketServer.js';
+import { roomBroker } from '../sfu/roomBroker.js';
 
 export interface Participant {
     userId: string;
@@ -241,6 +242,7 @@ export const handleLeaveMeeting = (
 
         if (participant.socketIds.size === 0) {
             roomState.participants.delete(user.id);
+            roomBroker.removePeer(normalizedCode, user.id);
 
             const activeParticipants = formatParticipants(roomState.participants);
             io.to(normalizedCode).emit('meeting:participant-left', {
@@ -285,6 +287,7 @@ export const closeMeetingRoom = (meetingCode: string) => {
     }
 
     meetingRooms.delete(normalizedCode);
+    roomBroker.closeRoom(normalizedCode);
 
     for (const [socketId, meetings] of socketToMeetingsMap.entries()) {
         meetings.delete(normalizedCode);
