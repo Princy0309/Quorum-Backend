@@ -8,6 +8,7 @@ import { sendSuccess } from '../utils/apiResponse.js';
 import { storeAndSendOTP, verifyOTPFromRedis } from '../services/otpService.js';
 import { issueTokens, revokeAllSessions } from '../services/tokenService.js';
 import { refreshCookieOptions } from '../utils/cookieOptions.js';
+import logger from '../utils/logger.js';
 
 import { verifyEmailSchema, sendResetSchema, resetPasswordSchema } from '../validators/otpValidators.js';
 
@@ -28,7 +29,9 @@ export const sendVerificationOTP = asyncHandler(async (req: Request, res: Respon
       if (parsed.createdAt && Date.now() - parsed.createdAt < 60 * 1000) {
         return sendSuccess(res, 200, 'Verification code already sent. Please check your inbox.');
       }
-    } catch (e) {}
+    } catch (e: any) {
+      logger.error('Failed to parse verification OTP record from Redis', { userId: user.id, error: e.message });
+    }
   }
 
   await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
@@ -103,7 +106,7 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response, next
 
     return sendSuccess(res, 200, 'Email verified successfully', responseData);
   } catch (err: unknown) {
-    console.error('Error during post-verification session issuance:', err);
+    logger.error('Error during post-verification session issuance', { error: (err as Error).message });
 
     return sendSuccess(res, 200, 'Email verified successfully. Please log in to continue.', {
       user: {
@@ -163,7 +166,9 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response, ne
       await redis.del(...redisHashes.map((h) => `refresh:${h}`));
     }
     await redis.del(`user_sessions:${user.id}`);
-  } catch (err) {}
+  } catch (err: any) {
+    logger.error('Failed to clean up Redis user sessions during password reset', { userId: user.id, error: err.message });
+  }
 
   return sendSuccess(res, 200, 'Password reset successfully. Please log in with your new password.');
 });

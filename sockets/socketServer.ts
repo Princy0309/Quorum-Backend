@@ -7,6 +7,9 @@ import { handleJoinMeeting, handleLeaveMeeting, handleEndMeeting, handleDisconne
 import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.js';
 import { handleToggleMic, handleToggleCam, handleMuteParticipant, handleSendMeetingMessage, MuteParticipantPayload } from './meetingControls.js';
 import { registerSfuSignalingHandler } from './sfuSignaling.js';
+import { registerMessageHandler } from './handlers/messageHandler.js';
+import { registerTypingHandler } from './handlers/typingHandler.js';
+import { registerPresenceHandler } from './handlers/presenceHandler.js';
 
 export interface AuthenticatedSocket extends Socket {
   data: {
@@ -99,6 +102,15 @@ export const initSocketServer = (httpServer: HTTPServer): SocketIOServer => {
 
   ioServer.on('connection', (socket) => {
     console.log(`Socket connected: ${socket.id} (User: ${socket.data.user?.id})`);
+
+    const userId = socket.data.user?.id;
+    if (userId) {
+      socket.join(`user:${userId}`);
+    }
+
+    registerMessageHandler(ioServer!, socket as any);
+    registerTypingHandler(ioServer!, socket as any);
+    registerPresenceHandler(ioServer!, socket as any);
 
     socket.on('meeting:join', (data: { meetingCode: string }, ack?: (res: any) => void) => {
       handleJoinMeeting(ioServer!, socket, data?.meetingCode, ack);

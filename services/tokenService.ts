@@ -5,6 +5,7 @@ import redis from '../config/redis.js';
 import { hashToken } from '../utils/hashToken.js';
 import { ApiError } from '../utils/ApiError.js';
 import { encryptPayload, decryptPayload } from '../utils/encryption.js';
+import logger from '../utils/logger.js';
 
 import env from '../config/env.js';
 
@@ -13,6 +14,7 @@ const JWT_AUDIENCE = env.JWT_AUDIENCE;
 const REFRESH_TTL_SECONDS = env.REFRESH_TOKEN_TTL_SECONDS;
 const JWT_SECRET = env.JWT_SECRET;
 const JWT_REFRESH_SECRET = env.JWT_REFRESH_SECRET;
+const ROTATION_GRACE_PERIOD_MS = 30 * 1000;
 
 export interface AccessTokenPayload {
   id: string;
@@ -116,8 +118,8 @@ export const saveSessionToDb = async (tokenHash: string, userId: string, device:
         ...(familyId && { familyId }),
       },
     });
-  } catch (err) {
-    console.error('Failed to save RefreshToken session to database:', err);
+  } catch (err: any) {
+    logger.error('Failed to save RefreshToken session to database', { error: err.message });
     throw new ApiError(500, 'Internal Server Error');
   }
 };
@@ -132,8 +134,8 @@ export const saveSessionToRedis = async (familyId: string, userId: string, devic
     );
     await redis.sadd(`user_sessions:${userId}`, familyId);
     await redis.expire(`user_sessions:${userId}`, REFRESH_TTL_SECONDS);
-  } catch (err) {
-    console.error('Failed to save RefreshToken session to Redis:', err);
+  } catch (err: any) {
+    logger.error('Failed to save RefreshToken session to Redis', { error: err.message });
     throw new ApiError(500, 'Internal Server Error');
   }
 };
@@ -142,8 +144,8 @@ export const deleteSessionFromRedis = async (familyId: string, userId: string) =
   try {
     await redis.del(`refresh:${familyId}`);
     await redis.srem(`user_sessions:${userId}`, familyId);
-  } catch (err) {
-    console.error('Failed to remove session from Redis:', err);
+  } catch (err: any) {
+    logger.error('Failed to remove session from Redis', { error: err.message });
     throw new ApiError(500, 'Internal Server Error');
   }
 };
@@ -162,9 +164,11 @@ export const issueTokens = async (user: { id: string }, req?: any): Promise<{ ac
 
   try {
     await saveSessionToRedis(familyId, user.id, device);
-  } catch (err) {
-    console.error('Rolling back DB after Redis failure');
-    await prisma.refreshToken.delete({ where: { tokenHash } }).catch(e => console.error('Rollback failed:', e));
+  } catch (err: any) {
+    logger.error('Rolling back DB after Redis failure', { error: err.message });
+    await prisma.refreshToken.delete({ where: { tokenHash } }).catch((e: any) => {
+      logger.error('Rollback failed', { error: e.message });
+    });
     throw err;
   }
 
@@ -178,13 +182,13 @@ const performReuseRevocation = async (storedToken: any) => {
     data: { revokedAt: new Date() },
   });
   
-  console.warn(`[Security] Token reuse detected for user ${storedToken.userId}. Session family revoked.`);
+  logger.warn('Token reuse detected. Session family revoked.', { userId: storedToken.userId, familyId: storedToken.familyId });
   
   try {
     await redis.del(`refresh:${storedToken.familyId}`);
     await redis.srem(`user_sessions:${storedToken.userId}`, storedToken.familyId);
-  } catch (redisErr) {
-    console.error(`[Security] Failed to remove revoked family from Redis for user ${storedToken.userId}. DB revocation succeeded.`, redisErr);
+  } catch (redisErr: any) {
+    logger.error('Failed to remove revoked family from Redis', { userId: storedToken.userId, error: redisErr.message });
   }
 };
 
@@ -211,7 +215,11 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
   }
 
   if (storedToken.revokedAt) {
-    if (storedToken.rotationCache) {
+    if (
+      storedToken.rotationCache &&
+      storedToken.rotationCacheExpiresAt &&
+      storedToken.rotationCacheExpiresAt > new Date()
+    ) {
       try {
         const parsed = decryptPayload(rawToken, storedToken.rotationCache);
         return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
@@ -240,6 +248,7 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
       const newTokenHash = hashToken(refreshToken);
       const accessToken = generateAccessToken(storedToken.userId, storedToken.familyId);
       const expiresAt = new Date(Date.now() + REFRESH_TTL_SECONDS * 1000);
+      const rotationCacheExpiresAt = new Date(Date.now() + ROTATION_GRACE_PERIOD_MS);
 
       await tx.refreshToken.create({
         data: {
@@ -258,7 +267,10 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
 
       await tx.refreshToken.update({
         where: { id: storedToken.id },
-        data: { rotationCache: encryptedCache },
+        data: {
+          rotationCache: encryptedCache,
+          rotationCacheExpiresAt
+        },
       });
 
       return { accessToken, refreshToken, newTokenHash, device };
@@ -269,9 +281,13 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
         await new Promise(resolve => setTimeout(resolve, 300));
         const updatedOldToken = await prisma.refreshToken.findUnique({
           where: { id: storedToken.id },
-          select: { rotationCache: true }
+          select: { rotationCache: true, rotationCacheExpiresAt: true }
         });
-        if (updatedOldToken?.rotationCache) {
+        if (
+          updatedOldToken?.rotationCache &&
+          updatedOldToken.rotationCacheExpiresAt &&
+          updatedOldToken.rotationCacheExpiresAt > new Date()
+        ) {
           try {
             const parsed = decryptPayload(rawToken, updatedOldToken.rotationCache);
             return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
@@ -296,15 +312,15 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
 
 export const revokeAccessToken = async (accessToken: string): Promise<void> => {
   try {
-    const decoded = jwt.decode(accessToken) as AccessTokenPayload | null;
+    const decoded = verifyAccessToken(accessToken);
     if (decoded && decoded.jti && decoded.exp) {
       const ttl = decoded.exp - Math.floor(Date.now() / 1000);
       if (ttl > 0) {
         await redis.set(`revoked_access:${decoded.jti}`, '1', 'EX', ttl);
       }
     }
-  } catch (err) {
-    console.error('Failed to revoke access token in Redis:', err);
+  } catch (err: any) {
+    logger.error('Failed to revoke access token in Redis or token verification failed', { error: err.message });
   }
 };
 

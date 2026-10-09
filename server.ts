@@ -11,12 +11,12 @@ import { initSocketServer } from './sockets/socketServer.js';
 let server: any;
 
 const startServer = async (): Promise<void> => {
-  const PORT = process.env.PORT || 5000;
+  const PORT = Number(process.env.PORT || 5000);
   
   const httpServer = createServer(app);
   initSocketServer(httpServer);
 
-  server = httpServer.listen(Number(PORT), '0.0.0.0', () => {
+  server = httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Quorum server running on port ${PORT}`);
   });
 
@@ -39,11 +39,11 @@ const startServer = async (): Promise<void> => {
 
 const gracefulShutdown = async (signal: string) => {
   console.log(`Received ${signal}. Shutting down gracefully...`);
-  
+
   if (server) {
     server.close(async () => {
       console.log('HTTP server closed.');
-      
+
       try {
         await emailWorker.close();
         console.log('Email worker closed.');

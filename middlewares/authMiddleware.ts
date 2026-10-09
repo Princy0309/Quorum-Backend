@@ -7,6 +7,7 @@ import { ApiError } from "../utils/ApiError.js";
 import prisma from "../config/prisma.js";
 import redis from "../config/redis.js";
 import { User } from "@prisma/client";
+import logger from "../utils/logger.js";
 
 declare global {
   namespace Express {
@@ -45,7 +46,9 @@ export const authMiddleware = async (
     if (isRevoked) {
       return next(new ApiError(401, "Token revoked"));
     }
-  } catch (err) {}
+  } catch (err: any) {
+    logger.error("Failed to check token revocation status in Redis", { error: err.message });
+  }
 
   try {
     const dbSession = await prisma.refreshToken.findFirst({
@@ -67,10 +70,13 @@ export const authMiddleware = async (
           ),
           redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
           redis.expire(`user_sessions:${dbSession.userId}`, remainingSeconds),
-        ]).catch(() => {});
+        ]).catch((err: any) => {
+          logger.error("Failed async Redis session caching in authMiddleware", { error: err.message });
+        });
       }
     }
-  } catch (dbErr) {
+  } catch (dbErr: any) {
+    logger.error("Database query failed in authMiddleware session lookup", { error: dbErr.message });
     return next(new ApiError(500, "Internal Server Error"));
   }
 
@@ -89,7 +95,8 @@ export const authMiddleware = async (
     const { passwordHash, ...safeUser } = user;
     req.user = safeUser;
     next();
-  } catch (err) {
+  } catch (err: any) {
+    logger.error("Database query failed in authMiddleware user lookup", { error: err.message });
     return next(new ApiError(500, "Internal Server Error"));
   }
 };
@@ -147,7 +154,9 @@ export const optionalAuth = async (
     if (isRevoked) {
       return next();
     }
-  } catch (err) {}
+  } catch (err: any) {
+    logger.error("Failed to check token revocation status in optionalAuth", { error: err.message });
+  }
 
   try {
     const dbSession = await prisma.refreshToken.findFirst({
@@ -169,10 +178,13 @@ export const optionalAuth = async (
           ),
           redis.sadd(`user_sessions:${dbSession.userId}`, dbSession.familyId),
           redis.expire(`user_sessions:${dbSession.userId}`, remainingSeconds),
-        ]).catch(() => {});
+        ]).catch((err: any) => {
+          logger.error("Failed async Redis session caching in optionalAuth", { error: err.message });
+        });
       }
     }
-  } catch (dbErr) {
+  } catch (dbErr: any) {
+    logger.error("Database query failed in optionalAuth session lookup", { error: dbErr.message });
     return next(new ApiError(500, "Internal Server Error"));
   }
 
@@ -186,7 +198,8 @@ export const optionalAuth = async (
         const { passwordHash, ...safeUser } = user;
         req.user = safeUser;
       }
-    } catch (err) {
+    } catch (err: any) {
+      logger.error("Database query failed in optionalAuth user lookup", { error: err.message });
       return next(new ApiError(500, "Internal Server Error"));
     }
   }
