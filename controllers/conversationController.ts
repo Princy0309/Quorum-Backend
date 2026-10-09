@@ -1,5 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
-import { getConversationMessages, getUserConversations, searchConversationMessages } from '../services/chatService.js';
+import {
+  getConversationMessages,
+  getUserConversations,
+  searchConversationMessages,
+  createGroupConversation,
+  addGroupParticipants,
+  removeGroupParticipant,
+  updateGroupConversation
+} from '../services/chatService.js';
 import { ApiError } from '../utils/ApiError.js';
 
 const parseAndValidatePagination = (
@@ -101,6 +109,105 @@ export const searchConversationMessagesController = async (req: Request, res: Re
     res.status(200).json({
       success: true,
       data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const createGroupConversationController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const { name, participantIds, avatar } = req.body;
+    const conversation = await createGroupConversation(userId, name, participantIds, avatar);
+
+    res.status(201).json({
+      success: true,
+      data: conversation
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const addGroupParticipantsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const { participantIds } = req.body;
+    const conversation = await addGroupParticipants(userId, conversationId, participantIds);
+
+    res.status(200).json({
+      success: true,
+      data: conversation
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const removeGroupParticipantController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const rawTargetUserId = req.params.userId;
+    const targetUserId = Array.isArray(rawTargetUserId) ? rawTargetUserId[0] : rawTargetUserId;
+    if (!targetUserId) {
+      throw new ApiError(400, 'targetUserId is required');
+    }
+
+    const result = await removeGroupParticipant(userId, conversationId, targetUserId);
+
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateGroupConversationController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const { name, avatar } = req.body;
+    const conversation = await updateGroupConversation(userId, conversationId, { name, avatar });
+
+    res.status(200).json({
+      success: true,
+      data: conversation
     });
   } catch (err) {
     next(err);
