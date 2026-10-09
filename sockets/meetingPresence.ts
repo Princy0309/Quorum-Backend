@@ -6,7 +6,14 @@ import { getMeeting } from '../services/meetingService.js';
 export interface Participant {
   userId: string;
   name: string;
-  socketId: string;
+  socketIds: Set<string>;
+  role: 'host' | 'participant';
+  joinedAt: Date;
+}
+
+export interface ParticipantDTO {
+  userId: string;
+  name: string;
   role: 'host' | 'participant';
   joinedAt: Date;
 }
@@ -26,12 +33,21 @@ export interface MeetingRoomState {
 }
 
 export const meetingRooms = new Map<string, MeetingRoomState>();
-export const socketToMeetingMap = new Map<string, string>();
+export const socketToMeetingMap = new Map<string, { meetingCode: string; userId: string }>();
 
-export const getOrCreateMeetingState = async (meetingCode: string, userId: string): Promise<MeetingRoomState | null> => {
+export const formatParticipants = (participantsMap: Map<string, Participant>): ParticipantDTO[] => {
+  return Array.from(participantsMap.values()).map((p) => ({
+    userId: p.userId,
+    name: p.name,
+    role: p.role,
+    joinedAt: p.joinedAt,
+  }));
+};
+
+export const getOrCreateMeetingState = async (meetingCode: string): Promise<MeetingRoomState | null> => {
   let state = meetingRooms.get(meetingCode);
   if (!state) {
-    let hostUserId = userId;
+    let hostUserId: string | null = null;
     let waitingRoomEnabled = true;
 
     try {
@@ -59,6 +75,10 @@ export const getOrCreateMeetingState = async (meetingCode: string, userId: strin
       }
     }
 
+    if (!hostUserId) {
+      return null;
+    }
+
     state = {
       code: meetingCode,
       hostUserId,
@@ -84,26 +104,23 @@ export const handleJoinMeeting = async (io: Server, socket: Socket, meetingCode:
   }
 
   const normalizedCode = meetingCode.trim();
-  const roomState = await getOrCreateMeetingState(normalizedCode, user.id);
+  const roomState = await getOrCreateMeetingState(normalizedCode);
 
   if (!roomState) {
     socket.emit('meeting:error', { message: 'Meeting not found or already ended' });
     return;
   }
 
-  const isHost = roomState.hostUserId === user.id || roomState.participants.size === 0;
-  if (isHost && roomState.hostUserId !== user.id) {
-    roomState.hostUserId = user.id;
-  }
+  const isHost = roomState.hostUserId === user.id;
 
-  if (!isHost && roomState.waitingRoomEnabled) {
+  if (!isHost && roomState.waitingRoomEnabled && !roomState.participants.has(user.id)) {
     const waitingUser: WaitingUser = {
       userId: user.id,
       name: user.name || 'Guest',
       socketId: socket.id,
     };
     roomState.waitingRoom.set(user.id, waitingUser);
-    socketToMeetingMap.set(socket.id, normalizedCode);
+    socketToMeetingMap.set(socket.id, { meetingCode: normalizedCode, userId: user.id });
 
     socket.emit('meeting:waiting-room', {
       message: 'You are in the waiting room. Please wait for the host to admit you.',
@@ -112,26 +129,41 @@ export const handleJoinMeeting = async (io: Server, socket: Socket, meetingCode:
 
     const hostParticipant = Array.from(roomState.participants.values()).find((p) => p.role === 'host');
     if (hostParticipant) {
-      io.to(hostParticipant.socketId).emit('meeting:guest-waiting', { user: waitingUser });
+      hostParticipant.socketIds.forEach((hostSocketId) => {
+        io.to(hostSocketId).emit('meeting:guest-waiting', { user: waitingUser });
+      });
     }
     return;
   }
 
   const participantRole: 'host' | 'participant' = isHost ? 'host' : 'participant';
-  const participant: Participant = {
-    userId: user.id,
-    name: user.name || 'Participant',
-    socketId: socket.id,
-    role: participantRole,
-    joinedAt: new Date(),
-  };
+  const existingParticipant = roomState.participants.get(user.id);
 
-  roomState.participants.set(user.id, participant);
-  socketToMeetingMap.set(socket.id, normalizedCode);
+  if (existingParticipant) {
+    existingParticipant.socketIds.add(socket.id);
+  } else {
+    roomState.participants.set(user.id, {
+      userId: user.id,
+      name: user.name || 'Participant',
+      socketIds: new Set([socket.id]),
+      role: participantRole,
+      joinedAt: new Date(),
+    });
+  }
+
+  socketToMeetingMap.set(socket.id, { meetingCode: normalizedCode, userId: user.id });
   socket.join(normalizedCode);
 
-  const activeParticipants = Array.from(roomState.participants.values());
+  const activeParticipants = formatParticipants(roomState.participants);
   const waitingUsersList = Array.from(roomState.waitingRoom.values());
+  const currentParticipant = roomState.participants.get(user.id)!;
+
+  const participantSummary: ParticipantDTO = {
+    userId: currentParticipant.userId,
+    name: currentParticipant.name,
+    role: currentParticipant.role,
+    joinedAt: currentParticipant.joinedAt,
+  };
 
   socket.emit('meeting:joined', {
     meetingCode: normalizedCode,
@@ -140,14 +172,16 @@ export const handleJoinMeeting = async (io: Server, socket: Socket, meetingCode:
     waitingRoom: isHost ? waitingUsersList : [],
   });
 
-  socket.to(normalizedCode).emit('meeting:participant-joined', {
-    participant,
-    participants: activeParticipants,
-  });
+  if (!existingParticipant) {
+    socket.to(normalizedCode).emit('meeting:participant-joined', {
+      participant: participantSummary,
+      participants: activeParticipants,
+    });
 
-  io.to(normalizedCode).emit('meeting:presence-update', {
-    participants: activeParticipants,
-  });
+    io.to(normalizedCode).emit('meeting:presence-update', {
+      participants: activeParticipants,
+    });
+  }
 };
 
 export const handleLeaveMeeting = (io: Server, socket: Socket, meetingCode: string) => {
@@ -157,25 +191,31 @@ export const handleLeaveMeeting = (io: Server, socket: Socket, meetingCode: stri
   const roomState = meetingRooms.get(meetingCode);
   if (!roomState) return;
 
-  let wasParticipant = false;
-  if (roomState.participants.has(user.id)) {
-    roomState.participants.delete(user.id);
-    wasParticipant = true;
-  }
-  roomState.waitingRoom.delete(user.id);
   socketToMeetingMap.delete(socket.id);
   socket.leave(meetingCode);
 
-  if (wasParticipant) {
-    const activeParticipants = Array.from(roomState.participants.values());
-    io.to(meetingCode).emit('meeting:participant-left', {
-      userId: user.id,
-      socketId: socket.id,
-      participants: activeParticipants,
-    });
-    io.to(meetingCode).emit('meeting:presence-update', {
-      participants: activeParticipants,
-    });
+  const participant = roomState.participants.get(user.id);
+  if (participant) {
+    participant.socketIds.delete(socket.id);
+
+    if (participant.socketIds.size === 0) {
+      roomState.participants.delete(user.id);
+
+      const activeParticipants = formatParticipants(roomState.participants);
+      io.to(meetingCode).emit('meeting:participant-left', {
+        userId: user.id,
+        socketId: socket.id,
+        participants: activeParticipants,
+      });
+      io.to(meetingCode).emit('meeting:presence-update', {
+        participants: activeParticipants,
+      });
+    }
+  }
+
+  const waitingUser = roomState.waitingRoom.get(user.id);
+  if (waitingUser && waitingUser.socketId === socket.id) {
+    roomState.waitingRoom.delete(user.id);
   }
 
   if (roomState.participants.size === 0 && roomState.waitingRoom.size === 0) {
@@ -184,8 +224,8 @@ export const handleLeaveMeeting = (io: Server, socket: Socket, meetingCode: stri
 };
 
 export const handleDisconnectCleanup = (io: Server, socket: Socket) => {
-  const meetingCode = socketToMeetingMap.get(socket.id);
-  if (meetingCode) {
-    handleLeaveMeeting(io, socket, meetingCode);
+  const mapping = socketToMeetingMap.get(socket.id);
+  if (mapping) {
+    handleLeaveMeeting(io, socket, mapping.meetingCode);
   }
 };

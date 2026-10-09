@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { meetingRooms, Participant } from './meetingPresence.js';
+import { meetingRooms, formatParticipants, ParticipantDTO } from './meetingPresence.js';
 
 export const handleAdmitParticipant = (io: Server, socket: Socket, payload: { meetingCode: string; targetUserId: string }) => {
   const user = socket.data.user;
@@ -33,15 +33,28 @@ export const handleAdmitParticipant = (io: Server, socket: Socket, payload: { me
 
   roomState.waitingRoom.delete(targetUserId);
 
-  const newParticipant: Participant = {
-    userId: waitingUser.userId,
-    name: waitingUser.name,
-    socketId: waitingUser.socketId,
-    role: 'participant',
-    joinedAt: new Date(),
-  };
+  const existingParticipant = roomState.participants.get(targetUserId);
+  if (existingParticipant) {
+    existingParticipant.socketIds.add(waitingUser.socketId);
+  } else {
+    roomState.participants.set(targetUserId, {
+      userId: waitingUser.userId,
+      name: waitingUser.name,
+      socketIds: new Set([waitingUser.socketId]),
+      role: 'participant',
+      joinedAt: new Date(),
+    });
+  }
 
-  roomState.participants.set(targetUserId, newParticipant);
+  const activeParticipants = formatParticipants(roomState.participants);
+  const admittedParticipant = roomState.participants.get(targetUserId)!;
+
+  const participantSummary: ParticipantDTO = {
+    userId: admittedParticipant.userId,
+    name: admittedParticipant.name,
+    role: admittedParticipant.role,
+    joinedAt: admittedParticipant.joinedAt,
+  };
 
   const targetSocket = io.sockets.sockets.get(waitingUser.socketId);
   if (targetSocket) {
@@ -49,14 +62,12 @@ export const handleAdmitParticipant = (io: Server, socket: Socket, payload: { me
     targetSocket.emit('meeting:admitted', {
       meetingCode,
       role: 'participant',
-      participants: Array.from(roomState.participants.values()),
+      participants: activeParticipants,
     });
   }
 
-  const activeParticipants = Array.from(roomState.participants.values());
-
   socket.to(meetingCode).emit('meeting:participant-joined', {
-    participant: newParticipant,
+    participant: participantSummary,
     participants: activeParticipants,
   });
 
