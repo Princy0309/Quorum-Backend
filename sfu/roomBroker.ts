@@ -51,7 +51,7 @@ export class RoomBroker extends EventEmitter {
         return peer;
     }
 
-      public publishTrack(
+    public publishTrack(
     roomCode: string,
     peerId: string,
     track: MediaStreamTrack
