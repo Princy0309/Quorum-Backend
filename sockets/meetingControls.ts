@@ -2,6 +2,17 @@ import { Server, Socket } from 'socket.io';
 import { meetingRooms, SocketAckResponse } from './meetingPresence.js';
 import { peerConnectionManager } from '../sfu/peerConnection.js';
 
+export type MuteAction = 'mute' | 'unmute' | 'allow-unmute';
+
+export interface MuteParticipantPayload {
+  meetingCode: string;
+  targetUserId: string;
+  action?: MuteAction;
+  allowUnmute?: boolean;
+}
+
+const messageRateLimits = new Map<string, number[]>();
+
 export const handleToggleMic = (
   io: Server,
   socket: Socket,
@@ -65,7 +76,7 @@ export const handleToggleMic = (
 export const handleMuteParticipant = (
   io: Server,
   socket: Socket,
-  payload: { meetingCode: string; targetUserId: string; allowUnmute?: boolean; action?: 'mute' | 'allow-unmute' | 'unmute' },
+  payload: MuteParticipantPayload,
   ack?: (res: SocketAckResponse) => void
 ) => {
   const user = socket.data.user;
@@ -86,6 +97,14 @@ export const handleMuteParticipant = (
     return;
   }
 
+  const normalizedAction: MuteAction = action || (allowUnmute === true ? 'allow-unmute' : 'mute');
+  if (!['mute', 'unmute', 'allow-unmute'].includes(normalizedAction)) {
+    const err = { code: 'INVALID_PAYLOAD', message: 'Action must be mute, unmute, or allow-unmute' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
   const roomState = meetingRooms.get(normalizedCode);
   if (!roomState) {
     const err = { code: 'MEETING_NOT_FOUND', message: 'Meeting room not found' };
@@ -96,7 +115,7 @@ export const handleMuteParticipant = (
 
   const hostParticipant = roomState.participants.get(user.id);
   if (roomState.hostUserId !== user.id || !hostParticipant || !hostParticipant.socketIds.has(socket.id)) {
-    const err = { code: 'NOT_MEETING_HOST', message: 'Only the host can mute participants' };
+    const err = { code: 'NOT_MEETING_HOST', message: 'Only the host can manage participant mute states' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
     return;
@@ -110,7 +129,7 @@ export const handleMuteParticipant = (
     return;
   }
 
-  if (action === 'allow-unmute' || action === 'unmute' || allowUnmute === true) {
+  if (normalizedAction === 'allow-unmute') {
     targetParticipant.hostMuted = false;
 
     targetParticipant.socketIds.forEach((sId) => {
@@ -130,9 +149,41 @@ export const handleMuteParticipant = (
       success: true,
       data: {
         targetUserId: targetUserId.trim(),
+        action: 'allow-unmute',
         isMuted: targetParticipant.isMuted ?? true,
         hostMuted: false,
         permittedToUnmute: true,
+      },
+    });
+    return;
+  }
+
+  if (normalizedAction === 'unmute') {
+    targetParticipant.hostMuted = false;
+    targetParticipant.isMuted = false;
+    peerConnectionManager.setPeerMuteStatus(normalizedCode, targetUserId.trim(), false);
+
+    targetParticipant.socketIds.forEach((sId) => {
+      io.to(sId).emit('meeting:unmuted-by-host', {
+        meetingCode: normalizedCode,
+      });
+    });
+
+    io.to(normalizedCode).emit('meeting:participant-mic-status', {
+      userId: targetUserId.trim(),
+      isMuted: false,
+      hostMuted: false,
+      unmutedByHost: true,
+    });
+
+    ack?.({
+      success: true,
+      data: {
+        targetUserId: targetUserId.trim(),
+        action: 'unmute',
+        isMuted: false,
+        hostMuted: false,
+        unmutedByHost: true,
       },
     });
     return;
@@ -157,7 +208,15 @@ export const handleMuteParticipant = (
     enforcedByHost: true,
   });
 
-  ack?.({ success: true, data: { targetUserId: targetUserId.trim(), isMuted: true, hostMuted: true } });
+  ack?.({
+    success: true,
+    data: {
+      targetUserId: targetUserId.trim(),
+      action: 'mute',
+      isMuted: true,
+      hostMuted: true,
+    },
+  });
 };
 
 export const handleToggleCam = (
@@ -200,6 +259,8 @@ export const handleToggleCam = (
     return;
   }
 
+  participant.isVideoOff = isVideoOff;
+
   io.to(normalizedCode).emit('meeting:participant-cam-status', {
     userId: user.id,
     socketId: socket.id,
@@ -225,13 +286,32 @@ export const handleSendMeetingMessage = (
 
   const { meetingCode, content } = payload || {};
   const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+  const trimmedContent = typeof content === 'string' ? content.trim() : '';
 
-  if (!normalizedCode || !content || typeof content !== 'string' || !content.trim()) {
+  if (!normalizedCode || !trimmedContent) {
     const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code and non-empty message content are required' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
     return;
   }
+
+  if (trimmedContent.length > 2000) {
+    const err = { code: 'MESSAGE_TOO_LONG', message: 'Message content cannot exceed 2000 characters' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  const now = Date.now();
+  const timestamps = (messageRateLimits.get(user.id) || []).filter((t) => now - t < 2000);
+  if (timestamps.length >= 5) {
+    const err = { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many messages sent. Please slow down.' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+  timestamps.push(now);
+  messageRateLimits.set(user.id, timestamps);
 
   const roomState = meetingRooms.get(normalizedCode);
   if (!roomState) {
@@ -252,7 +332,7 @@ export const handleSendMeetingMessage = (
   const messagePayload = {
     senderId: user.id,
     senderName: user.name || 'Participant',
-    content: content.trim(),
+    content: trimmedContent,
     timestamp: new Date(),
   };
 

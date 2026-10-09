@@ -5,7 +5,7 @@ import prisma from '../config/prisma.js';
 import env from '../config/env.js';
 import { handleJoinMeeting, handleLeaveMeeting, handleEndMeeting, handleDisconnectCleanup } from './meetingPresence.js';
 import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.js';
-import { handleToggleMic, handleToggleCam, handleMuteParticipant, handleSendMeetingMessage } from './meetingControls.js';
+import { handleToggleMic, handleToggleCam, handleMuteParticipant, handleSendMeetingMessage, MuteParticipantPayload } from './meetingControls.js';
 import { registerSfuSignalingHandler } from './sfuSignaling.js';
 
 export interface AuthenticatedSocket extends Socket {
@@ -120,7 +120,7 @@ export const initSocketServer = (httpServer: HTTPServer): SocketIOServer => {
       handleToggleMic(ioServer!, socket, data, ack);
     });
 
-    socket.on('meeting:mute-participant', (data: { meetingCode: string; targetUserId: string }, ack?: (res: any) => void) => {
+    socket.on('meeting:mute-participant', (data: MuteParticipantPayload, ack?: (res: any) => void) => {
       handleMuteParticipant(ioServer!, socket, data, ack);
     });
 

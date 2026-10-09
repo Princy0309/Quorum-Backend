@@ -69,7 +69,16 @@ export class PeerConnectionManager {
     onIceCandidate: (candidate: any) => void,
     onRenegotiationOffer: (targetSocketId: string, offer: any) => void
   ): Promise<RTCPeerConnection> {
-    this.closeConnection(meetingCode, socketId);
+    const key = this.getSessionKey(meetingCode, socketId);
+    const existingSession = this.sessions.get(key);
+    if (existingSession) {
+      try {
+        existingSession.pc.close();
+      } catch (err) {
+        console.error('Failed to close RTCPeerConnection:', err);
+      }
+      this.sessions.delete(key);
+    }
 
     const iceServers: any[] = [{ urls: 'stun:stun.l.google.com:19302' }];
     if (process.env.TURN_SERVER_URL) {
@@ -84,7 +93,6 @@ export class PeerConnectionManager {
       iceServers,
     });
 
-    const key = this.getSessionKey(meetingCode, socketId);
     const earlyCandidates = (this.earlyIceCandidates.get(key) || []).slice(0, 50);
     this.earlyIceCandidates.delete(key);
 

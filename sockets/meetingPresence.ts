@@ -14,6 +14,7 @@ export interface Participant {
     joinedAt: Date;
     isMuted?: boolean;
     hostMuted?: boolean;
+    isVideoOff?: boolean;
 }
 
 export interface ParticipantDTO {
@@ -23,6 +24,7 @@ export interface ParticipantDTO {
     joinedAt: Date;
     isMuted?: boolean;
     hostMuted?: boolean;
+    isVideoOff?: boolean;
 }
 
 export interface WaitingUser {
@@ -48,6 +50,7 @@ export interface SocketAckResponse {
 
 export const meetingRooms = new Map<string, MeetingRoomState>();
 export const socketToMeetingsMap = new Map<string, Set<string>>();
+const meetingInitLocks = new Map<string, Promise<MeetingRoomState | null>>();
 
 export const formatParticipants = (participantsMap: Map<string, Participant>): ParticipantDTO[] => {
     return Array.from(participantsMap.values()).map((p) => ({
@@ -57,37 +60,57 @@ export const formatParticipants = (participantsMap: Map<string, Participant>): P
         joinedAt: p.joinedAt,
         isMuted: p.isMuted ?? false,
         hostMuted: p.hostMuted ?? false,
+        isVideoOff: p.isVideoOff ?? false,
     }));
 };
 
 export const getOrCreateMeetingState = async (meetingCode: string): Promise<MeetingRoomState | null> => {
-    let state = meetingRooms.get(meetingCode);
-    if (!state) {
-        const dbMeeting = await prisma.meeting.findFirst({
-            where: {
-                code: meetingCode,
-                status: MeetingStatus.ACTIVE,
-            },
-            select: {
-                hostId: true,
-                waitingRoom: true,
-            },
-        });
-
-        if (!dbMeeting || !dbMeeting.hostId) {
-            return null;
-        }
-
-        state = {
-            code: meetingCode,
-            hostUserId: dbMeeting.hostId,
-            waitingRoomEnabled: dbMeeting.waitingRoom,
-            participants: new Map(),
-            waitingRoom: new Map(),
-        };
-        meetingRooms.set(meetingCode, state);
+    const existing = meetingRooms.get(meetingCode);
+    if (existing) {
+        return existing;
     }
-    return state;
+
+    const pending = meetingInitLocks.get(meetingCode);
+    if (pending) {
+        return await pending;
+    }
+
+    const initPromise = (async () => {
+        try {
+            const dbMeeting = await prisma.meeting.findFirst({
+                where: {
+                    code: meetingCode,
+                    status: MeetingStatus.ACTIVE,
+                },
+                select: {
+                    hostId: true,
+                    waitingRoom: true,
+                },
+            });
+
+            if (!dbMeeting || !dbMeeting.hostId) {
+                return null;
+            }
+
+            let state = meetingRooms.get(meetingCode);
+            if (!state) {
+                state = {
+                    code: meetingCode,
+                    hostUserId: dbMeeting.hostId,
+                    waitingRoomEnabled: dbMeeting.waitingRoom,
+                    participants: new Map(),
+                    waitingRoom: new Map(),
+                };
+                meetingRooms.set(meetingCode, state);
+            }
+            return state;
+        } finally {
+            meetingInitLocks.delete(meetingCode);
+        }
+    })();
+
+    meetingInitLocks.set(meetingCode, initPromise);
+    return await initPromise;
 };
 
 export const handleJoinMeeting = async (
@@ -184,6 +207,9 @@ export const handleJoinMeeting = async (
             socketIds: new Set([socket.id]),
             role: participantRole,
             joinedAt: new Date(),
+            isMuted: false,
+            hostMuted: false,
+            isVideoOff: false,
         });
     }
 
@@ -206,6 +232,9 @@ export const handleJoinMeeting = async (
         name: currentParticipant.name,
         role: currentParticipant.role,
         joinedAt: currentParticipant.joinedAt,
+        isMuted: currentParticipant.isMuted ?? false,
+        hostMuted: currentParticipant.hostMuted ?? false,
+        isVideoOff: currentParticipant.isVideoOff ?? false,
     };
 
     const joinedData = {

@@ -74,6 +74,9 @@ export const handleAdmitParticipant = (
       socketIds: new Set(activeSocketIds),
       role: 'participant',
       joinedAt: new Date(),
+      isMuted: false,
+      hostMuted: false,
+      isVideoOff: false,
     });
   }
 
@@ -85,6 +88,9 @@ export const handleAdmitParticipant = (
     name: admittedParticipant.name,
     role: admittedParticipant.role,
     joinedAt: admittedParticipant.joinedAt,
+    isMuted: admittedParticipant.isMuted ?? false,
+    hostMuted: admittedParticipant.hostMuted ?? false,
+    isVideoOff: admittedParticipant.isVideoOff ?? false,
   };
 
   activeSocketIds.forEach((sId) => {
