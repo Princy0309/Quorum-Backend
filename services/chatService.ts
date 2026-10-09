@@ -334,8 +334,8 @@ export const getConversationMessages = async (
 
   if (messages.length > queryLimit) {
     hasNextPage = true;
-    const nextItem = messages.pop();
-    nextCursor = nextItem ? nextItem.id : null;
+    messages.pop();
+    nextCursor = messages[messages.length - 1]?.id ?? null;
   }
 
   return {
@@ -542,8 +542,8 @@ export const searchConversationMessages = async (
 
   if (messages.length > queryLimit) {
     hasNextPage = true;
-    const nextItem = messages.pop();
-    nextCursor = nextItem ? nextItem.id : null;
+    messages.pop();
+    nextCursor = messages[messages.length - 1]?.id ?? null;
   }
 
   return {
