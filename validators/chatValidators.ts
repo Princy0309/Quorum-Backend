@@ -29,16 +29,15 @@ const isTrustedMediaUrl = (value: string, helpers: Joi.CustomHelpers) => {
 export const sendMessageSchema = Joi.object({
   conversationId: Joi.string().trim().max(100).required(),
   clientMessageId: Joi.string().trim().max(100).optional(),
-  content: Joi.string().trim().max(5000).allow(''),
+  content: Joi.string().trim().min(1).max(5000),
   fileUrl: Joi.string()
     .uri({ scheme: ['https'] })
     .max(2048)
     .custom(isTrustedMediaUrl)
     .messages({
       'any.invalid': 'fileUrl must originate from an authorized media storage provider (Cloudinary/S3)'
-    })
-    .allow(null, ''),
-  fileType: Joi.string().valid('image', 'video', 'audio', 'file').allow(null, '')
+    }),
+  fileType: Joi.string().valid('image', 'video', 'audio', 'file')
 }).or('content', 'fileUrl');
 
 export const readMessageSchema = Joi.object({

@@ -301,13 +301,14 @@ export const getConversationMessages = async (
 
   let cursorSeq: number | null = null;
   if (cursor) {
-    const cursorMsg = await prisma.message.findUnique({
-      where: { id: cursor },
+    const cursorMsg = await prisma.message.findFirst({
+      where: { id: cursor, conversationId },
       select: { seq: true }
     });
-    if (cursorMsg) {
-      cursorSeq = cursorMsg.seq;
+    if (!cursorMsg) {
+      throw new ApiError(400, 'Invalid cursor for this conversation');
     }
+    cursorSeq = cursorMsg.seq;
   }
 
   const messages = await prisma.message.findMany({
@@ -316,7 +317,6 @@ export const getConversationMessages = async (
       ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
     },
     take: queryLimit + 1,
-    ...(cursor && cursorSeq === null ? { cursor: { id: cursor }, skip: 1 } : {}),
     orderBy: [{ seq: 'desc' }, { id: 'desc' }],
     include: {
       sender: {
@@ -503,13 +503,14 @@ export const searchConversationMessages = async (
 
   let cursorSeq: number | null = null;
   if (cursor) {
-    const cursorMsg = await prisma.message.findUnique({
-      where: { id: cursor },
+    const cursorMsg = await prisma.message.findFirst({
+      where: { id: cursor, conversationId },
       select: { seq: true }
     });
-    if (cursorMsg) {
-      cursorSeq = cursorMsg.seq;
+    if (!cursorMsg) {
+      throw new ApiError(400, 'Invalid cursor for this conversation');
     }
+    cursorSeq = cursorMsg.seq;
   }
 
   const whereClause = {
@@ -525,7 +526,6 @@ export const searchConversationMessages = async (
     where: whereClause,
     orderBy: [{ seq: 'desc' }, { id: 'desc' }],
     take: queryLimit + 1,
-    ...(cursor && cursorSeq === null ? { cursor: { id: cursor }, skip: 1 } : {}),
     include: {
       sender: {
         select: {
