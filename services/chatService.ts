@@ -18,6 +18,20 @@ const safeEjectUserFromRoom = (conversationId: string, targetUserId: string, rem
   }
 };
 
+const notifyConversationUpdate = (userIds: string[], conversationData: any) => {
+  try {
+    const io = getIO();
+    userIds.forEach((uId) => {
+      io.to(`user:${uId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+        conversationId: conversationData.id,
+        conversation: conversationData
+      });
+    });
+  } catch (err: any) {
+    logger.error('Failed to emit conversation update event', { error: err.message });
+  }
+};
+
 export const getOrCreateDirectConversation = async (userId: string, targetUserId: string) => {
   if (userId === targetUserId) {
     throw new ApiError(400, 'Cannot start a direct message conversation with yourself');
@@ -604,7 +618,6 @@ export const createGroupConversation = async (
             select: {
               id: true,
               name: true,
-              email: true,
               avatar: true
             }
           }
@@ -616,6 +629,8 @@ export const createGroupConversation = async (
       }
     }
   });
+
+  notifyConversationUpdate(uniqueUserIds, conversation);
 
   return conversation;
 };
@@ -669,11 +684,15 @@ export const addGroupParticipants = async (
     data: newParticipantIds.map((pId) => ({
       conversationId,
       userId: pId
-    }))
+    })),
+    skipDuplicates: true
   });
 
-  const updated = await prisma.conversation.findUnique({
+  const updated = await prisma.conversation.update({
     where: { id: conversationId },
+    data: {
+      updatedAt: new Date()
+    },
     include: {
       participants: {
         include: {
@@ -681,7 +700,6 @@ export const addGroupParticipants = async (
             select: {
               id: true,
               name: true,
-              email: true,
               avatar: true
             }
           }
@@ -693,6 +711,9 @@ export const addGroupParticipants = async (
       }
     }
   });
+
+  const allParticipantIds = updated.participants.map((p) => p.userId);
+  notifyConversationUpdate(allParticipantIds, updated);
 
   return updated;
 };
@@ -743,16 +764,43 @@ export const removeGroupParticipant = async (
 
   safeEjectUserFromRoom(conversationId, targetUserId, userId);
 
-  const remainingParticipants = await prisma.conversationParticipant.count({
-    where: { conversationId }
+  const remainingParticipants = await prisma.conversationParticipant.findMany({
+    where: { conversationId },
+    select: { userId: true }
   });
 
-  if (remainingParticipants === 0) {
+  if (remainingParticipants.length === 0) {
     await prisma.conversation.delete({
       where: { id: conversationId }
     });
     return { success: true, conversationDeleted: true };
   }
+
+  const updated = await prisma.conversation.update({
+    where: { id: conversationId },
+    data: {
+      updatedAt: new Date()
+    },
+    include: {
+      participants: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true
+            }
+          }
+        }
+      },
+      messages: {
+        take: 1,
+        orderBy: [{ seq: 'desc' }, { id: 'desc' }]
+      }
+    }
+  });
+
+  notifyConversationUpdate(remainingParticipants.map((p) => p.userId), updated);
 
   return { success: true, conversationDeleted: false };
 };
@@ -804,7 +852,6 @@ export const updateGroupConversation = async (
             select: {
               id: true,
               name: true,
-              email: true,
               avatar: true
             }
           }
@@ -816,6 +863,8 @@ export const updateGroupConversation = async (
       }
     }
   });
+
+  notifyConversationUpdate(updated.participants.map((p) => p.userId), updated);
 
   return updated;
 };
