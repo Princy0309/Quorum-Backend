@@ -19,7 +19,7 @@ export interface PublishedTrack {
 
 export interface SfuRoom {
     code: string;
-    hostId: string;
+    hostId?: string;
     peers: Map<string, Peer>;
     channels: Map<string, TrackSubscriber[]>;
 }
