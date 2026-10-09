@@ -110,29 +110,7 @@ export const handleMuteParticipant = (
     return;
   }
 
-  if (action === 'unmute') {
-    targetParticipant.hostMuted = false;
-    targetParticipant.isMuted = false;
-    peerConnectionManager.setPeerMuteStatus(normalizedCode, targetUserId.trim(), false);
-
-    targetParticipant.socketIds.forEach((sId) => {
-      io.to(sId).emit('meeting:unmuted-by-host', {
-        meetingCode: normalizedCode,
-      });
-    });
-
-    io.to(normalizedCode).emit('meeting:participant-mic-status', {
-      userId: targetUserId.trim(),
-      isMuted: false,
-      hostMuted: false,
-      unmutedByHost: true,
-    });
-
-    ack?.({ success: true, data: { targetUserId: targetUserId.trim(), isMuted: false, hostMuted: false } });
-    return;
-  }
-
-  if (action === 'allow-unmute' || allowUnmute === true) {
+  if (action === 'allow-unmute' || action === 'unmute' || allowUnmute === true) {
     targetParticipant.hostMuted = false;
 
     targetParticipant.socketIds.forEach((sId) => {
@@ -143,12 +121,20 @@ export const handleMuteParticipant = (
 
     io.to(normalizedCode).emit('meeting:participant-mic-status', {
       userId: targetUserId.trim(),
-      isMuted: targetParticipant.isMuted ?? false,
+      isMuted: targetParticipant.isMuted ?? true,
       hostMuted: false,
       permittedToUnmute: true,
     });
 
-    ack?.({ success: true, data: { targetUserId: targetUserId.trim(), hostMuted: false } });
+    ack?.({
+      success: true,
+      data: {
+        targetUserId: targetUserId.trim(),
+        isMuted: targetParticipant.isMuted ?? true,
+        hostMuted: false,
+        permittedToUnmute: true,
+      },
+    });
     return;
   }
 

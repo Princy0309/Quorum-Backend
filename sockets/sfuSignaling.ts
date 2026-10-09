@@ -127,6 +127,38 @@ export const registerSfuSignalingHandler = (io: SocketIOServer, socket: Socket) 
   );
 
   socket.on(
+    'sfu:send-renegotiate-answer',
+    async (
+      payload: { meetingCode: string; answer: any },
+      ack?: (res: any) => void
+    ) => {
+      const user = socket.data.user;
+      if (!user || !user.id || !payload?.meetingCode || !payload?.answer) {
+        ack?.({ success: false, code: 'INVALID_PAYLOAD', message: 'Meeting code and answer required' });
+        return;
+      }
+
+      const normalizedCode = payload.meetingCode.trim();
+      if (!validateParticipant(normalizedCode)) {
+        ack?.({
+          success: false,
+          code: 'NOT_ACTIVE_PARTICIPANT',
+          message: 'You must be an active admitted participant to negotiate media',
+        });
+        return;
+      }
+
+      try {
+        await peerConnectionManager.handleAnswer(normalizedCode, socket.id, payload.answer);
+        ack?.({ success: true });
+      } catch (err: any) {
+        console.error('Failed to handle SFU answer:', err);
+        ack?.({ success: false, code: 'SFU_ANSWER_FAILED', message: err.message || 'Failed to process answer' });
+      }
+    }
+  );
+
+  socket.on(
     'sfu:send-ice-candidate',
     async (
       payload: { meetingCode: string; candidate: any },

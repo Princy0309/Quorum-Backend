@@ -176,17 +176,33 @@ export class PeerConnectionManager {
     await pc.setLocalDescription(answer);
 
     const existingPeers = roomBroker.getPeers(meetingCode).filter((p) => p.socketId !== socketId);
+    const existingSessions = Array.from(this.sessions.values()).filter(
+      (s) => s.meetingCode === meetingCode && s.socketId !== socketId
+    );
+
     let hasExistingTracks = false;
+    const allExistingTracks: any[] = [];
     for (const peer of existingPeers) {
       for (const track of peer.tracks.values()) {
-        const alreadyAdded = pc.getSenders().some((s) => s.track?.uuid === track.uuid);
-        if (!alreadyAdded) {
-          try {
-            pc.addTrack(track);
-            hasExistingTracks = true;
-          } catch (err) {
-            console.error('Failed to add existing track to new peer:', err);
-          }
+        allExistingTracks.push(track);
+      }
+    }
+    for (const s of existingSessions) {
+      for (const track of s.tracks.values()) {
+        if (!allExistingTracks.some((t) => t.uuid === track.uuid)) {
+          allExistingTracks.push(track);
+        }
+      }
+    }
+
+    for (const track of allExistingTracks) {
+      const alreadyAdded = pc.getSenders().some((s) => s.track?.uuid === track.uuid);
+      if (!alreadyAdded) {
+        try {
+          pc.addTrack(track);
+          hasExistingTracks = true;
+        } catch (err) {
+          console.error('Failed to add existing track to new peer:', err);
         }
       }
     }
@@ -194,7 +210,7 @@ export class PeerConnectionManager {
     if (hasExistingTracks) {
       setTimeout(() => {
         this.triggerRenegotiation(meetingCode, socketId);
-      }, 100);
+      }, 150);
     }
 
     return {

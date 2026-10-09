@@ -5,7 +5,7 @@
   "main": "server.ts",
   "scripts": {
     "postinstall": "prisma generate",
-    "test": "jest",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --forceExit",
     "start": "node dist/server.js",
     "dev": "nodemon -e ts --exec tsx server.ts",
     "db:migrate": ".\\node_modules\\.bin\\prisma migrate dev",
@@ -15,16 +15,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Princy0309/Quorum-Backend.git"
+    "url": "git+https://github.com/tusharTalan1/Quorum-Backend.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "bugs": {
-    "url": "https://github.com/Princy0309/Quorum-Backend/issues"
+    "url": "https://github.com/tusharTalan1/Quorum-Backend/issues"
   },
-  "homepage": "https://github.com/Princy0309/Quorum-Backend#readme",
+  "homepage": "https://github.com/tusharTalan1/Quorum-Backend#readme",
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.10",
