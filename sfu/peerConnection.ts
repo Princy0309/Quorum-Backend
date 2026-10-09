@@ -16,6 +16,7 @@ export interface PeerSession {
 
 export class PeerConnectionManager {
   private sessions: Map<string, PeerSession> = new Map();
+  private earlyIceCandidates: Map<string, any[]> = new Map();
 
   private getSessionKey(meetingCode: string, socketId: string): string {
     return `${meetingCode.trim()}:${socketId.trim()}`;
@@ -83,6 +84,10 @@ export class PeerConnectionManager {
       iceServers,
     });
 
+    const key = this.getSessionKey(meetingCode, socketId);
+    const earlyCandidates = this.earlyIceCandidates.get(key) || [];
+    this.earlyIceCandidates.delete(key);
+
     const session: PeerSession = {
       socketId,
       userId,
@@ -92,10 +97,10 @@ export class PeerConnectionManager {
       tracks: new Map(),
       isNegotiating: false,
       pendingRenegotiation: false,
-      pendingIceCandidates: [],
+      pendingIceCandidates: [...earlyCandidates],
       onRenegotiationOffer,
     };
-    this.sessions.set(this.getSessionKey(meetingCode, socketId), session);
+    this.sessions.set(key, session);
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -214,9 +219,18 @@ export class PeerConnectionManager {
   }
 
   public async handleIceCandidate(meetingCode: string, socketId: string, candidate: any): Promise<void> {
-    const session = this.getSession(meetingCode, socketId);
-    if (!session || !candidate) {
-      throw new Error('Peer connection session not found');
+    if (!candidate) {
+      return;
+    }
+
+    const key = this.getSessionKey(meetingCode, socketId);
+    const session = this.sessions.get(key);
+
+    if (!session) {
+      const list = this.earlyIceCandidates.get(key) || [];
+      list.push(candidate);
+      this.earlyIceCandidates.set(key, list);
+      return;
     }
 
     if (!session.pc.remoteDescription) {
@@ -245,6 +259,7 @@ export class PeerConnectionManager {
 
   public closeConnection(meetingCode: string, socketId: string): void {
     const key = this.getSessionKey(meetingCode, socketId);
+    this.earlyIceCandidates.delete(key);
     const session = this.sessions.get(key);
     if (session) {
       try {
@@ -259,6 +274,7 @@ export class PeerConnectionManager {
   public closeAllSocketConnections(socketId: string): void {
     for (const [key, session] of this.sessions.entries()) {
       if (session.socketId === socketId) {
+        this.earlyIceCandidates.delete(key);
         try {
           session.pc.close();
         } catch (err) {
@@ -272,6 +288,7 @@ export class PeerConnectionManager {
   public closeRoomConnections(meetingCode: string): void {
     for (const [key, session] of this.sessions.entries()) {
       if (session.meetingCode === meetingCode) {
+        this.earlyIceCandidates.delete(key);
         try {
           session.pc.close();
         } catch (err) {
