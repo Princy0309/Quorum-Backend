@@ -4,6 +4,7 @@ import { MeetingStatus } from '@prisma/client';
 import { getIO } from './socketServer.js';
 import { roomBroker } from '../sfu/roomBroker.js';
 import { peerConnectionManager } from '../sfu/peerConnection.js';
+import { endMeeting } from '../services/meetingService.js';
 
 export interface Participant {
     userId: string;
@@ -23,7 +24,7 @@ export interface ParticipantDTO {
 export interface WaitingUser {
     userId: string;
     name: string;
-    socketId: string;
+    socketIds: Set<string>;
 }
 
 export interface MeetingRoomState {
@@ -56,34 +57,29 @@ export const formatParticipants = (participantsMap: Map<string, Participant>): P
 export const getOrCreateMeetingState = async (meetingCode: string): Promise<MeetingRoomState | null> => {
     let state = meetingRooms.get(meetingCode);
     if (!state) {
-        try {
-            const dbMeeting = await prisma.meeting.findFirst({
-                where: {
-                    code: meetingCode,
-                    status: MeetingStatus.ACTIVE,
-                },
-                select: {
-                    hostId: true,
-                    waitingRoom: true,
-                },
-            });
-
-            if (!dbMeeting || !dbMeeting.hostId) {
-                return null;
-            }
-
-            state = {
+        const dbMeeting = await prisma.meeting.findFirst({
+            where: {
                 code: meetingCode,
-                hostUserId: dbMeeting.hostId,
-                waitingRoomEnabled: dbMeeting.waitingRoom,
-                participants: new Map(),
-                waitingRoom: new Map(),
-            };
-            meetingRooms.set(meetingCode, state);
-        } catch (dbErr) {
-            console.error('Failed to validate meeting in database:', dbErr);
+                status: MeetingStatus.ACTIVE,
+            },
+            select: {
+                hostId: true,
+                waitingRoom: true,
+            },
+        });
+
+        if (!dbMeeting || !dbMeeting.hostId) {
             return null;
         }
+
+        state = {
+            code: meetingCode,
+            hostUserId: dbMeeting.hostId,
+            waitingRoomEnabled: dbMeeting.waitingRoom,
+            participants: new Map(),
+            waitingRoom: new Map(),
+        };
+        meetingRooms.set(meetingCode, state);
     }
     return state;
 };
@@ -110,9 +106,19 @@ export const handleJoinMeeting = async (
         return;
     }
 
-    const roomState = await getOrCreateMeetingState(normalizedCode);
+    let roomState: MeetingRoomState | null;
+    try {
+        roomState = await getOrCreateMeetingState(normalizedCode);
+    } catch (dbErr: any) {
+        console.error('Failed to validate meeting in database:', dbErr);
+        const errorPayload = { code: 'SERVER_ERROR', message: 'Database error occurred while retrieving meeting' };
+        socket.emit('meeting:error', errorPayload);
+        ack?.({ success: false, ...errorPayload });
+        return;
+    }
+
     if (!roomState) {
-        const errorPayload = { code: 'MEETING_NOT_FOUND', message: 'Meeting not found or already ended' };
+        const errorPayload = { code: 'MEETING_NOT_FOUND', message: 'Meeting room not found or already ended' };
         socket.emit('meeting:error', errorPayload);
         ack?.({ success: false, ...errorPayload });
         return;
@@ -121,12 +127,17 @@ export const handleJoinMeeting = async (
     const isHost = roomState.hostUserId === user.id;
 
     if (!isHost && roomState.waitingRoomEnabled && !roomState.participants.has(user.id)) {
-        const waitingUser: WaitingUser = {
-            userId: user.id,
-            name: user.name || 'Guest',
-            socketId: socket.id,
-        };
-        roomState.waitingRoom.set(user.id, waitingUser);
+        let waitingUser = roomState.waitingRoom.get(user.id);
+        if (waitingUser) {
+            waitingUser.socketIds.add(socket.id);
+        } else {
+            waitingUser = {
+                userId: user.id,
+                name: user.name || 'Guest',
+                socketIds: new Set([socket.id]),
+            };
+            roomState.waitingRoom.set(user.id, waitingUser);
+        }
 
         const socketMeetings = socketToMeetingsMap.get(socket.id) || new Set();
         socketMeetings.add(normalizedCode);
@@ -143,7 +154,13 @@ export const handleJoinMeeting = async (
         const hostParticipant = Array.from(roomState.participants.values()).find((p) => p.role === 'host');
         if (hostParticipant) {
             hostParticipant.socketIds.forEach((hostSocketId) => {
-                io.to(hostSocketId).emit('meeting:guest-waiting', { user: waitingUser });
+                io.to(hostSocketId).emit('meeting:guest-waiting', {
+                    user: {
+                        userId: waitingUser!.userId,
+                        name: waitingUser!.name,
+                        socketIds: Array.from(waitingUser!.socketIds),
+                    },
+                });
             });
         }
         return;
@@ -171,7 +188,11 @@ export const handleJoinMeeting = async (
     socket.join(normalizedCode);
 
     const activeParticipants = formatParticipants(roomState.participants);
-    const waitingUsersList = Array.from(roomState.waitingRoom.values());
+    const waitingUsersList = Array.from(roomState.waitingRoom.values()).map((w) => ({
+        userId: w.userId,
+        name: w.name,
+        socketIds: Array.from(w.socketIds),
+    }));
     const currentParticipant = roomState.participants.get(user.id)!;
 
     const participantSummary: ParticipantDTO = {
@@ -260,8 +281,11 @@ export const handleLeaveMeeting = (
     }
 
     const waitingUser = roomState.waitingRoom.get(user.id);
-    if (waitingUser && waitingUser.socketId === socket.id) {
-        roomState.waitingRoom.delete(user.id);
+    if (waitingUser && waitingUser.socketIds.has(socket.id)) {
+        waitingUser.socketIds.delete(socket.id);
+        if (waitingUser.socketIds.size === 0) {
+            roomState.waitingRoom.delete(user.id);
+        }
     }
 
     if (roomState.participants.size === 0 && roomState.waitingRoom.size === 0) {
@@ -324,31 +348,17 @@ export const handleEndMeeting = async (
         return;
     }
 
-    const roomState = meetingRooms.get(normalizedCode);
-    if (!roomState) {
-        const err = { code: 'MEETING_NOT_FOUND', message: 'Meeting room not found' };
-        socket.emit('meeting:error', err);
-        ack?.({ success: false, ...err });
-        return;
-    }
-
-    if (roomState.hostUserId !== user.id) {
-        const err = { code: 'NOT_MEETING_HOST', message: 'Only the host can end this meeting' };
-        socket.emit('meeting:error', err);
-        ack?.({ success: false, ...err });
-        return;
-    }
-
     try {
-        await prisma.meeting.updateMany({
-            where: { code: normalizedCode, status: MeetingStatus.ACTIVE },
-            data: { status: MeetingStatus.ENDED },
-        });
-
-        closeMeetingRoom(normalizedCode);
+        await endMeeting(normalizedCode, user.id);
         ack?.({ success: true, message: 'Meeting ended successfully' });
     } catch (err: any) {
-        const errorPayload = { code: 'SERVER_ERROR', message: 'Failed to end meeting' };
+        const statusCode = err.statusCode || 500;
+        let code = 'SERVER_ERROR';
+        if (statusCode === 404) code = 'MEETING_NOT_FOUND';
+        else if (statusCode === 403) code = 'NOT_MEETING_HOST';
+        else if (statusCode === 400) code = 'MEETING_ALREADY_ENDED';
+
+        const errorPayload = { code, message: err.message || 'Failed to end meeting' };
         socket.emit('meeting:error', errorPayload);
         ack?.({ success: false, ...errorPayload });
     }
@@ -363,4 +373,3 @@ export const handleDisconnectCleanup = (io: Server, socket: Socket) => {
         });
     }
 };
-

@@ -48,8 +48,12 @@ export const handleAdmitParticipant = (
     return;
   }
 
-  const targetSocket = io.sockets.sockets.get(waitingUser.socketId);
-  if (!targetSocket || !targetSocket.connected) {
+  const activeSocketIds = Array.from(waitingUser.socketIds).filter((sId) => {
+    const s = io.sockets.sockets.get(sId);
+    return s && s.connected;
+  });
+
+  if (activeSocketIds.length === 0) {
     roomState.waitingRoom.delete(targetUserId.trim());
     const err = { code: 'PARTICIPANT_DISCONNECTED', message: 'Participant is no longer connected' };
     socket.emit('meeting:error', err);
@@ -61,12 +65,12 @@ export const handleAdmitParticipant = (
 
   const existingParticipant = roomState.participants.get(targetUserId.trim());
   if (existingParticipant) {
-    existingParticipant.socketIds.add(waitingUser.socketId);
+    activeSocketIds.forEach((sId) => existingParticipant.socketIds.add(sId));
   } else {
     roomState.participants.set(targetUserId.trim(), {
       userId: waitingUser.userId,
       name: waitingUser.name,
-      socketIds: new Set([waitingUser.socketId]),
+      socketIds: new Set(activeSocketIds),
       role: 'participant',
       joinedAt: new Date(),
     });
@@ -82,15 +86,20 @@ export const handleAdmitParticipant = (
     joinedAt: admittedParticipant.joinedAt,
   };
 
-  const socketMeetings = socketToMeetingsMap.get(waitingUser.socketId) || new Set();
-  socketMeetings.add(normalizedCode);
-  socketToMeetingsMap.set(waitingUser.socketId, socketMeetings);
+  activeSocketIds.forEach((sId) => {
+    const targetSocket = io.sockets.sockets.get(sId);
+    if (targetSocket && targetSocket.connected) {
+      const socketMeetings = socketToMeetingsMap.get(sId) || new Set();
+      socketMeetings.add(normalizedCode);
+      socketToMeetingsMap.set(sId, socketMeetings);
 
-  targetSocket.join(normalizedCode);
-  targetSocket.emit('meeting:admitted', {
-    meetingCode: normalizedCode,
-    role: 'participant',
-    participants: activeParticipants,
+      targetSocket.join(normalizedCode);
+      targetSocket.emit('meeting:admitted', {
+        meetingCode: normalizedCode,
+        role: 'participant',
+        participants: activeParticipants,
+      });
+    }
   });
 
   socket.to(normalizedCode).emit('meeting:participant-joined', {
@@ -152,15 +161,18 @@ export const handleRejectParticipant = (
     return;
   }
 
+  const activeSocketIds = Array.from(waitingUser.socketIds);
   roomState.waitingRoom.delete(targetUserId.trim());
 
-  const targetSocket = io.sockets.sockets.get(waitingUser.socketId);
-  if (targetSocket && targetSocket.connected) {
-    targetSocket.emit('meeting:rejected', {
-      meetingCode: normalizedCode,
-      message: 'The host has declined your request to join the meeting.',
-    });
-  }
+  activeSocketIds.forEach((sId) => {
+    const targetSocket = io.sockets.sockets.get(sId);
+    if (targetSocket && targetSocket.connected) {
+      targetSocket.emit('meeting:rejected', {
+        meetingCode: normalizedCode,
+        message: 'The host has declined your request to join the meeting.',
+      });
+    }
+  });
 
   ack?.({ success: true, data: { rejectedUserId: targetUserId.trim() } });
 };

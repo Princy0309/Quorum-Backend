@@ -10,6 +10,7 @@ export interface PeerSession {
   tracks: Map<string, MediaStreamTrack>;
   isNegotiating: boolean;
   pendingRenegotiation: boolean;
+  pendingIceCandidates: any[];
   onRenegotiationOffer?: (targetSocketId: string, offer: any) => void;
 }
 
@@ -22,6 +23,17 @@ export class PeerConnectionManager {
 
   public getSession(meetingCode: string, socketId: string): PeerSession | undefined {
     return this.sessions.get(this.getSessionKey(meetingCode, socketId));
+  }
+
+  private async flushPendingIceCandidates(session: PeerSession): Promise<void> {
+    while (session.pendingIceCandidates.length > 0) {
+      const candidate = session.pendingIceCandidates.shift();
+      try {
+        await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.error('Failed to add queued ICE candidate:', err);
+      }
+    }
   }
 
   public async triggerRenegotiation(meetingCode: string, socketId: string): Promise<void> {
@@ -58,8 +70,17 @@ export class PeerConnectionManager {
   ): Promise<RTCPeerConnection> {
     this.closeConnection(meetingCode, socketId);
 
+    const iceServers: any[] = [{ urls: 'stun:stun.l.google.com:19302' }];
+    if (process.env.TURN_SERVER_URL) {
+      iceServers.push({
+        urls: process.env.TURN_SERVER_URL,
+        username: process.env.TURN_USERNAME,
+        credential: process.env.TURN_PASSWORD,
+      });
+    }
+
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      iceServers,
     });
 
     const session: PeerSession = {
@@ -71,6 +92,7 @@ export class PeerConnectionManager {
       tracks: new Map(),
       isNegotiating: false,
       pendingRenegotiation: false,
+      pendingIceCandidates: [],
       onRenegotiationOffer,
     };
     this.sessions.set(this.getSessionKey(meetingCode, socketId), session);
@@ -140,6 +162,11 @@ export class PeerConnectionManager {
     );
 
     await pc.setRemoteDescription(new RTCSessionDescription(offer.sdp, offer.type));
+    const session = this.getSession(meetingCode, socketId);
+    if (session) {
+      await this.flushPendingIceCandidates(session);
+    }
+
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
 
@@ -177,6 +204,7 @@ export class PeerConnectionManager {
       throw new Error('Peer connection session not found');
     }
     await session.pc.setRemoteDescription(new RTCSessionDescription(answer.sdp, answer.type));
+    await this.flushPendingIceCandidates(session);
     session.isNegotiating = false;
 
     if (session.pendingRenegotiation) {
@@ -190,6 +218,12 @@ export class PeerConnectionManager {
     if (!session || !candidate) {
       throw new Error('Peer connection session not found');
     }
+
+    if (!session.pc.remoteDescription) {
+      session.pendingIceCandidates.push(candidate);
+      return;
+    }
+
     await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
   }
 
