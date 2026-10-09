@@ -30,13 +30,13 @@ export const getIO = (): SocketIOServer => {
 const allowedOrigins = env.ALLOWED_ORIGINS
   ? env.ALLOWED_ORIGINS.split(',').map((o: string) => o.trim()).filter(Boolean)
   : [
-      'https://quorum-web-omega.vercel.app',
-      'https://newquorum.me',
-      'https://www.newquorum.me',
-      'https://api.newquorum.me',
-      'http://localhost:3000',
-      'http://localhost:5173',
-    ];
+    'https://quorum-web-omega.vercel.app',
+    'https://newquorum.me',
+    'https://www.newquorum.me',
+    'https://api.newquorum.me',
+    'http://localhost:3000',
+    'http://localhost:5173',
+  ];
 
 export const initSocketServer = (httpServer: HTTPServer): SocketIOServer => {
   ioServer = new SocketIOServer(httpServer, {
