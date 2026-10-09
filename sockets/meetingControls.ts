@@ -49,6 +49,69 @@ export const handleToggleMic = (
   ack?.({ success: true, data: { isMuted } });
 };
 
+export const handleMuteParticipant = (
+  io: Server,
+  socket: Socket,
+  payload: { meetingCode: string; targetUserId: string },
+  ack?: (res: SocketAckResponse) => void
+) => {
+  const user = socket.data.user;
+  if (!user || !user.id) {
+    const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  const { meetingCode, targetUserId } = payload || {};
+  const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+
+  if (!normalizedCode || typeof targetUserId !== 'string' || !targetUserId.trim()) {
+    const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code and target user ID are required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  const roomState = meetingRooms.get(normalizedCode);
+  if (!roomState) {
+    const err = { code: 'MEETING_NOT_FOUND', message: 'Meeting room not found' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  if (roomState.hostUserId !== user.id) {
+    const err = { code: 'NOT_MEETING_HOST', message: 'Only the host can mute participants' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  const targetParticipant = roomState.participants.get(targetUserId.trim());
+  if (!targetParticipant) {
+    const err = { code: 'PARTICIPANT_NOT_FOUND', message: 'Participant not found in meeting' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  targetParticipant.socketIds.forEach((sId) => {
+    io.to(sId).emit('meeting:force-mute', {
+      meetingCode: normalizedCode,
+      mutedBy: user.id,
+    });
+  });
+
+  io.to(normalizedCode).emit('meeting:participant-mic-status', {
+    userId: targetUserId.trim(),
+    isMuted: true,
+    enforcedByHost: true,
+  });
+
+  ack?.({ success: true, data: { targetUserId: targetUserId.trim(), isMuted: true } });
+};
+
 export const handleToggleCam = (
   io: Server,
   socket: Socket,
