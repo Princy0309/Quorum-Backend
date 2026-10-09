@@ -2,6 +2,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import { verifyAccessToken } from '../services/tokenService.js';
 import prisma from '../config/prisma.js';
+import env from '../config/env.js';
 import { handleJoinMeeting, handleLeaveMeeting, handleDisconnectCleanup } from './meetingPresence.js';
 import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.js';
 import { handleToggleMic, handleToggleCam, handleSendMeetingMessage } from './meetingControls.js';
@@ -26,10 +27,34 @@ export const getIO = (): SocketIOServer => {
   return ioServer;
 };
 
+const allowedOrigins = env.ALLOWED_ORIGINS
+  ? env.ALLOWED_ORIGINS.split(',').map((o: string) => o.trim()).filter(Boolean)
+  : [
+      'https://quorum-web-omega.vercel.app',
+      'https://newquorum.me',
+      'https://www.newquorum.me',
+      'https://api.newquorum.me',
+      'http://localhost:3000',
+      'http://localhost:5173',
+    ];
+
 export const initSocketServer = (httpServer: HTTPServer): SocketIOServer => {
   ioServer = new SocketIOServer(httpServer, {
     cors: {
-      origin: '*',
+      origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+        if (!origin) return callback(null, true);
+
+        const isAllowedDomain = allowedOrigins.includes(origin) || origin.includes('newquorum.me');
+        const isLocalDev = env.NODE_ENV !== 'production' && (
+          origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')
+        );
+
+        if (isAllowedDomain || isLocalDev) {
+          callback(null, true);
+        } else {
+          callback(new Error('CORS origin not allowed'), false);
+        }
+      },
       credentials: true,
     },
   });
@@ -74,32 +99,32 @@ export const initSocketServer = (httpServer: HTTPServer): SocketIOServer => {
   ioServer.on('connection', (socket) => {
     console.log(`Socket connected: ${socket.id} (User: ${socket.data.user?.id})`);
 
-    socket.on('meeting:join', (data: { meetingCode: string }) => {
-      handleJoinMeeting(ioServer!, socket, data?.meetingCode);
+    socket.on('meeting:join', (data: { meetingCode: string }, ack?: (res: any) => void) => {
+      handleJoinMeeting(ioServer!, socket, data?.meetingCode, ack);
     });
 
-    socket.on('meeting:leave', (data: { meetingCode: string }) => {
-      handleLeaveMeeting(ioServer!, socket, data?.meetingCode);
+    socket.on('meeting:leave', (data: { meetingCode: string }, ack?: (res: any) => void) => {
+      handleLeaveMeeting(ioServer!, socket, data?.meetingCode, ack);
     });
 
-    socket.on('meeting:admit-participant', (data: { meetingCode: string; targetUserId: string }) => {
-      handleAdmitParticipant(ioServer!, socket, data);
+    socket.on('meeting:admit-participant', (data: { meetingCode: string; targetUserId: string }, ack?: (res: any) => void) => {
+      handleAdmitParticipant(ioServer!, socket, data, ack);
     });
 
-    socket.on('meeting:reject-participant', (data: { meetingCode: string; targetUserId: string }) => {
-      handleRejectParticipant(ioServer!, socket, data);
+    socket.on('meeting:reject-participant', (data: { meetingCode: string; targetUserId: string }, ack?: (res: any) => void) => {
+      handleRejectParticipant(ioServer!, socket, data, ack);
     });
 
-    socket.on('meeting:toggle-mic', (data: { meetingCode: string; isMuted: boolean }) => {
-      handleToggleMic(ioServer!, socket, data);
+    socket.on('meeting:toggle-mic', (data: { meetingCode: string; isMuted: boolean }, ack?: (res: any) => void) => {
+      handleToggleMic(ioServer!, socket, data, ack);
     });
 
-    socket.on('meeting:toggle-cam', (data: { meetingCode: string; isVideoOff: boolean }) => {
-      handleToggleCam(ioServer!, socket, data);
+    socket.on('meeting:toggle-cam', (data: { meetingCode: string; isVideoOff: boolean }, ack?: (res: any) => void) => {
+      handleToggleCam(ioServer!, socket, data, ack);
     });
 
-    socket.on('meeting:send-message', (data: { meetingCode: string; content: string }) => {
-      handleSendMeetingMessage(ioServer!, socket, data);
+    socket.on('meeting:send-message', (data: { meetingCode: string; content: string }, ack?: (res: any) => void) => {
+      handleSendMeetingMessage(ioServer!, socket, data, ack);
     });
 
     socket.on('disconnect', () => {

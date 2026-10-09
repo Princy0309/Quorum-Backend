@@ -1,96 +1,149 @@
 import { Server, Socket } from 'socket.io';
-import { meetingRooms } from './meetingPresence.js';
+import { meetingRooms, SocketAckResponse } from './meetingPresence.js';
 
-export const handleToggleMic = (io: Server, socket: Socket, payload: { meetingCode: string; isMuted: boolean }) => {
+export const handleToggleMic = (
+  io: Server,
+  socket: Socket,
+  payload: { meetingCode: string; isMuted: boolean },
+  ack?: (res: SocketAckResponse) => void
+) => {
   const user = socket.data.user;
   if (!user || !user.id) {
-    socket.emit('meeting:error', { message: 'Unauthorized' });
+    const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
     return;
   }
 
   const { meetingCode, isMuted } = payload || {};
-  if (!meetingCode || typeof isMuted !== 'boolean') {
-    socket.emit('meeting:error', { message: 'Meeting code and isMuted status are required' });
+  const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+
+  if (!normalizedCode || typeof isMuted !== 'boolean') {
+    const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code and isMuted status are required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
     return;
   }
 
-  const roomState = meetingRooms.get(meetingCode);
+  const roomState = meetingRooms.get(normalizedCode);
   if (!roomState) {
-    socket.emit('meeting:error', { message: 'Meeting room not found' });
+    const err = { code: 'MEETING_NOT_FOUND', message: 'Meeting room not found' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
     return;
   }
 
   if (!roomState.participants.has(user.id)) {
-    socket.emit('meeting:error', { message: 'You are not an active participant in this meeting' });
+    const err = { code: 'NOT_ACTIVE_PARTICIPANT', message: 'You are not an active participant in this meeting' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
     return;
   }
 
-  io.to(meetingCode).emit('meeting:participant-mic-status', {
+  io.to(normalizedCode).emit('meeting:participant-mic-status', {
     userId: user.id,
     socketId: socket.id,
     isMuted,
   });
+
+  ack?.({ success: true, data: { isMuted } });
 };
 
-export const handleToggleCam = (io: Server, socket: Socket, payload: { meetingCode: string; isVideoOff: boolean }) => {
+export const handleToggleCam = (
+  io: Server,
+  socket: Socket,
+  payload: { meetingCode: string; isVideoOff: boolean },
+  ack?: (res: SocketAckResponse) => void
+) => {
   const user = socket.data.user;
   if (!user || !user.id) {
-    socket.emit('meeting:error', { message: 'Unauthorized' });
+    const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
     return;
   }
 
   const { meetingCode, isVideoOff } = payload || {};
-  if (!meetingCode || typeof isVideoOff !== 'boolean') {
-    socket.emit('meeting:error', { message: 'Meeting code and isVideoOff status are required' });
+  const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+
+  if (!normalizedCode || typeof isVideoOff !== 'boolean') {
+    const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code and isVideoOff status are required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
     return;
   }
 
-  const roomState = meetingRooms.get(meetingCode);
+  const roomState = meetingRooms.get(normalizedCode);
   if (!roomState) {
-    socket.emit('meeting:error', { message: 'Meeting room not found' });
+    const err = { code: 'MEETING_NOT_FOUND', message: 'Meeting room not found' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
     return;
   }
 
   if (!roomState.participants.has(user.id)) {
-    socket.emit('meeting:error', { message: 'You are not an active participant in this meeting' });
+    const err = { code: 'NOT_ACTIVE_PARTICIPANT', message: 'You are not an active participant in this meeting' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
     return;
   }
 
-  io.to(meetingCode).emit('meeting:participant-cam-status', {
+  io.to(normalizedCode).emit('meeting:participant-cam-status', {
     userId: user.id,
     socketId: socket.id,
     isVideoOff,
   });
+
+  ack?.({ success: true, data: { isVideoOff } });
 };
 
-export const handleSendMeetingMessage = (io: Server, socket: Socket, payload: { meetingCode: string; content: string }) => {
+export const handleSendMeetingMessage = (
+  io: Server,
+  socket: Socket,
+  payload: { meetingCode: string; content: string },
+  ack?: (res: SocketAckResponse) => void
+) => {
   const user = socket.data.user;
   if (!user || !user.id) {
-    socket.emit('meeting:error', { message: 'Unauthorized' });
+    const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
     return;
   }
 
   const { meetingCode, content } = payload || {};
-  if (!meetingCode || !content || typeof content !== 'string' || !content.trim()) {
-    socket.emit('meeting:error', { message: 'Meeting code and non-empty message content are required' });
+  const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+
+  if (!normalizedCode || !content || typeof content !== 'string' || !content.trim()) {
+    const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code and non-empty message content are required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
     return;
   }
 
-  const roomState = meetingRooms.get(meetingCode);
+  const roomState = meetingRooms.get(normalizedCode);
   if (!roomState) {
-    socket.emit('meeting:error', { message: 'Meeting room not found' });
+    const err = { code: 'MEETING_NOT_FOUND', message: 'Meeting room not found' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
     return;
   }
 
   if (!roomState.participants.has(user.id)) {
-    socket.emit('meeting:error', { message: 'You are not an active participant in this meeting' });
+    const err = { code: 'NOT_ACTIVE_PARTICIPANT', message: 'You are not an active participant in this meeting' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
     return;
   }
 
-  io.to(meetingCode).emit('meeting:new-message', {
+  const messagePayload = {
     senderId: user.id,
     senderName: user.name || 'Participant',
     content: content.trim(),
     timestamp: new Date(),
-  });
+  };
+
+  io.to(normalizedCode).emit('meeting:new-message', messagePayload);
+
+  ack?.({ success: true, data: messagePayload });
 };
