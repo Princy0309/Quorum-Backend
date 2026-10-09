@@ -4,6 +4,7 @@ import { verifyAccessToken } from '../services/tokenService.js';
 import prisma from '../config/prisma.js';
 import { handleJoinMeeting, handleLeaveMeeting, handleDisconnectCleanup } from './meetingPresence.js';
 import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.js';
+import { handleToggleMic, handleToggleCam, handleSendMeetingMessage } from './meetingControls.js';
 
 export interface AuthenticatedSocket extends Socket {
   data: {
@@ -87,6 +88,18 @@ export const initSocketServer = (httpServer: HTTPServer): SocketIOServer => {
 
     socket.on('meeting:reject-participant', (data: { meetingCode: string; targetUserId: string }) => {
       handleRejectParticipant(ioServer!, socket, data);
+    });
+
+    socket.on('meeting:toggle-mic', (data: { meetingCode: string; isMuted: boolean }) => {
+      handleToggleMic(ioServer!, socket, data);
+    });
+
+    socket.on('meeting:toggle-cam', (data: { meetingCode: string; isVideoOff: boolean }) => {
+      handleToggleCam(ioServer!, socket, data);
+    });
+
+    socket.on('meeting:send-message', (data: { meetingCode: string; content: string }) => {
+      handleSendMeetingMessage(ioServer!, socket, data);
     });
 
     socket.on('disconnect', () => {

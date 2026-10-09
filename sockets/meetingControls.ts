@@ -62,3 +62,35 @@ export const handleToggleCam = (io: Server, socket: Socket, payload: { meetingCo
     isVideoOff,
   });
 };
+
+export const handleSendMeetingMessage = (io: Server, socket: Socket, payload: { meetingCode: string; content: string }) => {
+  const user = socket.data.user;
+  if (!user || !user.id) {
+    socket.emit('meeting:error', { message: 'Unauthorized' });
+    return;
+  }
+
+  const { meetingCode, content } = payload || {};
+  if (!meetingCode || !content || typeof content !== 'string' || !content.trim()) {
+    socket.emit('meeting:error', { message: 'Meeting code and non-empty message content are required' });
+    return;
+  }
+
+  const roomState = meetingRooms.get(meetingCode);
+  if (!roomState) {
+    socket.emit('meeting:error', { message: 'Meeting room not found' });
+    return;
+  }
+
+  if (!roomState.participants.has(user.id)) {
+    socket.emit('meeting:error', { message: 'You are not an active participant in this meeting' });
+    return;
+  }
+
+  io.to(meetingCode).emit('meeting:new-message', {
+    senderId: user.id,
+    senderName: user.name || 'Participant',
+    content: content.trim(),
+    timestamp: new Date(),
+  });
+};
