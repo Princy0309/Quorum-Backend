@@ -1,5 +1,22 @@
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
+import { CHAT_EVENTS } from '../utils/constants.js';
+import logger from '../utils/logger.js';
+import { getIO } from '../sockets/socketServer.js';
+
+const safeEjectUserFromRoom = (conversationId: string, targetUserId: string, removedByUserId: string) => {
+  try {
+    const io = getIO();
+    io.in(`user:${targetUserId}`).socketsLeave(`conversation:${conversationId}`);
+    io.to(`user:${targetUserId}`).emit(CHAT_EVENTS.CONVERSATION_REMOVED, {
+      conversationId,
+      userId: targetUserId,
+      removedBy: removedByUserId
+    });
+  } catch (err: any) {
+    logger.error('Failed to eject socket room or dispatch removal event', { conversationId, targetUserId, error: err.message });
+  }
+};
 
 export const getOrCreateDirectConversation = async (userId: string, targetUserId: string) => {
   if (userId === targetUserId) {
@@ -575,6 +592,7 @@ export const createGroupConversation = async (
       type: 'group',
       name: name.trim(),
       avatar: avatar || null,
+      ownerId: creatorId,
       participants: {
         create: uniqueUserIds.map((userId) => ({ userId }))
       }
@@ -625,6 +643,10 @@ export const addGroupParticipants = async (
   const isUserMember = conversation.participants.some((p) => p.userId === userId);
   if (!isUserMember) {
     throw new ApiError(403, 'You are not a member of this conversation');
+  }
+
+  if (conversation.ownerId && conversation.ownerId !== userId) {
+    throw new ApiError(403, 'Only the group owner can add new participants');
   }
 
   const existingParticipantIds = new Set(conversation.participants.map((p) => p.userId));
@@ -705,6 +727,11 @@ export const removeGroupParticipant = async (
     throw new ApiError(404, 'Target user is not a participant in this conversation');
   }
 
+  const isSelfRemoval = userId === targetUserId;
+  if (!isSelfRemoval && conversation.ownerId && conversation.ownerId !== userId) {
+    throw new ApiError(403, 'Only the group owner can remove other participants');
+  }
+
   await prisma.conversationParticipant.delete({
     where: {
       conversationId_userId: {
@@ -713,6 +740,8 @@ export const removeGroupParticipant = async (
       }
     }
   });
+
+  safeEjectUserFromRoom(conversationId, targetUserId, userId);
 
   const remainingParticipants = await prisma.conversationParticipant.count({
     where: { conversationId }
@@ -751,6 +780,10 @@ export const updateGroupConversation = async (
   const isUserMember = conversation.participants.some((p) => p.userId === userId);
   if (!isUserMember) {
     throw new ApiError(403, 'You are not a member of this conversation');
+  }
+
+  if (conversation.ownerId && conversation.ownerId !== userId) {
+    throw new ApiError(403, 'Only the group owner can update group details');
   }
 
   const dataToUpdate: any = {};
