@@ -248,12 +248,6 @@ export const handleLeaveMeeting = (
         return;
     }
 
-    const roomState = meetingRooms.get(normalizedCode);
-    if (!roomState) {
-        ack?.({ success: true });
-        return;
-    }
-
     const socketMeetings = socketToMeetingsMap.get(socket.id);
     if (socketMeetings) {
         socketMeetings.delete(normalizedCode);
@@ -265,6 +259,12 @@ export const handleLeaveMeeting = (
     socket.leave(normalizedCode);
     roomBroker.removePeer(normalizedCode, socket.id);
     peerConnectionManager.closeConnection(normalizedCode, socket.id);
+
+    const roomState = meetingRooms.get(normalizedCode);
+    if (!roomState) {
+        ack?.({ success: true });
+        return;
+    }
 
     const participant = roomState.participants.get(user.id);
     if (participant) {
@@ -352,6 +352,17 @@ export const handleEndMeeting = async (
         socket.emit('meeting:error', err);
         ack?.({ success: false, ...err });
         return;
+    }
+
+    const roomState = meetingRooms.get(normalizedCode);
+    if (roomState) {
+        const hostParticipant = roomState.participants.get(user.id);
+        if (roomState.hostUserId !== user.id || !hostParticipant || !hostParticipant.socketIds.has(socket.id)) {
+            const err = { code: 'NOT_MEETING_HOST', message: 'Only the host active in this meeting can end it' };
+            socket.emit('meeting:error', err);
+            ack?.({ success: false, ...err });
+            return;
+        }
     }
 
     try {

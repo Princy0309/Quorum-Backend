@@ -35,7 +35,7 @@ export const handleToggleMic = (
   }
 
   const participant = roomState.participants.get(user.id);
-  if (!participant) {
+  if (!participant || !participant.socketIds.has(socket.id)) {
     const err = { code: 'NOT_ACTIVE_PARTICIPANT', message: 'You are not an active participant in this meeting' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
@@ -65,7 +65,7 @@ export const handleToggleMic = (
 export const handleMuteParticipant = (
   io: Server,
   socket: Socket,
-  payload: { meetingCode: string; targetUserId: string; allowUnmute?: boolean },
+  payload: { meetingCode: string; targetUserId: string; allowUnmute?: boolean; action?: 'mute' | 'allow-unmute' | 'unmute' },
   ack?: (res: SocketAckResponse) => void
 ) => {
   const user = socket.data.user;
@@ -76,7 +76,7 @@ export const handleMuteParticipant = (
     return;
   }
 
-  const { meetingCode, targetUserId, allowUnmute } = payload || {};
+  const { meetingCode, targetUserId, allowUnmute, action } = payload || {};
   const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
 
   if (!normalizedCode || typeof targetUserId !== 'string' || !targetUserId.trim()) {
@@ -94,7 +94,8 @@ export const handleMuteParticipant = (
     return;
   }
 
-  if (roomState.hostUserId !== user.id) {
+  const hostParticipant = roomState.participants.get(user.id);
+  if (roomState.hostUserId !== user.id || !hostParticipant || !hostParticipant.socketIds.has(socket.id)) {
     const err = { code: 'NOT_MEETING_HOST', message: 'Only the host can mute participants' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
@@ -109,14 +110,44 @@ export const handleMuteParticipant = (
     return;
   }
 
-  if (allowUnmute === true) {
+  if (action === 'unmute') {
     targetParticipant.hostMuted = false;
+    targetParticipant.isMuted = false;
+    peerConnectionManager.setPeerMuteStatus(normalizedCode, targetUserId.trim(), false);
+
+    targetParticipant.socketIds.forEach((sId) => {
+      io.to(sId).emit('meeting:unmuted-by-host', {
+        meetingCode: normalizedCode,
+      });
+    });
+
+    io.to(normalizedCode).emit('meeting:participant-mic-status', {
+      userId: targetUserId.trim(),
+      isMuted: false,
+      hostMuted: false,
+      unmutedByHost: true,
+    });
+
+    ack?.({ success: true, data: { targetUserId: targetUserId.trim(), isMuted: false, hostMuted: false } });
+    return;
+  }
+
+  if (action === 'allow-unmute' || allowUnmute === true) {
+    targetParticipant.hostMuted = false;
+
+    targetParticipant.socketIds.forEach((sId) => {
+      io.to(sId).emit('meeting:permitted-to-unmute', {
+        meetingCode: normalizedCode,
+      });
+    });
+
     io.to(normalizedCode).emit('meeting:participant-mic-status', {
       userId: targetUserId.trim(),
       isMuted: targetParticipant.isMuted ?? false,
       hostMuted: false,
       permittedToUnmute: true,
     });
+
     ack?.({ success: true, data: { targetUserId: targetUserId.trim(), hostMuted: false } });
     return;
   }
@@ -175,7 +206,8 @@ export const handleToggleCam = (
     return;
   }
 
-  if (!roomState.participants.has(user.id)) {
+  const participant = roomState.participants.get(user.id);
+  if (!participant || !participant.socketIds.has(socket.id)) {
     const err = { code: 'NOT_ACTIVE_PARTICIPANT', message: 'You are not an active participant in this meeting' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
@@ -223,7 +255,8 @@ export const handleSendMeetingMessage = (
     return;
   }
 
-  if (!roomState.participants.has(user.id)) {
+  const participant = roomState.participants.get(user.id);
+  if (!participant || !participant.socketIds.has(socket.id)) {
     const err = { code: 'NOT_ACTIVE_PARTICIPANT', message: 'You are not an active participant in this meeting' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });

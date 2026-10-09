@@ -33,7 +33,8 @@ export const handleAdmitParticipant = (
     return;
   }
 
-  if (roomState.hostUserId !== user.id) {
+  const hostParticipant = roomState.participants.get(user.id);
+  if (roomState.hostUserId !== user.id || !hostParticipant || !hostParticipant.socketIds.has(socket.id)) {
     const err = { code: 'NOT_MEETING_HOST', message: 'Only the host can admit participants' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
@@ -146,7 +147,8 @@ export const handleRejectParticipant = (
     return;
   }
 
-  if (roomState.hostUserId !== user.id) {
+  const hostParticipant = roomState.participants.get(user.id);
+  if (roomState.hostUserId !== user.id || !hostParticipant || !hostParticipant.socketIds.has(socket.id)) {
     const err = { code: 'NOT_MEETING_HOST', message: 'Only the host can reject participants' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
