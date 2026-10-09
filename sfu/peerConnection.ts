@@ -27,8 +27,8 @@ export class PeerConnectionManager {
   }
 
   private async flushPendingIceCandidates(session: PeerSession): Promise<void> {
-    while (session.pendingIceCandidates.length > 0) {
-      const candidate = session.pendingIceCandidates.shift();
+    const queue = session.pendingIceCandidates.splice(0, session.pendingIceCandidates.length);
+    for (const candidate of queue) {
       try {
         await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (err) {
@@ -85,7 +85,7 @@ export class PeerConnectionManager {
     });
 
     const key = this.getSessionKey(meetingCode, socketId);
-    const earlyCandidates = this.earlyIceCandidates.get(key) || [];
+    const earlyCandidates = (this.earlyIceCandidates.get(key) || []).slice(0, 50);
     this.earlyIceCandidates.delete(key);
 
     const session: PeerSession = {
@@ -228,17 +228,25 @@ export class PeerConnectionManager {
 
     if (!session) {
       const list = this.earlyIceCandidates.get(key) || [];
-      list.push(candidate);
-      this.earlyIceCandidates.set(key, list);
+      if (list.length < 50) {
+        list.push(candidate);
+        this.earlyIceCandidates.set(key, list);
+      }
       return;
     }
 
     if (!session.pc.remoteDescription) {
-      session.pendingIceCandidates.push(candidate);
+      if (session.pendingIceCandidates.length < 50) {
+        session.pendingIceCandidates.push(candidate);
+      }
       return;
     }
 
-    await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
+    try {
+      await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (err) {
+      console.error('Failed to add ICE candidate:', err);
+    }
   }
 
   public setPeerMuteStatus(meetingCode: string, userId: string, isMuted: boolean): void {
@@ -272,9 +280,13 @@ export class PeerConnectionManager {
   }
 
   public closeAllSocketConnections(socketId: string): void {
+    for (const key of Array.from(this.earlyIceCandidates.keys())) {
+      if (key.endsWith(`:${socketId.trim()}`)) {
+        this.earlyIceCandidates.delete(key);
+      }
+    }
     for (const [key, session] of this.sessions.entries()) {
       if (session.socketId === socketId) {
-        this.earlyIceCandidates.delete(key);
         try {
           session.pc.close();
         } catch (err) {
@@ -286,9 +298,13 @@ export class PeerConnectionManager {
   }
 
   public closeRoomConnections(meetingCode: string): void {
+    for (const key of Array.from(this.earlyIceCandidates.keys())) {
+      if (key.startsWith(`${meetingCode.trim()}:`)) {
+        this.earlyIceCandidates.delete(key);
+      }
+    }
     for (const [key, session] of this.sessions.entries()) {
       if (session.meetingCode === meetingCode) {
-        this.earlyIceCandidates.delete(key);
         try {
           session.pc.close();
         } catch (err) {

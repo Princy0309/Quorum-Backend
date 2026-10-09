@@ -12,6 +12,8 @@ export interface Participant {
     socketIds: Set<string>;
     role: 'host' | 'participant';
     joinedAt: Date;
+    isMuted?: boolean;
+    hostMuted?: boolean;
 }
 
 export interface ParticipantDTO {
@@ -19,6 +21,8 @@ export interface ParticipantDTO {
     name: string;
     role: 'host' | 'participant';
     joinedAt: Date;
+    isMuted?: boolean;
+    hostMuted?: boolean;
 }
 
 export interface WaitingUser {
@@ -51,6 +55,8 @@ export const formatParticipants = (participantsMap: Map<string, Participant>): P
         name: p.name,
         role: p.role,
         joinedAt: p.joinedAt,
+        isMuted: p.isMuted ?? false,
+        hostMuted: p.hostMuted ?? false,
     }));
 };
 
@@ -300,20 +306,20 @@ export const closeMeetingRoom = (meetingCode: string) => {
     if (!normalizedCode) return;
 
     const roomState = meetingRooms.get(normalizedCode);
-    if (!roomState) return;
-
-    try {
-        const io = getIO();
-        io.to(normalizedCode).emit('meeting:ended', {
-            meetingCode: normalizedCode,
-            message: 'The meeting has been ended by the host',
-        });
-        io.in(normalizedCode).socketsLeave(normalizedCode);
-    } catch (err) {
-        console.error('Failed to broadcast meeting ended event:', err);
+    if (roomState) {
+        try {
+            const io = getIO();
+            io.to(normalizedCode).emit('meeting:ended', {
+                meetingCode: normalizedCode,
+                message: 'The meeting has been ended by the host',
+            });
+            io.in(normalizedCode).socketsLeave(normalizedCode);
+        } catch (err) {
+            console.error('Failed to broadcast meeting ended event:', err);
+        }
+        meetingRooms.delete(normalizedCode);
     }
 
-    meetingRooms.delete(normalizedCode);
     roomBroker.closeRoom(normalizedCode);
     peerConnectionManager.closeRoomConnections(normalizedCode);
 

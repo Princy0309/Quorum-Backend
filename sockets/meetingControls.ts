@@ -34,26 +34,38 @@ export const handleToggleMic = (
     return;
   }
 
-  if (!roomState.participants.has(user.id)) {
+  const participant = roomState.participants.get(user.id);
+  if (!participant) {
     const err = { code: 'NOT_ACTIVE_PARTICIPANT', message: 'You are not an active participant in this meeting' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
     return;
   }
 
+  if (!isMuted && participant.hostMuted) {
+    const err = { code: 'HOST_MUTED', message: 'You have been muted by the host and cannot unmute yourself' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  participant.isMuted = isMuted;
+  peerConnectionManager.setPeerMuteStatus(normalizedCode, user.id, isMuted);
+
   io.to(normalizedCode).emit('meeting:participant-mic-status', {
     userId: user.id,
     socketId: socket.id,
     isMuted,
+    hostMuted: participant.hostMuted ?? false,
   });
 
-  ack?.({ success: true, data: { isMuted } });
+  ack?.({ success: true, data: { isMuted, hostMuted: participant.hostMuted ?? false } });
 };
 
 export const handleMuteParticipant = (
   io: Server,
   socket: Socket,
-  payload: { meetingCode: string; targetUserId: string },
+  payload: { meetingCode: string; targetUserId: string; allowUnmute?: boolean },
   ack?: (res: SocketAckResponse) => void
 ) => {
   const user = socket.data.user;
@@ -64,7 +76,7 @@ export const handleMuteParticipant = (
     return;
   }
 
-  const { meetingCode, targetUserId } = payload || {};
+  const { meetingCode, targetUserId, allowUnmute } = payload || {};
   const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
 
   if (!normalizedCode || typeof targetUserId !== 'string' || !targetUserId.trim()) {
@@ -97,6 +109,21 @@ export const handleMuteParticipant = (
     return;
   }
 
+  if (allowUnmute === true) {
+    targetParticipant.hostMuted = false;
+    io.to(normalizedCode).emit('meeting:participant-mic-status', {
+      userId: targetUserId.trim(),
+      isMuted: targetParticipant.isMuted ?? false,
+      hostMuted: false,
+      permittedToUnmute: true,
+    });
+    ack?.({ success: true, data: { targetUserId: targetUserId.trim(), hostMuted: false } });
+    return;
+  }
+
+  targetParticipant.isMuted = true;
+  targetParticipant.hostMuted = true;
+
   targetParticipant.socketIds.forEach((sId) => {
     io.to(sId).emit('meeting:force-mute', {
       meetingCode: normalizedCode,
@@ -109,10 +136,11 @@ export const handleMuteParticipant = (
   io.to(normalizedCode).emit('meeting:participant-mic-status', {
     userId: targetUserId.trim(),
     isMuted: true,
+    hostMuted: true,
     enforcedByHost: true,
   });
 
-  ack?.({ success: true, data: { targetUserId: targetUserId.trim(), isMuted: true } });
+  ack?.({ success: true, data: { targetUserId: targetUserId.trim(), isMuted: true, hostMuted: true } });
 };
 
 export const handleToggleCam = (
