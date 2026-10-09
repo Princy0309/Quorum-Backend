@@ -129,7 +129,7 @@ export const handleMuteParticipant = (
     return;
   }
 
-  if (normalizedAction === 'allow-unmute') {
+  if (normalizedAction === 'allow-unmute' || normalizedAction === 'unmute') {
     targetParticipant.hostMuted = false;
 
     targetParticipant.socketIds.forEach((sId) => {
@@ -149,41 +149,10 @@ export const handleMuteParticipant = (
       success: true,
       data: {
         targetUserId: targetUserId.trim(),
-        action: 'allow-unmute',
+        action: normalizedAction,
         isMuted: targetParticipant.isMuted ?? true,
         hostMuted: false,
         permittedToUnmute: true,
-      },
-    });
-    return;
-  }
-
-  if (normalizedAction === 'unmute') {
-    targetParticipant.hostMuted = false;
-    targetParticipant.isMuted = false;
-    peerConnectionManager.setPeerMuteStatus(normalizedCode, targetUserId.trim(), false);
-
-    targetParticipant.socketIds.forEach((sId) => {
-      io.to(sId).emit('meeting:unmuted-by-host', {
-        meetingCode: normalizedCode,
-      });
-    });
-
-    io.to(normalizedCode).emit('meeting:participant-mic-status', {
-      userId: targetUserId.trim(),
-      isMuted: false,
-      hostMuted: false,
-      unmutedByHost: true,
-    });
-
-    ack?.({
-      success: true,
-      data: {
-        targetUserId: targetUserId.trim(),
-        action: 'unmute',
-        isMuted: false,
-        hostMuted: false,
-        unmutedByHost: true,
       },
     });
     return;
@@ -302,17 +271,6 @@ export const handleSendMeetingMessage = (
     return;
   }
 
-  const now = Date.now();
-  const timestamps = (messageRateLimits.get(user.id) || []).filter((t) => now - t < 2000);
-  if (timestamps.length >= 5) {
-    const err = { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many messages sent. Please slow down.' };
-    socket.emit('meeting:error', err);
-    ack?.({ success: false, ...err });
-    return;
-  }
-  timestamps.push(now);
-  messageRateLimits.set(user.id, timestamps);
-
   const roomState = meetingRooms.get(normalizedCode);
   if (!roomState) {
     const err = { code: 'MEETING_NOT_FOUND', message: 'Meeting room not found' };
@@ -327,6 +285,28 @@ export const handleSendMeetingMessage = (
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
     return;
+  }
+
+  const now = Date.now();
+  const timestamps = (messageRateLimits.get(user.id) || []).filter((t) => now - t < 2000);
+  if (timestamps.length >= 5) {
+    const err = { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many messages sent. Please slow down.' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+  timestamps.push(now);
+  messageRateLimits.set(user.id, timestamps);
+
+  if (messageRateLimits.size > 500) {
+    for (const [uId, list] of messageRateLimits.entries()) {
+      const active = list.filter((t) => now - t < 5000);
+      if (active.length === 0) {
+        messageRateLimits.delete(uId);
+      } else {
+        messageRateLimits.set(uId, active);
+      }
+    }
   }
 
   const messagePayload = {
