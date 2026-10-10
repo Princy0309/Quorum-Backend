@@ -25,22 +25,22 @@ const app = express();
 const trustProxy = process.env.TRUST_PROXY || 1;
 app.set('trust proxy', isNaN(Number(trustProxy)) ? trustProxy : Number(trustProxy));
 
-const allowedOrigins = env.ALLOWED_ORIGINS 
+const allowedOrigins = env.ALLOWED_ORIGINS
   ? env.ALLOWED_ORIGINS.split(',').map((o: string) => o.trim()).filter(Boolean)
   : [
-      'https://quorum-web-omega.vercel.app',
-      'https://newquorum.me',
-      'https://www.newquorum.me',
-      'https://api.newquorum.me',
-      'http://localhost:3000',
-      'http://localhost:5173',
-    ];
+    'https://quorum-web-omega.vercel.app',
+    'https://newquorum.me',
+    'https://www.newquorum.me',
+    'https://api.newquorum.me',
+    'http://localhost:3000',
+    'http://localhost:5173',
+  ];
 
 app.use(cors({
   origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
     if (!origin) return callback(null, true);
 
-    const isAllowedDomain = allowedOrigins.includes(origin) || origin.includes('newquorum.me');
+    const isAllowedDomain = allowedOrigins.includes(origin);
     const isLocalDev = env.NODE_ENV !== 'production' && (
       origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')
     );
@@ -56,7 +56,7 @@ app.use(cors({
 }));
 
 app.use(helmet());
-app.use(express.json({limit: "10kb"}));
+app.use(express.json({ limit: "10kb" }));
 app.use(cookieParser());
 app.use(verifyCSRF);
 
@@ -81,7 +81,7 @@ app.get('/api/csrf-token', (req: Request, res: Response) => {
 setupSwagger(app);
 
 app.get('/health', (req: Request, res: Response) => {
-  res.json({ 
+  res.json({
     status: 'ok',
     hasDbUrl: !!process.env.DATABASE_URL,
     hasRedisUrl: !!process.env.REDIS_URL,
