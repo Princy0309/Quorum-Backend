@@ -637,28 +637,47 @@ export const createGroupConversation = async (
   return conversation;
 };
 
+const ensureGroupOwner = async (tx: any, conversation: any) => {
+  if (conversation && conversation.type === 'group' && !conversation.ownerId && conversation.participants && conversation.participants.length > 0) {
+    const sorted = [...conversation.participants].sort(
+      (a: any, b: any) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
+    );
+    const oldest = sorted[0];
+    if (oldest) {
+      await tx.conversation.update({
+        where: { id: conversation.id },
+        data: { ownerId: oldest.userId }
+      });
+      conversation.ownerId = oldest.userId;
+    }
+  }
+  return conversation;
+};
+
 export const addGroupParticipants = async (
   userId: string,
   conversationId: string,
   participantIds: string[]
 ) => {
   const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
-    const conversation = await tx.conversation.findUnique({
+    const rawConversation = await tx.conversation.findUnique({
       where: { id: conversationId },
       include: {
         participants: true
       }
     });
 
-    if (!conversation) {
+    if (!rawConversation) {
       throw new ApiError(404, 'Conversation not found');
     }
+
+    const conversation = await ensureGroupOwner(tx, rawConversation);
 
     if (conversation.type !== 'group') {
       throw new ApiError(400, 'Cannot add participants to a direct conversation');
     }
 
-    const isUserMember = conversation.participants.some((p) => p.userId === userId);
+    const isUserMember = conversation.participants.some((p: any) => p.userId === userId);
     if (!isUserMember) {
       throw new ApiError(403, 'You are not a member of this conversation');
     }
@@ -667,7 +686,7 @@ export const addGroupParticipants = async (
       throw new ApiError(403, 'Only the group owner can add new participants');
     }
 
-    const existingParticipantIds = new Set(conversation.participants.map((p) => p.userId));
+    const existingParticipantIds = new Set(conversation.participants.map((p: any) => p.userId));
     const newParticipantIds = Array.from(new Set(participantIds)).filter((id) => !existingParticipantIds.has(id));
 
     if (newParticipantIds.length === 0) {
@@ -730,27 +749,29 @@ export const removeGroupParticipant = async (
   targetUserId: string
 ) => {
   const result = await prisma.$transaction(async (tx) => {
-    const conversation = await tx.conversation.findUnique({
+    const rawConversation = await tx.conversation.findUnique({
       where: { id: conversationId },
       include: {
         participants: true
       }
     });
 
-    if (!conversation) {
+    if (!rawConversation) {
       throw new ApiError(404, 'Conversation not found');
     }
+
+    const conversation = await ensureGroupOwner(tx, rawConversation);
 
     if (conversation.type !== 'group') {
       throw new ApiError(400, 'Cannot remove participants from a direct conversation');
     }
 
-    const isUserMember = conversation.participants.some((p) => p.userId === userId);
+    const isUserMember = conversation.participants.some((p: any) => p.userId === userId);
     if (!isUserMember) {
       throw new ApiError(403, 'You are not a member of this conversation');
     }
 
-    const isTargetMember = conversation.participants.some((p) => p.userId === targetUserId);
+    const isTargetMember = conversation.participants.some((p: any) => p.userId === targetUserId);
     if (!isTargetMember) {
       throw new ApiError(404, 'Target user is not a participant in this conversation');
     }
@@ -831,22 +852,24 @@ export const updateGroupConversation = async (
   updates: { name?: string; avatar?: string | null }
 ) => {
   const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
-    const conversation = await tx.conversation.findUnique({
+    const rawConversation = await tx.conversation.findUnique({
       where: { id: conversationId },
       include: {
         participants: true
       }
     });
 
-    if (!conversation) {
+    if (!rawConversation) {
       throw new ApiError(404, 'Conversation not found');
     }
+
+    const conversation = await ensureGroupOwner(tx, rawConversation);
 
     if (conversation.type !== 'group') {
       throw new ApiError(400, 'Cannot modify direct conversation details');
     }
 
-    const isUserMember = conversation.participants.some((p) => p.userId === userId);
+    const isUserMember = conversation.participants.some((p: any) => p.userId === userId);
     if (!isUserMember) {
       throw new ApiError(403, 'You are not a member of this conversation');
     }
@@ -901,22 +924,24 @@ export const transferGroupOwnership = async (
   newOwnerId: string
 ) => {
   const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
-    const conversation = await tx.conversation.findUnique({
+    const rawConversation = await tx.conversation.findUnique({
       where: { id: conversationId },
       include: {
         participants: true
       }
     });
 
-    if (!conversation) {
+    if (!rawConversation) {
       throw new ApiError(404, 'Conversation not found');
     }
+
+    const conversation = await ensureGroupOwner(tx, rawConversation);
 
     if (conversation.type !== 'group') {
       throw new ApiError(400, 'Cannot transfer ownership of a direct conversation');
     }
 
-    const isUserMember = conversation.participants.some((p) => p.userId === userId);
+    const isUserMember = conversation.participants.some((p: any) => p.userId === userId);
     if (!isUserMember) {
       throw new ApiError(403, 'You are not a member of this conversation');
     }
@@ -925,7 +950,7 @@ export const transferGroupOwnership = async (
       throw new ApiError(403, 'Only the group owner can transfer ownership');
     }
 
-    const isNewOwnerMember = conversation.participants.some((p) => p.userId === newOwnerId);
+    const isNewOwnerMember = conversation.participants.some((p: any) => p.userId === newOwnerId);
     if (!isNewOwnerMember) {
       throw new ApiError(400, 'Target user is not a participant in this group');
     }
@@ -967,6 +992,8 @@ export const transferGroupOwnership = async (
 
   return updated;
 };
+
+
 
 
 
