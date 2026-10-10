@@ -1,30 +1,13 @@
-import type {MediaStreamTrack, RTCRtpSender, RTCPeerConnection } from 'werift';
+import { MediaStreamTrack } from 'werift';
 
-
-export interface Peer {
-    id: string;
-    name: string;
-    socketId: string;
-    peerConnection?: RTCPeerConnection;
-    publishedTracks: Map<string, PublishedTrack>;
-
-}
-
-export interface PublishedTrack {
-    trackId: string;
-    kind: 'audio' | 'video';
-    peerId: string;
-    mediaStreamTrack: MediaStreamTrack;
+export interface SfuPeer {
+  userId: string;
+  socketId: string;
+  joinedAt: Date;
+  tracks: Map<string, MediaStreamTrack>;
 }
 
 export interface SfuRoom {
-    code: string;
-    hostId?: string;
-    peers: Map<string, Peer>;
-    channels: Map<string, TrackSubscriber[]>;
-}
-
-export interface TrackSubscriber {
-    subscriberPeerId: string;
-    sender: RTCRtpSender;
+  meetingCode: string;
+  peers: Map<string, SfuPeer>;
 }
