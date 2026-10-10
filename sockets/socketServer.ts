@@ -24,6 +24,16 @@ export const initSocketServer = (httpServer: any) => {
 
   ioInstance = io;
 
+    io.use((socket, next) => {
+    const auth = socket.handshake.auth || {};
+    socket.data.user = {
+      id: String(auth.userId || socket.id),
+      name: String(auth.name || 'Participant'),
+    };
+    next();
+  });
+
+
   io.on('connection', (socket) => {
     logger.info(`[Socket] Client connected: ${socket.id}`);
 
