@@ -3,6 +3,8 @@ import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import { env } from '../config/env.js';
 import { MeetingStatus } from '@prisma/client';
+import { closeMeetingRoom } from '../sockets/meetingPresence.js';
+
 
 const generateCode = (): string => {
   const letters = 'abcdefghijklmnopqrstuvwxyz';
@@ -86,6 +88,8 @@ export const endMeeting = async (code: string, hostId: string) => {
     where: { code },
     data: { status: MeetingStatus.ENDED },
   });
+
+  closeMeetingRoom(code);
 
   return { message: 'Meeting ended successfully' };
 };

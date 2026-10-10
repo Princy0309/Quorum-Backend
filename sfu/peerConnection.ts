@@ -40,3 +40,30 @@ export const createPeerConnection = (): RTCPeerConnection => {
 
   return pc;
 };
+
+class PeerConnectionManager {
+  private muteStates = new Map<string, Map<string, boolean>>();
+
+  setPeerMuteStatus(roomCode: string, userId: string, isMuted: boolean): void {
+    let room = this.muteStates.get(roomCode);
+    if (!room) {
+      room = new Map();
+      this.muteStates.set(roomCode, room);
+    }
+    room.set(userId, isMuted);
+  }
+
+  getPeerMuteStatus(roomCode: string, userId: string): boolean {
+    return this.muteStates.get(roomCode)?.get(userId) ?? false;
+  }
+
+  closeConnection(roomCode: string, peerId: string): void {
+    
+  }
+
+  closeRoomConnections(roomCode: string): void {
+    this.muteStates.delete(roomCode);
+  }
+}
+
+export const peerConnectionManager = new PeerConnectionManager();

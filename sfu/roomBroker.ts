@@ -4,54 +4,56 @@ import type { SfuRoom, Peer, PublishedTrack, TrackSubscriber } from './types.js'
 import logger from '../utils/logger.js';
 
 export class RoomBroker extends EventEmitter {
-    private static instance: RoomBroker;
-    private rooms: Map<string, SfuRoom> = new Map();
-    private constructor() {
-        super();
+  private static instance: RoomBroker;
+  private rooms: Map<string, SfuRoom> = new Map();
+
+  private constructor() {
+    super();
+  }
+
+  public static getInstance(): RoomBroker {
+    if (!RoomBroker.instance) {
+      RoomBroker.instance = new RoomBroker();
     }
-    public static getInstance(): RoomBroker {
-        if (!RoomBroker.instance) {
-            RoomBroker.instance = new RoomBroker();
-        }
-        return RoomBroker.instance;
-    }
+    return RoomBroker.instance;
+  }
 
-    public getOrCreateRoom(roomCode: string): SfuRoom {
-        let room = this.rooms.get(roomCode);
+  public getOrCreateRoom(roomCode: string): SfuRoom {
+    let room = this.rooms.get(roomCode);
 
-        if (!room) {
-            room = {
-                code: roomCode,
-                peers: new Map(),
-                channels: new Map()
-            };
-            this.rooms.set(roomCode, room);
-            logger.info(`[SFU Broker] Created room: ${roomCode}`);
-        }
-
-        return room;
-    }
-
-    public addPeer(roomCode: string, peerId: string, socketId: string, name?: string): Peer {
-        const room = this.getOrCreateRoom(roomCode);
-        let peer = room.peers.get(peerId);
-
-        if (!peer) {
-            peer = {
-                id: peerId,
-                name: name || '',
-                socketId,
-                publishedTracks: new Map(),
-            }
-            room.peers.set(peerId, peer);
-            logger.info(`[SFU Broker] Peer ${peerId} joined SFU room ${roomCode}`);
-        } else {
-            peer.socketId = socketId;
-        }
-        return peer;
+    if (!room) {
+      room = {
+        code: roomCode,
+        peers: new Map(),
+        channels: new Map(),
+      };
+      this.rooms.set(roomCode, room);
+      logger.info(`[SFU Broker] Created room: ${roomCode}`);
     }
 
-    public publishTrack(
+    return room;
+  }
+
+  public addPeer(roomCode: string, peerId: string, socketId: string, name?: string): Peer {
+    const room = this.getOrCreateRoom(roomCode);
+    let peer = room.peers.get(peerId);
+
+    if (!peer) {
+      peer = {
+        id: peerId,
+        name: name || '',
+        socketId,
+        publishedTracks: new Map(),
+      };
+      room.peers.set(peerId, peer);
+      logger.info(`[SFU Broker] Peer ${peerId} joined SFU room ${roomCode}`);
+    } else {
+      peer.socketId = socketId;
+    }
+    return peer;
+  }
+
+  public publishTrack(
     roomCode: string,
     peerId: string,
     track: MediaStreamTrack
@@ -106,8 +108,7 @@ export class RoomBroker extends EventEmitter {
     return publishedTrack;
   }
 
-
-    public subscribeToTrack(
+  public subscribeToTrack(
     roomCode: string,
     subscriberPeerId: string,
     trackId: string,
@@ -154,13 +155,11 @@ export class RoomBroker extends EventEmitter {
     const peer = room.peers.get(peerId);
     if (!peer) return;
 
-    
     for (const trackId of peer.publishedTracks.keys()) {
       room.channels.delete(trackId);
       this.emit('track-unpublished', { roomCode, peerId, trackId });
     }
 
-    
     for (const [trackId, subscribers] of room.channels.entries()) {
       room.channels.set(
         trackId,
@@ -168,7 +167,6 @@ export class RoomBroker extends EventEmitter {
       );
     }
 
-    
     if (peer.peerConnection) {
       try {
         peer.peerConnection.close();
@@ -186,10 +184,24 @@ export class RoomBroker extends EventEmitter {
     }
   }
 
+  public removePeersByUser(roomCode: string, userId: string): void {
+    const room = this.rooms.get(roomCode);
+    if (!room) return;
+    for (const [peerId, peer] of room.peers.entries()) {
+      if (peer.id === userId) {
+        this.removePeer(roomCode, peerId);
+      }
+    }
+  }
 
-    
-
-
+  public closeRoom(roomCode: string): void {
+    const room = this.rooms.get(roomCode);
+    if (!room) return;
+    for (const peerId of Array.from(room.peers.keys())) {
+      this.removePeer(roomCode, peerId);
+    }
+    this.rooms.delete(roomCode);
+  }
 }
 
 export const roomBroker = RoomBroker.getInstance();
