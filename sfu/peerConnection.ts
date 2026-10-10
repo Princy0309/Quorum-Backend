@@ -289,6 +289,25 @@ export class PeerConnectionManager {
     }
   }
 
+  public addRemoteTrackToPeer(
+    meetingCode: string,
+    targetSocketId: string,
+    sourceUserId: string,
+    track: any
+  ): void {
+    const session = this.getSession(meetingCode, targetSocketId);
+    if (!session || session.pc.signalingState === 'closed') {
+      return;
+    }
+
+    try {
+      session.pc.addTrack(track);
+      this.triggerRenegotiation(meetingCode, targetSocketId);
+    } catch (err) {
+      console.error('Failed to add remote track to peer connection:', err);
+    }
+  }
+
   public closeConnection(meetingCode: string, socketId: string): void {
     const key = this.getSessionKey(meetingCode, socketId);
     this.earlyIceCandidates.delete(key);

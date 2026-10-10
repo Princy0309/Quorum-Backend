@@ -1,4 +1,5 @@
 import { SfuPeer, SfuRoom } from './types.js';
+import { peerConnectionManager } from './peerConnection.js';
 
 class RoomBroker {
   private rooms: Map<string, SfuRoom> = new Map();
@@ -55,9 +56,29 @@ class RoomBroker {
     return Array.from(room.peers.values());
   }
 
+  public broadcastTrackToRoom(
+    meetingCode: string,
+    sourceSocketId: string,
+    sourceUserId: string,
+    track: any
+  ): void {
+    const peers = this.getPeers(meetingCode);
+    for (const peer of peers) {
+      if (peer.socketId !== sourceSocketId) {
+        peerConnectionManager.addRemoteTrackToPeer(
+          meetingCode,
+          peer.socketId,
+          sourceUserId,
+          track
+        );
+      }
+    }
+  }
+
   public closeRoom(meetingCode: string): void {
     this.rooms.delete(meetingCode);
   }
 }
 
 export const roomBroker = new RoomBroker();
+

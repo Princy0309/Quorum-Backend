@@ -59,9 +59,9 @@ export const initSocketServer = (httpServer: HTTPServer): SocketIOServer => {
           callback(new Error('CORS origin not allowed'), false);
         }
       },
-      credentials: true,
     },
   });
+
 
   ioServer.use(async (socket, next) => {
     try {
