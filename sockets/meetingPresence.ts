@@ -5,6 +5,7 @@ import { getIO } from './socketServer.js';
 import { roomBroker } from '../sfu/roomBroker.js';
 import { peerConnectionManager } from '../sfu/peerConnection.js';
 import { endMeeting } from '../services/meetingService.js';
+import logger from '../utils/logger.js';
 
 export interface Participant {
     userId: string;
@@ -186,6 +187,7 @@ export const handleJoinMeeting = async (
 
   const isHost = roomState.hostUserId === user.id;
 
+  logger.info(`[Join Debug] meeting=${normalizedCode}, socket=${socket.id}, resolvedUser=${user.id} (${user.name}), hostUserId=${roomState.hostUserId}, isHost=${isHost}`);
 
     if (!isHost && roomState.waitingRoomEnabled && !roomState.participants.has(user.id)) {
         let waitingUser = roomState.waitingRoom.get(user.id);

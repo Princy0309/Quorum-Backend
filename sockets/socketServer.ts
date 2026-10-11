@@ -25,52 +25,64 @@ export const initSocketServer = (httpServer: any) => {
 
   ioInstance = io;
 
-    io.use((socket, next) => {
-      const auth = socket.handshake.auth || {};
-      let userId : string | null = null;
-      let name: string = auth.name || 'Participant';
+  io.use((socket, next) => {
+    const auth = socket.handshake.auth || {};
+    const query = socket.handshake.query || {};
+    let userId: string | null = null;
+    let name: string = auth.name || (typeof query.name === 'string' ? query.name : '') || 'Participant';
 
-      const token = auth.token || socket.handshake.headers.authorization?.replace('Bearer', '');
-      if(token){
-        try{
-          const decoded = verifyAccessToken(token);
-          if(decoded?.id){
-            userId = decoded.id;
-          }
-        }catch(err){
-          logger.debug(`[Socket] Handshake token verification failed: ${err}`);
+
+    let rawToken = auth.token ||
+      (typeof socket.handshake.headers.authorization === 'string' ? socket.handshake.headers.authorization : '') ||
+      (typeof query.token === 'string' ? query.token : '');
+
+    let token = typeof rawToken === 'string' ? rawToken.replace(/^Bearer\s+/i, '').trim() : '';
+
+    if (token) {
+      try {
+        const decoded = verifyAccessToken(token);
+        if (decoded?.id) {
+          userId = decoded.id;
         }
+      } catch (err: any) {
+        logger.warn(`[Socket Auth] Token verification failed for socket ${socket.id}: ${err.message}`);
       }
-        if(!userId && auth.userId){
-          userId = String(auth.userId);
-        }
+    }
 
-        socket.data.user = {
-          id: String(userId || socket.id),
-          name: String(name)
-        };
-      
-      next();
-    });
+    if (!userId && auth.userId) {
+      userId = String(auth.userId);
+    }
+
+    socket.data.user = {
+      id: String(userId || socket.id),
+      name: String(name),
+      isAuthenticated: !!userId,
+    };
+
+    logger.info(`[Socket Auth] Client ${socket.id} resolved: userId=${socket.data.user.id}, name=${socket.data.user.name}, isAuth=${socket.data.user.isAuthenticated}`);
+    next();
+  });
+
+
 
   io.on('connection', (socket) => {
     logger.info(`[Socket] Client connected: ${socket.id}`);
 
-    
+
     registerSfuSignaling(io, socket);
 
-    
+
     socket.on('meeting:join', (data, ack) => handleJoinMeeting(io, socket, data.meetingCode, ack));
     socket.on('meeting:leave', (data, ack) => handleLeaveMeeting(io, socket, data.meetingCode, ack));
     socket.on('meeting:end', (data, ack) => handleEndMeeting(io, socket, data, ack));
 
-    
+
     socket.on('meeting:toggle-mic', (data, ack) => handleToggleMic(io, socket, data, ack));
     socket.on('meeting:toggle-cam', (data, ack) => handleToggleCam(io, socket, data, ack));
     socket.on('meeting:mute-participant', (data, ack) => handleMuteParticipant(io, socket, data, ack));
     socket.on('meeting:send-message', (data, ack) => handleSendMeetingMessage(io, socket, data, ack));
 
-    
+
     socket.on('meeting:admit-participant', (data, ack) => handleAdmitParticipant(io, socket, data, ack));
     socket.on('meeting:reject-participant', (data, ack) => handleRejectParticipant(io, socket, data, ack));
 
