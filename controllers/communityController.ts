@@ -8,7 +8,8 @@ import {
   createInviteLink,
   validateInviteToken,
   joinCommunityViaInvite,
-  revokeInviteLink
+  revokeInviteLink,
+  searchUsersToInvite
 } from '../services/communityService.js';
 import { ApiError } from '../utils/ApiError.js';
 
@@ -187,4 +188,29 @@ export const revokeInviteLinkController = async (req: Request, res: Response, ne
     next(err);
   }
 };
+
+export const searchUsersToInviteController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const query = typeof req.query.q === 'string' ? req.query.q : '';
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+    const limit = typeof req.query.limit === 'string' && /^\d+$/.test(req.query.limit)
+      ? parseInt(req.query.limit, 10)
+      : 20;
+
+    const result = await searchUsersToInvite(userId, id, query, cursor, limit);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 

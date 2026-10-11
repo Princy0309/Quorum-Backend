@@ -427,3 +427,69 @@ export const revokeInviteLink = async (userId: string, communityId: string, invi
   };
 };
 
+export const searchUsersToInvite = async (
+  userId: string,
+  communityId: string,
+  query: string,
+  cursor?: string,
+  limit: number = 20
+) => {
+  const membership = await prisma.communityMember.findUnique({
+    where: {
+      communityId_userId: {
+        communityId,
+        userId
+      }
+    }
+  });
+
+  if (!membership) {
+    throw new ApiError(403, 'Access denied. You are not a member of this community');
+  }
+
+  const cleanQuery = typeof query === 'string' ? query.trim() : '';
+  const take = Math.min(Math.max(limit, 1), 50);
+
+  const existingMembers = await prisma.communityMember.findMany({
+    where: { communityId },
+    select: { userId: true }
+  });
+  const excludedUserIds = existingMembers.map((m) => m.userId);
+
+  const whereClause: any = {
+    id: { notIn: excludedUserIds }
+  };
+
+  if (cleanQuery) {
+    whereClause.OR = [
+      { name: { contains: cleanQuery, mode: 'insensitive' } },
+      { email: { contains: cleanQuery, mode: 'insensitive' } }
+    ];
+  }
+
+  const users = await prisma.user.findMany({
+    where: whereClause,
+    take: take + 1,
+    skip: cursor ? 1 : 0,
+    cursor: cursor ? { id: cursor } : undefined,
+    orderBy: { id: 'asc' },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      avatar: true
+    }
+  });
+
+  const hasNextPage = users.length > take;
+  const pagedUsers = hasNextPage ? users.slice(0, take) : users;
+  const nextCursor = hasNextPage && pagedUsers.length > 0 ? pagedUsers[pagedUsers.length - 1].id : null;
+
+  return {
+    users: pagedUsers,
+    nextCursor,
+    hasNextPage
+  };
+};
+
+

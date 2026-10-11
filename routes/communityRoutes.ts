@@ -15,7 +15,8 @@ import {
   createInviteLinkController,
   validateInviteTokenController,
   joinCommunityViaInviteController,
-  revokeInviteLinkController
+  revokeInviteLinkController,
+  searchUsersToInviteController
 } from '../controllers/communityController.js';
 
 const router = Router();
@@ -26,6 +27,7 @@ router.get('/', authMiddleware, getUserCommunitiesController);
 router.get('/invites/:token', validateInviteTokenController);
 router.post('/invites/:token/join', authMiddleware, joinCommunityViaInviteController);
 
+router.get('/:id/users/search', authMiddleware, searchUsersToInviteController);
 router.post('/:id/invites', authMiddleware, validateJoi(createInviteSchema), createInviteLinkController);
 router.delete('/:id/invites/:inviteId', authMiddleware, revokeInviteLinkController);
 
