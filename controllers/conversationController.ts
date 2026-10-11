@@ -149,7 +149,7 @@ export const addGroupParticipantsController = async (req: Request, res: Response
       throw new ApiError(400, 'conversationId is required');
     }
 
-    const { participantIds } = req.body;
+    const participantIds = req.body.participantIds || req.body.userIds || req.body.members || req.body.memberIds || [];
     const conversation = await addGroupParticipants(userId, conversationId, participantIds);
 
     res.status(200).json({
@@ -180,7 +180,8 @@ export const removeGroupParticipantController = async (req: Request, res: Respon
       throw new ApiError(400, 'targetUserId is required');
     }
 
-    const result = await removeGroupParticipant(userId, conversationId, targetUserId);
+    const actualTargetUserId = targetUserId.trim().toLowerCase() === 'me' ? userId : targetUserId.trim();
+    const result = await removeGroupParticipant(userId, conversationId, actualTargetUserId);
 
     res.status(200).json({
       success: true,

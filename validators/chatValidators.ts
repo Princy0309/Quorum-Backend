@@ -68,8 +68,11 @@ export const createGroupSchema = Joi.object({
 }).or('participantIds', 'userIds', 'members', 'memberIds');
 
 export const addParticipantsSchema = Joi.object({
-  participantIds: Joi.array().items(Joi.string().trim().max(100)).min(1).max(50).required()
-});
+  participantIds: Joi.array().items(Joi.string().trim().max(100)).min(1).max(50).optional(),
+  userIds: Joi.array().items(Joi.string().trim().max(100)).min(1).max(50).optional(),
+  members: Joi.array().items(Joi.string().trim().max(100)).min(1).max(50).optional(),
+  memberIds: Joi.array().items(Joi.string().trim().max(100)).min(1).max(50).optional()
+}).or('participantIds', 'userIds', 'members', 'memberIds');
 
 export const updateGroupSchema = Joi.object({
   name: Joi.string().trim().min(1).max(100).optional(),
