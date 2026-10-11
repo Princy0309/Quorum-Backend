@@ -6,6 +6,7 @@ import expressWinston from 'express-winston';
 import helmet from 'helmet';
 import userRoutes from './routes/userRoutes.js';
 import meetingRoutes from './routes/meetingRoutes.js';
+import communityRoutes from './routes/communityRoutes.js';
 
 
 
@@ -83,6 +84,7 @@ app.use('/api/devices', deviceRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/meetings', meetingRoutes);
+app.use('/api/communities', communityRoutes);
 app.get('/api/csrf-token', (req: Request, res: Response) => {
   res.json({ csrfToken: res.locals.csrfToken || req.cookies['XSRF-TOKEN'] });
 });
