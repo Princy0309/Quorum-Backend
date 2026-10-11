@@ -43,6 +43,8 @@ model User {
   deviceTokens             DeviceToken[]
   hostedMeetings           Meeting[]
   ownedConversations       Conversation[]            @relation("GroupOwner")
+  ownedCommunities         Community[]               @relation("CommunityOwner")
+  communityMemberships     CommunityMember[]
 }
 
 model RefreshToken {
@@ -146,4 +148,37 @@ model Meeting {
   host        User          @relation(fields: [hostId], references: [id], onDelete: Cascade)
 
   @@index([code])
+}
+
+enum CommunityRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Community {
+  id          String            @id @default(uuid())
+  name        String
+  description String?
+  ownerId     String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  owner       User              @relation("CommunityOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members     CommunityMember[]
+
+  @@index([ownerId])
+}
+
+model CommunityMember {
+  id          String        @id @default(uuid())
+  communityId String
+  userId      String
+  role        CommunityRole @default(MEMBER)
+  joinedAt    DateTime      @default(now())
+  community   Community     @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+  @@index([userId])
+  @@index([communityId])
 }
