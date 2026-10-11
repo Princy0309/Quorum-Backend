@@ -4,6 +4,7 @@ import { handleJoinMeeting, handleLeaveMeeting, handleEndMeeting, handleDisconne
 import { handleToggleMic, handleToggleCam, handleMuteParticipant, handleSendMeetingMessage } from './meetingControls.js';
 import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.js';
 import logger from '../utils/logger.js';
+import { verifyAccessToken } from '../services/tokenService.js';
 
 let ioInstance: Server | null = null;
 
@@ -25,14 +26,32 @@ export const initSocketServer = (httpServer: any) => {
   ioInstance = io;
 
     io.use((socket, next) => {
-    const auth = socket.handshake.auth || {};
-    socket.data.user = {
-      id: String(auth.userId || socket.id),
-      name: String(auth.name || 'Participant'),
-    };
-    next();
-  });
+      const auth = socket.handshake.auth || {};
+      let userId : string | null = null;
+      let name: string = auth.name || 'Participant';
 
+      const token = auth.token || socket.handshake.headers.authorization?.replace('Bearer', '');
+      if(token){
+        try{
+          const decoded = verifyAccessToken(token);
+          if(decoded?.id){
+            userId = decoded.id;
+          }
+        }catch(err){
+          logger.debug(`[Socket] Handshake token verification failed: ${err}`);
+        }
+      }
+        if(!userId && auth.userId){
+          userId = String(auth.userId);
+        }
+
+        socket.data.user = {
+          id: String(userId || socket.id),
+          name: String(name)
+        };
+      
+      next();
+    });
 
   io.on('connection', (socket) => {
     logger.info(`[Socket] Client connected: ${socket.id}`);
