@@ -52,6 +52,15 @@ export const meetingRooms = new Map<string, MeetingRoomState>();
 export const socketToMeetingsMap = new Map<string, Set<string>>();
 const meetingInitLocks = new Map<string, Promise<MeetingRoomState | null>>();
 
+export const normalizeMeetingCode = (code: string): string => {
+    let cleaned = typeof code === 'string' ? code.trim().toLowerCase() : '';  
+    if(cleaned.includes('/')){
+        const parts = cleaned.split('/').filter(Boolean);
+        cleaned = parts[parts.length - 1];
+    }
+    return cleaned;
+};
+
 export const formatParticipants = (participantsMap: Map<string, Participant>): ParticipantDTO[] => {
     return Array.from(participantsMap.values()).map((p) => ({
         userId: p.userId,
@@ -64,13 +73,16 @@ export const formatParticipants = (participantsMap: Map<string, Participant>): P
     }));
 };
 
+
 export const getOrCreateMeetingState = async (meetingCode: string): Promise<MeetingRoomState | null> => {
-    const existing = meetingRooms.get(meetingCode);
+    const cleanCode = normalizeMeetingCode(meetingCode);
+    
+    const existing = meetingRooms.get(cleanCode);
     if (existing) {
         return existing;
     }
 
-    const pending = meetingInitLocks.get(meetingCode);
+    const pending = meetingInitLocks.get(cleanCode);
     if (pending) {
         return await pending;
     }
@@ -79,7 +91,7 @@ export const getOrCreateMeetingState = async (meetingCode: string): Promise<Meet
         try {
             const dbMeeting = await prisma.meeting.findFirst({
                 where: {
-                    code: meetingCode,
+                    code: cleanCode,
                     status: MeetingStatus.ACTIVE,
                 },
                 select: {
@@ -89,44 +101,44 @@ export const getOrCreateMeetingState = async (meetingCode: string): Promise<Meet
             });
 
             if (!dbMeeting || !dbMeeting.hostId) {
-                if (meetingCode.startsWith('test-')) {
-                    let state = meetingRooms.get(meetingCode);
+                if (cleanCode.startsWith('test-')) {
+                    let state = meetingRooms.get(cleanCode);
                     if (!state) {
                         state = {
-                            code: meetingCode,
+                            code: cleanCode,
                             hostUserId: '',
                             waitingRoomEnabled: true,
                             participants: new Map(),
                             waitingRoom: new Map(),
                         };
-                        meetingRooms.set(meetingCode, state);
+                        meetingRooms.set(cleanCode, state);
                     }
                     return state;
                 }
                 return null;
             }
 
-
-            let state = meetingRooms.get(meetingCode);
+            let state = meetingRooms.get(cleanCode);
             if (!state) {
                 state = {
-                    code: meetingCode,
+                    code: cleanCode,
                     hostUserId: dbMeeting.hostId,
                     waitingRoomEnabled: dbMeeting.waitingRoom,
                     participants: new Map(),
                     waitingRoom: new Map(),
                 };
-                meetingRooms.set(meetingCode, state);
+                meetingRooms.set(cleanCode, state);
             }
             return state;
         } finally {
-            meetingInitLocks.delete(meetingCode);
+            meetingInitLocks.delete(cleanCode);
         }
     })();
 
-    meetingInitLocks.set(meetingCode, initPromise);
+    meetingInitLocks.set(cleanCode, initPromise);
     return await initPromise;
 };
+
 
 export const handleJoinMeeting = async (
     io: Server,
@@ -142,7 +154,7 @@ export const handleJoinMeeting = async (
         return;
     }
 
-    const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+    const normalizedCode = normalizeMeetingCode(meetingCode);
     if (!normalizedCode) {
         const errorPayload = { code: 'INVALID_PAYLOAD', message: 'Meeting code is required' };
         socket.emit('meeting:error', errorPayload);
@@ -291,7 +303,7 @@ export const handleLeaveMeeting = (
         return;
     }
 
-    const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+    const normalizedCode = normalizeMeetingCode(meetingCode);
     if (!normalizedCode) {
         ack?.({ success: false, code: 'INVALID_PAYLOAD', message: 'Meeting code is required' });
         return;
@@ -351,7 +363,7 @@ export const handleLeaveMeeting = (
 };
 
 export const closeMeetingRoom = (meetingCode: string) => {
-    const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+    const normalizedCode = normalizeMeetingCode(meetingCode);
     if (!normalizedCode) return;
 
     const roomState = meetingRooms.get(normalizedCode);
@@ -395,8 +407,8 @@ export const handleEndMeeting = async (
     }
 
     const { meetingCode } = payload || {};
-    const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
-    if (!normalizedCode) {
+    const normalizedCode = normalizeMeetingCode(meetingCode);
+    if(!normalizedCode){
         const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code is required' };
         socket.emit('meeting:error', err);
         ack?.({ success: false, ...err });
