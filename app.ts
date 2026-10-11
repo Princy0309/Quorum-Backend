@@ -6,7 +6,7 @@ import expressWinston from 'express-winston';
 import helmet from 'helmet';
 import userRoutes from './routes/userRoutes.js';
 import meetingRoutes from './routes/meetingRoutes.js';
-
+import organizationRoutes from './routes/organizationRoutes.js';
 
 
 dotenv.config();
@@ -75,6 +75,7 @@ app.use('/api/otp', otpRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/meetings', meetingRoutes);
+app.use('/api/organizations', organizationRoutes);
 app.get('/api/csrf-token', (req: Request, res: Response) => {
   res.json({ csrfToken: res.locals.csrfToken || req.cookies['XSRF-TOKEN'] });
 });
