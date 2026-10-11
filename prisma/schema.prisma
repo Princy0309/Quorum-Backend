@@ -20,6 +20,12 @@ enum MeetingStatus {
 
 }
 
+enum OrgRole {
+  ORG_ADMIN
+  TEAM_HEAD
+  MEMBER
+}
+
 model User {
   id                  String               @id @default(uuid())
   name                String
@@ -39,6 +45,9 @@ model User {
   passwordResetTokens PasswordResetToken[]
   refreshTokens       RefreshToken[]
   hostedMeetings      Meeting[]
+  ownedOrganizations  Organization[]       @relation("OrgOwner")
+  memberships         OrganizationMember[]
+
 }
 
 model RefreshToken {
@@ -80,4 +89,35 @@ model Meeting {
   updatedAt   DateTime      @updatedAt
   host        User          @relation(fields: [hostId], references: [id], onDelete: Cascade)
   @@index([code])
+}
+
+model Organization {
+  id           String      @id @default(uuid())
+  name         String     
+  slug         String      @unique
+  description  String? 
+  logo         String?
+  ownerId      String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  owner        User        @relation("OrgOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members      OrganizationMember[]
+
+  @@index([slug])
+  @@index([ownerId])
+}
+
+
+model OrganizationMember {
+  id                 String           @id @default(uuid())
+  organizationId     String 
+  userId             String 
+  role               OrgRole          @default(MEMBER)
+  joinedAt           DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  organization       Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
 }
