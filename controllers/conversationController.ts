@@ -123,7 +123,8 @@ export const createGroupConversationController = async (req: Request, res: Respo
       throw new ApiError(401, 'Unauthorized');
     }
 
-    const { name, participantIds, avatar } = req.body;
+    const { name, avatar } = req.body;
+    const participantIds = req.body.participantIds || req.body.userIds || req.body.members || req.body.memberIds || [];
     const conversation = await createGroupConversation(userId, name, participantIds, avatar);
 
     res.status(201).json({

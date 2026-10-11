@@ -190,7 +190,17 @@ Broadcasted when another participant starts or stops typing.
   }
   ```
 
-#### 5. `presence:online` & `presence:offline`
+#### 5. `conversation:removed`
+Broadcasted to a participant's personal channel (`user:${userId}`) when they are removed from a group conversation by the group owner.
+* **Payload:**
+  ```json
+  {
+    "conversationId": "conv-uuid",
+    "removedBy": "owner-user-uuid"
+  }
+  ```
+
+#### 6. `presence:online` & `presence:offline`
 Broadcasted to contacts/co-participants when a user connects or disconnects.
 * **Online Payload:** `{ "userId": "user-uuid" }`
 * **Offline Payload:** `{ "userId": "user-uuid", "lastSeen": "2026-10-09T18:05:00.000Z" }`
@@ -232,7 +242,7 @@ All endpoints require `Authorization: Bearer <ACCESS_TOKEN>`. For web clients us
   ```
 
 ### 2. Create Group Conversation
-Create a new group chat with a name, optional avatar, and initial members.
+Create a new group chat with a name, optional avatar, and initial members. The creator automatically becomes the group owner (`ownerId`).
 * **Endpoint:** `POST /api/conversations/group`
 * **Body:**
   ```json
@@ -254,18 +264,20 @@ Create a new group chat with a name, optional avatar, and initial members.
       "type": "group",
       "name": "Project Engineering",
       "avatar": "https://res.cloudinary.com/...",
+      "ownerId": "creator-uuid",
       "participants": [
-        { "userId": "creator-uuid", "user": { "id": "creator-uuid", "name": "Creator" } },
-        { "userId": "user-uuid-1", "user": { "id": "user-uuid-1", "name": "User 1" } },
-        { "userId": "user-uuid-2", "user": { "id": "user-uuid-2", "name": "User 2" } }
+        { "userId": "creator-uuid", "role": "owner", "user": { "id": "creator-uuid", "name": "Creator" } },
+        { "userId": "user-uuid-1", "role": "member", "user": { "id": "user-uuid-1", "name": "User 1" } },
+        { "userId": "user-uuid-2", "role": "member", "user": { "id": "user-uuid-2", "name": "User 2" } }
       ]
     }
   }
   ```
 
 ### 3. Add Members to Group
-Add one or more users to an existing group.
+Add one or more users to an existing group conversation.
 * **Endpoint:** `POST /api/conversations/:id/participants`
+* **Authorization Rules:** Requires participant membership in the group.
 * **Body:**
   ```json
   {
@@ -275,24 +287,34 @@ Add one or more users to an existing group.
     ]
   }
   ```
-* **Response (200 OK):** Returns updated group conversation with all participants.
+* **Response (200 OK):** Returns updated group conversation with all active participants.
+* **Real-time Event Emitted:** Broadcasts `conversation:update` to all added and existing participants' user channels (`user:${userId}`).
 
 ### 4. Remove Member or Leave Group
-Leave a group (pass own `userId`) or remove another member.
+Leave a group (passing own `userId`) or remove another member (Owner only).
 * **Endpoint:** `DELETE /api/conversations/:id/participants/:userId`
+* **Authorization Rules:**
+  - **Self-Removal (Leaving):** Any participant can remove themselves to leave the group. If the group owner leaves, ownership is automatically transferred to the next longest-standing group participant.
+  - **Removing Others:** Only the group owner can remove other participants. Attempting to remove another user as a non-owner returns `403 Forbidden`.
 * **Response (200 OK):**
   ```json
   {
     "success": true,
     "data": {
       "success": true,
-      "conversationDeleted": false
+      "conversationDeleted": false,
+      "newOwnerId": "next-owner-uuid-if-owner-left"
     }
   }
   ```
+* **Real-time Events Emitted:** 
+  - `conversation:removed` is emitted to the target user's personal channel `user:${userId}` so their UI immediately removes the conversation.
+  - `conversation:update` is emitted to remaining participants.
 
-### 5. Update Group Name / Avatar
+### 5. Update Group Details (Name & Avatar)
+Update group title or avatar picture.
 * **Endpoint:** `PATCH /api/conversations/:id`
+* **Authorization Rules:** Only the group owner can update group details.
 * **Body:**
   ```json
   {
@@ -300,7 +322,8 @@ Leave a group (pass own `userId`) or remove another member.
     "avatar": "https://res.cloudinary.com/..."
   }
   ```
-* **Response (200 OK):** Returns updated group conversation.
+* **Response (200 OK):** Returns updated group conversation object.
+* **Real-time Event Emitted:** Broadcasts `conversation:update` to all participants.
 
 ### 6. List User Conversations
 * **Endpoint:** `GET /api/conversations`
