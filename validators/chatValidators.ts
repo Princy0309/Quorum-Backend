@@ -60,9 +60,12 @@ export const unregisterDeviceTokenSchema = z.object({
 
 export const createGroupSchema = Joi.object({
   name: Joi.string().trim().min(1).max(100).required(),
-  avatar: Joi.string().uri({ scheme: ['https'] }).max(2048).custom(isTrustedMediaUrl).optional(),
-  participantIds: Joi.array().items(Joi.string().trim().max(100)).min(1).max(99).required()
-});
+  avatar: Joi.string().uri({ scheme: ['https'] }).max(2048).custom(isTrustedMediaUrl).allow(null, '').optional(),
+  participantIds: Joi.array().items(Joi.string().trim().max(100)).min(1).max(99).optional(),
+  userIds: Joi.array().items(Joi.string().trim().max(100)).min(1).max(99).optional(),
+  members: Joi.array().items(Joi.string().trim().max(100)).min(1).max(99).optional(),
+  memberIds: Joi.array().items(Joi.string().trim().max(100)).min(1).max(99).optional()
+}).or('participantIds', 'userIds', 'members', 'memberIds');
 
 export const addParticipantsSchema = Joi.object({
   participantIds: Joi.array().items(Joi.string().trim().max(100)).min(1).max(50).required()
