@@ -682,10 +682,6 @@ export const addGroupParticipants = async (
       throw new ApiError(403, 'You are not a member of this conversation');
     }
 
-    if (!conversation.ownerId || conversation.ownerId !== userId) {
-      throw new ApiError(403, 'Only the group owner can add new participants');
-    }
-
     const existingParticipantIds = new Set(conversation.participants.map((p: any) => p.userId));
     const newParticipantIds = Array.from(new Set(participantIds)).filter((id) => !existingParticipantIds.has(id));
 
@@ -782,7 +778,13 @@ export const removeGroupParticipant = async (
     }
 
     if (conversation.ownerId === targetUserId && conversation.participants.length > 1) {
-      throw new ApiError(400, 'Group owner must transfer ownership before leaving the group');
+      const nextOwner = conversation.participants.find((p: any) => p.userId !== targetUserId);
+      if (nextOwner) {
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: { ownerId: nextOwner.userId }
+        });
+      }
     }
 
     await tx.conversationParticipant.delete({
