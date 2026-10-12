@@ -16,7 +16,10 @@ import {
   validateInviteTokenController,
   joinCommunityViaInviteController,
   revokeInviteLinkController,
-  searchUsersToInviteController
+  searchUsersToInviteController,
+  getCommunityMembersController,
+  leaveCommunityController,
+  removeCommunityMemberController
 } from '../controllers/communityController.js';
 
 const router = Router();
@@ -30,6 +33,10 @@ router.post('/invites/:token/join', authMiddleware, joinCommunityViaInviteContro
 router.get('/:id/users/search', authMiddleware, searchUsersToInviteController);
 router.post('/:id/invites', authMiddleware, validateJoi(createInviteSchema), createInviteLinkController);
 router.delete('/:id/invites/:inviteId', authMiddleware, revokeInviteLinkController);
+
+router.get('/:id/members', authMiddleware, getCommunityMembersController);
+router.post('/:id/leave', authMiddleware, leaveCommunityController);
+router.delete('/:id/members/:userId', authMiddleware, removeCommunityMemberController);
 
 router.get('/:id', authMiddleware, getCommunityDetailsController);
 router.patch('/:id', authMiddleware, validateJoi(updateCommunitySchema), updateCommunityController);

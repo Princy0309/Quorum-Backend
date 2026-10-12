@@ -9,7 +9,10 @@ import {
   validateInviteToken,
   joinCommunityViaInvite,
   revokeInviteLink,
-  searchUsersToInvite
+  searchUsersToInvite,
+  listCommunityMembers,
+  leaveCommunity,
+  removeCommunityMember
 } from '../services/communityService.js';
 import { ApiError } from '../utils/ApiError.js';
 
@@ -18,6 +21,13 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 const validateCommunityId = (id: unknown): string => {
   if (!id || typeof id !== 'string' || !UUID_REGEX.test(id.trim())) {
     throw new ApiError(400, 'Invalid community ID format');
+  }
+  return id.trim();
+};
+
+const validateUserId = (id: unknown): string => {
+  if (!id || typeof id !== 'string' || !UUID_REGEX.test(id.trim())) {
+    throw new ApiError(400, 'Invalid user ID format');
   }
   return id.trim();
 };
@@ -204,6 +214,67 @@ export const searchUsersToInviteController = async (req: Request, res: Response,
       : 20;
 
     const result = await searchUsersToInvite(userId, id, query, cursor, limit);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getCommunityMembersController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+    const limit = typeof req.query.limit === 'string' && /^\d+$/.test(req.query.limit)
+      ? parseInt(req.query.limit, 10)
+      : 20;
+
+    const result = await listCommunityMembers(userId, id, cursor, limit);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const leaveCommunityController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const result = await leaveCommunity(userId, id);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const removeCommunityMemberController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actorId = req.user?.id;
+    if (!actorId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const targetUserId = validateUserId(req.params.userId);
+
+    const result = await removeCommunityMember(actorId, id, targetUserId);
     res.status(200).json({
       success: true,
       data: result

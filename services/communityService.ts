@@ -1,7 +1,13 @@
 import crypto from 'crypto';
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
-import { CommunityRole } from '@prisma/client';
+
+export const CommunityRole = {
+  OWNER: 'OWNER',
+  ADMIN: 'ADMIN',
+  MEMBER: 'MEMBER'
+} as const;
+export type CommunityRole = (typeof CommunityRole)[keyof typeof CommunityRole];
 
 export interface CreateCommunityInput {
   name: string;
@@ -490,6 +496,204 @@ export const searchUsersToInvite = async (
     nextCursor,
     hasNextPage
   };
+};
+
+export const listCommunityMembers = async (
+  userId: string,
+  communityId: string,
+  cursor?: string,
+  limit: number = 20
+) => {
+  const membership = await prisma.communityMember.findUnique({
+    where: {
+      communityId_userId: {
+        communityId,
+        userId
+      }
+    }
+  });
+
+  if (!membership) {
+    throw new ApiError(403, 'Access denied. You are not a member of this community');
+  }
+
+  const take = Math.min(Math.max(limit, 1), 50);
+
+  const members = await prisma.communityMember.findMany({
+    where: { communityId },
+    take: take + 1,
+    skip: cursor ? 1 : 0,
+    cursor: cursor ? { id: cursor } : undefined,
+    orderBy: { joinedAt: 'asc' },
+    select: {
+      id: true,
+      role: true,
+      joinedAt: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          avatar: true
+        }
+      }
+    }
+  });
+
+  const hasNextPage = members.length > take;
+  const pagedMembers = hasNextPage ? members.slice(0, take) : members;
+  const nextCursor = hasNextPage && pagedMembers.length > 0 ? pagedMembers[pagedMembers.length - 1].id : null;
+
+  return {
+    members: pagedMembers,
+    nextCursor,
+    hasNextPage
+  };
+};
+
+export const leaveCommunity = async (userId: string, communityId: string) => {
+  return await prisma.$transaction(async (tx) => {
+    const community = await tx.community.findUnique({
+      where: { id: communityId }
+    });
+
+    if (!community) {
+      throw new ApiError(404, 'Community not found');
+    }
+
+    const membership = await tx.communityMember.findUnique({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId
+        }
+      }
+    });
+
+    if (!membership) {
+      throw new ApiError(400, 'You are not a member of this community');
+    }
+
+    if (membership.role === CommunityRole.OWNER || community.ownerId === userId) {
+      const otherOwners = await tx.communityMember.findMany({
+        where: {
+          communityId,
+          role: CommunityRole.OWNER,
+          userId: { not: userId }
+        }
+      });
+
+      if (otherOwners.length === 0) {
+        throw new ApiError(400, 'Cannot leave the community as the sole owner. Please transfer ownership before leaving or delete the community');
+      }
+
+      if (community.ownerId === userId) {
+        await tx.community.update({
+          where: { id: communityId },
+          data: { ownerId: otherOwners[0].userId }
+        });
+      }
+    }
+
+    await tx.communityMember.delete({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId
+        }
+      }
+    });
+
+    return { message: 'Successfully left the community' };
+  });
+};
+
+export const removeCommunityMember = async (
+  actorId: string,
+  communityId: string,
+  targetUserId: string
+) => {
+  if (actorId === targetUserId) {
+    throw new ApiError(400, 'Cannot remove yourself via this endpoint. Please use the leave endpoint instead');
+  }
+
+  return await prisma.$transaction(async (tx) => {
+    const community = await tx.community.findUnique({
+      where: { id: communityId }
+    });
+
+    if (!community) {
+      throw new ApiError(404, 'Community not found');
+    }
+
+    const actorMembership = await tx.communityMember.findUnique({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId: actorId
+        }
+      }
+    });
+
+    if (!actorMembership) {
+      throw new ApiError(403, 'Access denied. You are not a member of this community');
+    }
+
+    if (actorMembership.role === CommunityRole.MEMBER) {
+      throw new ApiError(403, 'Access denied. Only owners and admins can remove members');
+    }
+
+    const targetMembership = await tx.communityMember.findUnique({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId: targetUserId
+        }
+      }
+    });
+
+    if (!targetMembership) {
+      throw new ApiError(404, 'Member not found in this community');
+    }
+
+    if (actorMembership.role === CommunityRole.ADMIN) {
+      if (targetMembership.role === CommunityRole.OWNER || targetMembership.role === CommunityRole.ADMIN) {
+        throw new ApiError(403, 'Admins cannot remove other admins or owners');
+      }
+    }
+
+    if (targetMembership.role === CommunityRole.OWNER || community.ownerId === targetUserId) {
+      const otherOwners = await tx.communityMember.findMany({
+        where: {
+          communityId,
+          role: CommunityRole.OWNER,
+          userId: { not: targetUserId }
+        }
+      });
+
+      if (otherOwners.length === 0) {
+        throw new ApiError(400, 'Cannot remove the sole owner of the community');
+      }
+
+      if (community.ownerId === targetUserId) {
+        await tx.community.update({
+          where: { id: communityId },
+          data: { ownerId: otherOwners[0].userId }
+        });
+      }
+    }
+
+    await tx.communityMember.delete({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId: targetUserId
+        }
+      }
+    });
+
+    return { message: 'Member removed successfully' };
+  });
 };
 
 
