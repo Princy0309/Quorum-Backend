@@ -236,57 +236,61 @@ export const deleteCommunity = async (userId: string, communityId: string) => {
 };
 
 export const createInviteLink = async (userId: string, communityId: string, expiresInDays?: number) => {
-  const community = await prisma.community.findUnique({
-    where: { id: communityId }
-  });
+  return await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Community" WHERE id = ${communityId} FOR UPDATE`;
 
-  if (!community) {
-    throw new ApiError(404, 'Community not found');
-  }
+    const community = await tx.community.findUnique({
+      where: { id: communityId }
+    });
 
-  const membership = await prisma.communityMember.findUnique({
-    where: {
-      communityId_userId: {
-        communityId,
-        userId
-      }
+    if (!community) {
+      throw new ApiError(404, 'Community not found');
     }
-  });
 
-  if (!membership || (membership.role !== CommunityRole.OWNER && membership.role !== CommunityRole.ADMIN)) {
-    throw new ApiError(403, 'Only community owners and admins can generate invitation links');
-  }
-
-  const token = crypto.randomBytes(16).toString('hex');
-  const days = expiresInDays && expiresInDays > 0 ? expiresInDays : 7;
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + days);
-
-  const invite = await prisma.communityInvite.create({
-    data: {
-      communityId,
-      inviterId: userId,
-      token,
-      expiresAt
-    },
-    include: {
-      community: {
-        select: {
-          id: true,
-          name: true
+    const membership = await tx.communityMember.findUnique({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId
         }
       }
-    }
-  });
+    });
 
-  return {
-    id: invite.id,
-    communityId: invite.communityId,
-    communityName: invite.community.name,
-    token: invite.token,
-    expiresAt: invite.expiresAt,
-    createdAt: invite.createdAt
-  };
+    if (!membership || (membership.role !== CommunityRole.OWNER && membership.role !== CommunityRole.ADMIN)) {
+      throw new ApiError(403, 'Only community owners and admins can generate invitation links');
+    }
+
+    const token = crypto.randomBytes(16).toString('hex');
+    const days = expiresInDays && expiresInDays > 0 ? expiresInDays : 7;
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + days);
+
+    const invite = await tx.communityInvite.create({
+      data: {
+        communityId,
+        inviterId: userId,
+        token,
+        expiresAt
+      },
+      include: {
+        community: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      }
+    });
+
+    return {
+      id: invite.id,
+      communityId: invite.communityId,
+      communityName: invite.community.name,
+      token: invite.token,
+      expiresAt: invite.expiresAt,
+      createdAt: invite.createdAt
+    };
+  });
 };
 
 export const validateInviteToken = async (token: string) => {
@@ -411,6 +415,8 @@ export const joinCommunityViaInvite = async (userId: string, token: string) => {
 
 export const revokeInviteLink = async (userId: string, communityId: string, inviteId: string) => {
   return await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Community" WHERE id = ${communityId} FOR UPDATE`;
+
     const membership = await tx.communityMember.findUnique({
       where: {
         communityId_userId: {
@@ -537,6 +543,19 @@ export const listCommunityMembers = async (
   }
 
   const take = Math.min(Math.max(limit, 1), 50);
+
+  if (cursor) {
+    const cursorMember = await prisma.communityMember.findFirst({
+      where: {
+        id: cursor,
+        communityId
+      }
+    });
+
+    if (!cursorMember) {
+      throw new ApiError(400, 'Invalid pagination cursor for this community');
+    }
+  }
 
   const members = await prisma.communityMember.findMany({
     where: { communityId },

@@ -79,6 +79,19 @@ export const getPostComments = async (
 
   const take = Math.min(Math.max(limit, 1), 50);
 
+  if (cursor) {
+    const cursorComment = await prisma.communityComment.findFirst({
+      where: {
+        id: cursor,
+        postId
+      }
+    });
+
+    if (!cursorComment) {
+      throw new ApiError(400, 'Invalid pagination cursor for this post');
+    }
+  }
+
   const comments = await prisma.communityComment.findMany({
     where: { postId },
     take: take + 1,

@@ -66,6 +66,19 @@ export const getCommunityPosts = async (
 
   const take = Math.min(Math.max(limit, 1), 50);
 
+  if (cursor) {
+    const cursorPost = await prisma.communityPost.findFirst({
+      where: {
+        id: cursor,
+        communityId
+      }
+    });
+
+    if (!cursorPost) {
+      throw new ApiError(400, 'Invalid pagination cursor for this community');
+    }
+  }
+
   const posts = await prisma.communityPost.findMany({
     where: { communityId },
     take: take + 1,
