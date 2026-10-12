@@ -201,7 +201,6 @@ model CommunityInvite {
   inviter     User      @relation(fields: [inviterId], references: [id], onDelete: Cascade)
 
   @@index([communityId])
-  @@index([token])
 }
 
 model CommunityPost {
