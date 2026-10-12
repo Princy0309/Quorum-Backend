@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { RTCSessionDescription } from 'werift';
+import { RTCSessionDescription, RTCPeerConnection } from 'werift';
 import { roomBroker } from '../sfu/roomBroker.js';
 import { createPeerConnection } from '../sfu/peerConnection.js';
 import logger from '../utils/logger.js';
@@ -23,6 +23,8 @@ interface CandidatePayload {
   roomCode: string;
   peerId: string;
   candidate: any;
+  target?: 'publisher' | 'subscriber';
+  trackId?: string;
 }
 
 interface SubscribePayload {
@@ -35,11 +37,12 @@ interface SubscribePayload {
   };
 }
 
+const subscriberPeerConnections = new Map<string, RTCPeerConnection>();
+
 export const registerSfuSignaling = (io: Server, socket: Socket) => {
   let currentRoom: string | null = null;
   let currentPeerId: string | null = null;
 
-  
   socket.on('sfu:join', ({ roomCode, peerId, name }: JoinPayload) => {
     currentRoom = roomCode;
     currentPeerId = peerId;
@@ -59,7 +62,6 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     logger.info(`[Signaling] Peer ${peerId} joined SFU room ${roomCode}`);
   });
 
-  
   socket.on('sfu:offer', async ({ roomCode, peerId, sdp }: OfferPayload) => {
     try {
       const room = roomBroker.getOrCreateRoom(roomCode);
@@ -73,7 +75,6 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       const pc = createPeerConnection();
       peer.peerConnection = pc;
 
-      
       pc.onTrack.subscribe((track) => {
         const publishedTrack = roomBroker.publishTrack(roomCode, peerId, track);
 
@@ -84,10 +85,14 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         });
       });
 
-     
       pc.onIceCandidate.subscribe((candidate) => {
         if (candidate) {
-          socket.emit('sfu:ice-candidate', { candidate });
+          socket.emit('sfu:ice-candidate', {
+            roomCode,
+            peerId,
+            target: 'publisher',
+            candidate: candidate.toJSON ? candidate.toJSON() : candidate,
+          });
         }
       });
 
@@ -109,21 +114,30 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     }
   });
 
-  
-  socket.on('sfu:ice-candidate', async ({ roomCode, peerId, candidate }: CandidatePayload) => {
+  socket.on('sfu:ice-candidate', async ({ roomCode, peerId, candidate, target, trackId }: CandidatePayload) => {
     try {
-      const room = roomBroker.getOrCreateRoom(roomCode);
-      const peer = room.peers.get(peerId);
+      if (!candidate) return;
 
-      if (peer?.peerConnection && candidate) {
-        await peer.peerConnection.addIceCandidate(candidate);
+      if (target === 'subscriber' && trackId) {
+        const subKey = `${roomCode}:${peerId}:${trackId}`;
+        const consumerPc = subscriberPeerConnections.get(subKey);
+        if (consumerPc) {
+          await consumerPc.addIceCandidate(candidate);
+          logger.debug(`[Signaling] Added subscriber ICE candidate for track ${trackId}`);
+        }
+      } else {
+        const room = roomBroker.getOrCreateRoom(roomCode);
+        const peer = room.peers.get(peerId);
+        if (peer?.peerConnection) {
+          await peer.peerConnection.addIceCandidate(candidate);
+          logger.debug(`[Signaling] Added publisher ICE candidate for peer ${peerId}`);
+        }
       }
     } catch (err) {
       logger.error(`[Signaling] Error adding ICE candidate for peer ${peerId}:`, err);
     }
   });
 
-  
   socket.on(
     'sfu:subscribe',
     async ({ roomCode, subscriberPeerId, trackId, sdp }: SubscribePayload) => {
@@ -146,14 +160,25 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         }
 
         const consumerPc = createPeerConnection();
+        const subKey = `${roomCode}:${subscriberPeerId}:${trackId}`;
+        subscriberPeerConnections.set(subKey, consumerPc);
 
         consumerPc.onIceCandidate.subscribe((candidate) => {
           if (candidate) {
-            socket.emit('sfu:subscribe-ice-candidate', { trackId, candidate });
+            socket.emit('sfu:ice-candidate', {
+              roomCode,
+              peerId: subscriberPeerId,
+              target: 'subscriber',
+              trackId,
+              candidate: candidate.toJSON ? candidate.toJSON() : candidate,
+            });
+            socket.emit('sfu:subscribe-ice-candidate', {
+              trackId,
+              candidate: candidate.toJSON ? candidate.toJSON() : candidate,
+            });
           }
         });
 
-        
         const transceiver = consumerPc.addTransceiver(publishedTrack.kind, {
           direction: 'sendonly',
         });
@@ -189,9 +214,15 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     }
   );
 
-  
   const handleLeave = () => {
     if (currentRoom && currentPeerId) {
+      for (const [key, pc] of subscriberPeerConnections.entries()) {
+        if (key.includes(`:${currentPeerId}:`)) {
+          pc.close();
+          subscriberPeerConnections.delete(key);
+        }
+      }
+
       roomBroker.removePeer(currentRoom, currentPeerId);
       socket.to(currentRoom).emit('sfu:peer-left', { peerId: currentPeerId });
       logger.info(`[Signaling] Peer ${currentPeerId} left room ${currentRoom}`);
