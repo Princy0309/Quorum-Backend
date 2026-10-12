@@ -46,6 +46,8 @@ model User {
   ownedCommunities         Community[]               @relation("CommunityOwner")
   communityMemberships     CommunityMember[]
   sentCommunityInvites     CommunityInvite[]
+  communityPosts           CommunityPost[]
+  communityComments        CommunityComment[]
 }
 
 model RefreshToken {
@@ -167,6 +169,7 @@ model Community {
   owner       User              @relation("CommunityOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members     CommunityMember[]
   invites     CommunityInvite[]
+  posts       CommunityPost[]
 
   @@index([ownerId])
 }
@@ -199,4 +202,35 @@ model CommunityInvite {
 
   @@index([communityId])
   @@index([token])
+}
+
+model CommunityPost {
+  id          String             @id @default(uuid())
+  communityId String
+  authorId    String
+  content     String
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  community   Community          @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  author      User               @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments    CommunityComment[]
+
+  @@index([communityId])
+  @@index([authorId])
+  @@index([createdAt])
+}
+
+model CommunityComment {
+  id        String        @id @default(uuid())
+  postId    String
+  authorId  String
+  content   String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([authorId])
+  @@index([createdAt])
 }
