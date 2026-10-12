@@ -6,6 +6,7 @@ import {
   updateCommunitySchema,
   createInviteSchema
 } from '../validators/communityValidators.js';
+import { createPostSchema } from '../validators/postValidators.js';
 import {
   createCommunityController,
   getUserCommunitiesController,
@@ -21,6 +22,10 @@ import {
   leaveCommunityController,
   removeCommunityMemberController
 } from '../controllers/communityController.js';
+import {
+  createPostController,
+  getCommunityPostsController
+} from '../controllers/postController.js';
 
 const router = Router();
 
@@ -37,6 +42,9 @@ router.delete('/:id/invites/:inviteId', authMiddleware, revokeInviteLinkControll
 router.get('/:id/members', authMiddleware, getCommunityMembersController);
 router.post('/:id/leave', authMiddleware, leaveCommunityController);
 router.delete('/:id/members/:userId', authMiddleware, removeCommunityMemberController);
+
+router.post('/:id/posts', authMiddleware, validateJoi(createPostSchema), createPostController);
+router.get('/:id/posts', authMiddleware, getCommunityPostsController);
 
 router.get('/:id', authMiddleware, getCommunityDetailsController);
 router.patch('/:id', authMiddleware, validateJoi(updateCommunitySchema), updateCommunityController);
