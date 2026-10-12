@@ -153,78 +153,86 @@ export const getCommunityDetails = async (userId: string, communityId: string) =
 };
 
 export const updateCommunity = async (userId: string, communityId: string, data: UpdateCommunityInput) => {
-  const community = await prisma.community.findUnique({
-    where: { id: communityId }
-  });
+  return await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Community" WHERE id = ${communityId} FOR UPDATE`;
 
-  if (!community) {
-    throw new ApiError(404, 'Community not found');
-  }
+    const community = await tx.community.findUnique({
+      where: { id: communityId }
+    });
 
-  if (community.ownerId !== userId) {
-    throw new ApiError(403, 'Only the community owner can update community settings');
-  }
+    if (!community) {
+      throw new ApiError(404, 'Community not found');
+    }
 
-  const updateData: { name?: string; description?: string | null } = {};
-  if (data.name !== undefined) {
-    updateData.name = data.name.trim();
-  }
-  if (data.description !== undefined) {
-    updateData.description = data.description?.trim() || null;
-  }
+    if (community.ownerId !== userId) {
+      throw new ApiError(403, 'Only the community owner can update community settings');
+    }
 
-  const updatedCommunity = await prisma.community.update({
-    where: { id: communityId },
-    data: updateData,
-    include: {
-      owner: {
-        select: {
-          id: true,
-          name: true,
-          avatar: true
-        }
-      },
-      _count: {
-        select: {
-          members: true
+    const updateData: { name?: string; description?: string | null } = {};
+    if (data.name !== undefined) {
+      updateData.name = data.name.trim();
+    }
+    if (data.description !== undefined) {
+      updateData.description = data.description?.trim() || null;
+    }
+
+    const updatedCommunity = await tx.community.update({
+      where: { id: communityId },
+      data: updateData,
+      include: {
+        owner: {
+          select: {
+            id: true,
+            name: true,
+            avatar: true
+          }
+        },
+        _count: {
+          select: {
+            members: true
+          }
         }
       }
-    }
-  });
+    });
 
-  return {
-    id: updatedCommunity.id,
-    name: updatedCommunity.name,
-    description: updatedCommunity.description,
-    ownerId: updatedCommunity.ownerId,
-    owner: updatedCommunity.owner,
-    memberCount: updatedCommunity._count.members,
-    createdAt: updatedCommunity.createdAt,
-    updatedAt: updatedCommunity.updatedAt
-  };
+    return {
+      id: updatedCommunity.id,
+      name: updatedCommunity.name,
+      description: updatedCommunity.description,
+      ownerId: updatedCommunity.ownerId,
+      owner: updatedCommunity.owner,
+      memberCount: updatedCommunity._count.members,
+      createdAt: updatedCommunity.createdAt,
+      updatedAt: updatedCommunity.updatedAt
+    };
+  });
 };
 
 export const deleteCommunity = async (userId: string, communityId: string) => {
-  const community = await prisma.community.findUnique({
-    where: { id: communityId }
+  return await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Community" WHERE id = ${communityId} FOR UPDATE`;
+
+    const community = await tx.community.findUnique({
+      where: { id: communityId }
+    });
+
+    if (!community) {
+      throw new ApiError(404, 'Community not found');
+    }
+
+    if (community.ownerId !== userId) {
+      throw new ApiError(403, 'Only the community owner can delete the community');
+    }
+
+    await tx.community.delete({
+      where: { id: communityId }
+    });
+
+    return {
+      success: true,
+      message: 'Community deleted successfully'
+    };
   });
-
-  if (!community) {
-    throw new ApiError(404, 'Community not found');
-  }
-
-  if (community.ownerId !== userId) {
-    throw new ApiError(403, 'Only the community owner can delete the community');
-  }
-
-  await prisma.community.delete({
-    where: { id: communityId }
-  });
-
-  return {
-    success: true,
-    message: 'Community deleted successfully'
-  };
 };
 
 export const createInviteLink = async (userId: string, communityId: string, expiresInDays?: number) => {
