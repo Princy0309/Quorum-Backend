@@ -329,66 +329,70 @@ export const validateInviteToken = async (token: string) => {
 };
 
 export const joinCommunityViaInvite = async (userId: string, token: string) => {
-  const invite = await prisma.communityInvite.findUnique({
-    where: { token }
-  });
-
-  if (!invite || invite.isRevoked) {
-    throw new ApiError(404, 'Invitation link is invalid or has been revoked');
-  }
-
-  if (invite.expiresAt && invite.expiresAt < new Date()) {
-    throw new ApiError(410, 'Invitation link has expired');
-  }
-
-  const existingMember = await prisma.communityMember.findUnique({
-    where: {
-      communityId_userId: {
-        communityId: invite.communityId,
-        userId
-      }
-    }
-  });
-
-  if (existingMember) {
-    throw new ApiError(400, 'You are already a member of this community');
-  }
-
   try {
-    const newMembership = await prisma.communityMember.create({
-      data: {
-        communityId: invite.communityId,
-        userId,
-        role: CommunityRole.MEMBER
-      },
-      include: {
-        community: {
-          include: {
-            owner: {
-              select: {
-                id: true,
-                name: true,
-                avatar: true
-              }
-            },
-            _count: {
-              select: {
-                members: true
+    return await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "CommunityInvite" WHERE token = ${token} FOR UPDATE`;
+
+      const invite = await tx.communityInvite.findUnique({
+        where: { token }
+      });
+
+      if (!invite || invite.isRevoked) {
+        throw new ApiError(404, 'Invitation link is invalid or has been revoked');
+      }
+
+      if (invite.expiresAt && invite.expiresAt < new Date()) {
+        throw new ApiError(410, 'Invitation link has expired');
+      }
+
+      const existingMember = await tx.communityMember.findUnique({
+        where: {
+          communityId_userId: {
+            communityId: invite.communityId,
+            userId
+          }
+        }
+      });
+
+      if (existingMember) {
+        throw new ApiError(400, 'You are already a member of this community');
+      }
+
+      const newMembership = await tx.communityMember.create({
+        data: {
+          communityId: invite.communityId,
+          userId,
+          role: CommunityRole.MEMBER
+        },
+        include: {
+          community: {
+            include: {
+              owner: {
+                select: {
+                  id: true,
+                  name: true,
+                  avatar: true
+                }
+              },
+              _count: {
+                select: {
+                  members: true
+                }
               }
             }
           }
         }
-      }
-    });
+      });
 
-    return {
-      communityId: newMembership.communityId,
-      name: newMembership.community.name,
-      description: newMembership.community.description,
-      role: newMembership.role,
-      memberCount: newMembership.community._count.members,
-      joinedAt: newMembership.joinedAt
-    };
+      return {
+        communityId: newMembership.communityId,
+        name: newMembership.community.name,
+        description: newMembership.community.description,
+        role: newMembership.role,
+        memberCount: newMembership.community._count.members,
+        joinedAt: newMembership.joinedAt
+      };
+    });
   } catch (err: any) {
     if (err?.code === 'P2002') {
       throw new ApiError(400, 'You are already a member of this community');
@@ -398,46 +402,50 @@ export const joinCommunityViaInvite = async (userId: string, token: string) => {
 };
 
 export const revokeInviteLink = async (userId: string, communityId: string, inviteId: string) => {
-  const membership = await prisma.communityMember.findUnique({
-    where: {
-      communityId_userId: {
-        communityId,
-        userId
+  return await prisma.$transaction(async (tx) => {
+    const membership = await tx.communityMember.findUnique({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId
+        }
       }
+    });
+
+    if (!membership || (membership.role !== CommunityRole.OWNER && membership.role !== CommunityRole.ADMIN)) {
+      throw new ApiError(403, 'Only community owners and admins can revoke invitation links');
     }
-  });
 
-  if (!membership || (membership.role !== CommunityRole.OWNER && membership.role !== CommunityRole.ADMIN)) {
-    throw new ApiError(403, 'Only community owners and admins can revoke invitation links');
-  }
+    await tx.$queryRaw`SELECT id FROM "CommunityInvite" WHERE id = ${inviteId} FOR UPDATE`;
 
-  const invite = await prisma.communityInvite.findFirst({
-    where: {
-      id: inviteId,
-      communityId
+    const invite = await tx.communityInvite.findFirst({
+      where: {
+        id: inviteId,
+        communityId
+      }
+    });
+
+    if (!invite) {
+      throw new ApiError(404, 'Invitation link not found');
     }
-  });
 
-  if (!invite) {
-    throw new ApiError(404, 'Invitation link not found');
-  }
+    if (invite.isRevoked) {
+      return {
+        success: true,
+        message: 'Invitation link is already revoked'
+      };
+    }
 
-  if (invite.isRevoked) {
+    await tx.communityInvite.update({
+      where: { id: inviteId },
+      data: { isRevoked: true }
+    });
+
     return {
       success: true,
-      message: 'Invitation link is already revoked'
+      message: 'Invitation link revoked successfully'
     };
-  }
-
-  await prisma.communityInvite.update({
-    where: { id: inviteId },
-    data: { isRevoked: true }
   });
-
-  return {
-    success: true,
-    message: 'Invitation link revoked successfully'
-  };
 };
 
 export const searchUsersToInvite = async (
@@ -539,7 +547,6 @@ export const listCommunityMembers = async (
         select: {
           id: true,
           name: true,
-          email: true,
           avatar: true
         }
       }
@@ -559,6 +566,8 @@ export const listCommunityMembers = async (
 
 export const leaveCommunity = async (userId: string, communityId: string) => {
   return await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Community" WHERE id = ${communityId} FOR UPDATE`;
+
     const community = await tx.community.findUnique({
       where: { id: communityId }
     });
@@ -624,6 +633,8 @@ export const removeCommunityMember = async (
   }
 
   return await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Community" WHERE id = ${communityId} FOR UPDATE`;
+
     const community = await tx.community.findUnique({
       where: { id: communityId }
     });
@@ -713,6 +724,8 @@ export const changeMemberRole = async (
   }
 
   return await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Community" WHERE id = ${communityId} FOR UPDATE`;
+
     const community = await tx.community.findUnique({
       where: { id: communityId }
     });
@@ -780,6 +793,8 @@ export const transferCommunityOwnership = async (
   }
 
   return await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Community" WHERE id = ${communityId} FOR UPDATE`;
+
     const community = await tx.community.findUnique({
       where: { id: communityId }
     });
