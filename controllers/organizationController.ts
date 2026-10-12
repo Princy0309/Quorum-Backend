@@ -4,6 +4,8 @@ import {ApiError} from '../utils/ApiError.js';
 import {
   createOrganization,
   getUserOrganizations,
+  getOrganizationById,
+  updateOrganization,
 } from '../services/organizationService.js';
 
 export const createOrganizationController = asyncHandler(
@@ -41,3 +43,46 @@ export const getUserOrganizationsController = asyncHandler(
     });
   }
 );
+
+export const getOrganizationController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const rawId = req.params.orgId || req.params.id;
+    const orgId = typeof rawId === 'string' ? rawId.trim() : undefined;
+
+    if (!orgId) {
+      return next(new ApiError(400, 'Valid Organization ID is required'));
+    }
+
+    const organization = await getOrganizationById(orgId);
+
+    return res.status(200).json({
+      success: true,
+      data: organization,
+    });
+  }
+);
+
+export const updateOrganizationController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const rawId = req.params.orgId || req.params.id;
+    const orgId = typeof rawId === 'string' ? rawId.trim() : undefined;
+
+    if (!orgId) {
+      return next(new ApiError(400, 'Valid Organization ID is required'));
+    }
+
+    const { name, description, logo } = req.body;
+
+    const updatedOrg = await updateOrganization(orgId, {
+      name,
+      description,
+      logo,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: updatedOrg,
+    });
+  }
+);
+
