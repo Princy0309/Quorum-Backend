@@ -112,6 +112,19 @@ export const updateCommunityPost = async (
     throw new ApiError(404, 'Post not found');
   }
 
+  const membership = await prisma.communityMember.findUnique({
+    where: {
+      communityId_userId: {
+        communityId: post.communityId,
+        userId
+      }
+    }
+  });
+
+  if (!membership) {
+    throw new ApiError(403, 'Access denied. You are no longer a member of this community');
+  }
+
   if (post.authorId !== userId) {
     throw new ApiError(403, 'You can only edit your own posts');
   }
@@ -152,17 +165,21 @@ export const deleteCommunityPost = async (
     throw new ApiError(404, 'Post not found');
   }
 
-  if (post.authorId !== userId) {
-    const membership = await prisma.communityMember.findUnique({
-      where: {
-        communityId_userId: {
-          communityId: post.communityId,
-          userId
-        }
+  const membership = await prisma.communityMember.findUnique({
+    where: {
+      communityId_userId: {
+        communityId: post.communityId,
+        userId
       }
-    });
+    }
+  });
 
-    if (!membership || (membership.role !== CommunityRole.OWNER && membership.role !== CommunityRole.ADMIN)) {
+  if (!membership) {
+    throw new ApiError(403, 'Access denied. You are no longer a member of this community');
+  }
+
+  if (post.authorId !== userId) {
+    if (membership.role !== CommunityRole.OWNER && membership.role !== CommunityRole.ADMIN) {
       throw new ApiError(403, 'You do not have permission to delete this post');
     }
   }

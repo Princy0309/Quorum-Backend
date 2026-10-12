@@ -4,7 +4,9 @@ import { validateJoi } from '../middlewares/validate.js';
 import {
   createCommunitySchema,
   updateCommunitySchema,
-  createInviteSchema
+  createInviteSchema,
+  updateMemberRoleSchema,
+  transferOwnershipSchema
 } from '../validators/communityValidators.js';
 import { createPostSchema } from '../validators/postValidators.js';
 import {
@@ -20,7 +22,9 @@ import {
   searchUsersToInviteController,
   getCommunityMembersController,
   leaveCommunityController,
-  removeCommunityMemberController
+  removeCommunityMemberController,
+  changeMemberRoleController,
+  transferCommunityOwnershipController
 } from '../controllers/communityController.js';
 import {
   createPostController,
@@ -40,7 +44,9 @@ router.post('/:id/invites', authMiddleware, validateJoi(createInviteSchema), cre
 router.delete('/:id/invites/:inviteId', authMiddleware, revokeInviteLinkController);
 
 router.get('/:id/members', authMiddleware, getCommunityMembersController);
+router.patch('/:id/members/:userId/role', authMiddleware, validateJoi(updateMemberRoleSchema), changeMemberRoleController);
 router.post('/:id/leave', authMiddleware, leaveCommunityController);
+router.post('/:id/transfer-ownership', authMiddleware, validateJoi(transferOwnershipSchema), transferCommunityOwnershipController);
 router.delete('/:id/members/:userId', authMiddleware, removeCommunityMemberController);
 
 router.post('/:id/posts', authMiddleware, validateJoi(createPostSchema), createPostController);

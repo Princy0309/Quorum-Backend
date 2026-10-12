@@ -13,3 +13,11 @@ export const updateCommunitySchema = Joi.object({
 export const createInviteSchema = Joi.object({
   expiresInDays: Joi.number().integer().min(1).max(30).optional()
 });
+
+export const updateMemberRoleSchema = Joi.object({
+  role: Joi.string().valid('ADMIN', 'MEMBER').required()
+});
+
+export const transferOwnershipSchema = Joi.object({
+  newOwnerId: Joi.string().trim().required()
+});

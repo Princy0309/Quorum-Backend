@@ -113,11 +113,31 @@ export const updatePostComment = async (
   content: string
 ) => {
   const comment = await prisma.communityComment.findUnique({
-    where: { id: commentId }
+    where: { id: commentId },
+    include: {
+      post: {
+        select: {
+          communityId: true
+        }
+      }
+    }
   });
 
   if (!comment) {
     throw new ApiError(404, 'Comment not found');
+  }
+
+  const membership = await prisma.communityMember.findUnique({
+    where: {
+      communityId_userId: {
+        communityId: comment.post.communityId,
+        userId
+      }
+    }
+  });
+
+  if (!membership) {
+    throw new ApiError(403, 'Access denied. You are no longer a member of this community');
   }
 
   if (comment.authorId !== userId) {
@@ -162,17 +182,21 @@ export const deletePostComment = async (
     throw new ApiError(404, 'Comment not found');
   }
 
-  if (comment.authorId !== userId) {
-    const membership = await prisma.communityMember.findUnique({
-      where: {
-        communityId_userId: {
-          communityId: comment.post.communityId,
-          userId
-        }
+  const membership = await prisma.communityMember.findUnique({
+    where: {
+      communityId_userId: {
+        communityId: comment.post.communityId,
+        userId
       }
-    });
+    }
+  });
 
-    if (!membership || (membership.role !== CommunityRole.OWNER && membership.role !== CommunityRole.ADMIN)) {
+  if (!membership) {
+    throw new ApiError(403, 'Access denied. You are no longer a member of this community');
+  }
+
+  if (comment.authorId !== userId) {
+    if (membership.role !== CommunityRole.OWNER && membership.role !== CommunityRole.ADMIN) {
       throw new ApiError(403, 'You do not have permission to delete this comment');
     }
   }

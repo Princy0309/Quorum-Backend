@@ -354,40 +354,47 @@ export const joinCommunityViaInvite = async (userId: string, token: string) => {
     throw new ApiError(400, 'You are already a member of this community');
   }
 
-  const newMembership = await prisma.communityMember.create({
-    data: {
-      communityId: invite.communityId,
-      userId,
-      role: CommunityRole.MEMBER
-    },
-    include: {
-      community: {
-        include: {
-          owner: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true
-            }
-          },
-          _count: {
-            select: {
-              members: true
+  try {
+    const newMembership = await prisma.communityMember.create({
+      data: {
+        communityId: invite.communityId,
+        userId,
+        role: CommunityRole.MEMBER
+      },
+      include: {
+        community: {
+          include: {
+            owner: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true
+              }
+            },
+            _count: {
+              select: {
+                members: true
+              }
             }
           }
         }
       }
-    }
-  });
+    });
 
-  return {
-    communityId: newMembership.communityId,
-    name: newMembership.community.name,
-    description: newMembership.community.description,
-    role: newMembership.role,
-    memberCount: newMembership.community._count.members,
-    joinedAt: newMembership.joinedAt
-  };
+    return {
+      communityId: newMembership.communityId,
+      name: newMembership.community.name,
+      description: newMembership.community.description,
+      role: newMembership.role,
+      memberCount: newMembership.community._count.members,
+      joinedAt: newMembership.joinedAt
+    };
+  } catch (err: any) {
+    if (err?.code === 'P2002') {
+      throw new ApiError(400, 'You are already a member of this community');
+    }
+    throw err;
+  }
 };
 
 export const revokeInviteLink = async (userId: string, communityId: string, inviteId: string) => {
@@ -449,8 +456,8 @@ export const searchUsersToInvite = async (
     }
   });
 
-  if (!membership) {
-    throw new ApiError(403, 'Access denied. You are not a member of this community');
+  if (!membership || (membership.role !== CommunityRole.OWNER && membership.role !== CommunityRole.ADMIN)) {
+    throw new ApiError(403, 'Only community owners and admins can search users to invite');
   }
 
   const cleanQuery = typeof query === 'string' ? query.trim() : '';
@@ -467,10 +474,7 @@ export const searchUsersToInvite = async (
   };
 
   if (cleanQuery) {
-    whereClause.OR = [
-      { name: { contains: cleanQuery, mode: 'insensitive' } },
-      { email: { contains: cleanQuery, mode: 'insensitive' } }
-    ];
+    whereClause.name = { contains: cleanQuery, mode: 'insensitive' };
   }
 
   const users = await prisma.user.findMany({
@@ -482,7 +486,6 @@ export const searchUsersToInvite = async (
     select: {
       id: true,
       name: true,
-      email: true,
       avatar: true
     }
   });
@@ -524,7 +527,10 @@ export const listCommunityMembers = async (
     take: take + 1,
     skip: cursor ? 1 : 0,
     cursor: cursor ? { id: cursor } : undefined,
-    orderBy: { joinedAt: 'asc' },
+    orderBy: [
+      { joinedAt: 'asc' },
+      { id: 'asc' }
+    ],
     select: {
       id: true,
       role: true,
@@ -696,4 +702,139 @@ export const removeCommunityMember = async (
   });
 };
 
+export const changeMemberRole = async (
+  actorId: string,
+  communityId: string,
+  targetUserId: string,
+  newRole: 'ADMIN' | 'MEMBER'
+) => {
+  if (actorId === targetUserId) {
+    throw new ApiError(400, 'Cannot change your own role');
+  }
 
+  return await prisma.$transaction(async (tx) => {
+    const community = await tx.community.findUnique({
+      where: { id: communityId }
+    });
+
+    if (!community) {
+      throw new ApiError(404, 'Community not found');
+    }
+
+    if (community.ownerId !== actorId) {
+      throw new ApiError(403, 'Only the community owner can change member roles');
+    }
+
+    const targetMembership = await tx.communityMember.findUnique({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId: targetUserId
+        }
+      }
+    });
+
+    if (!targetMembership) {
+      throw new ApiError(404, 'Member not found in this community');
+    }
+
+    const updated = await tx.communityMember.update({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId: targetUserId
+        }
+      },
+      data: {
+        role: newRole
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            avatar: true
+          }
+        }
+      }
+    });
+
+    return {
+      id: updated.id,
+      communityId: updated.communityId,
+      userId: updated.userId,
+      role: updated.role,
+      user: updated.user,
+      joinedAt: updated.joinedAt
+    };
+  });
+};
+
+export const transferCommunityOwnership = async (
+  actorId: string,
+  communityId: string,
+  newOwnerId: string
+) => {
+  if (actorId === newOwnerId) {
+    throw new ApiError(400, 'Cannot transfer ownership to yourself');
+  }
+
+  return await prisma.$transaction(async (tx) => {
+    const community = await tx.community.findUnique({
+      where: { id: communityId }
+    });
+
+    if (!community) {
+      throw new ApiError(404, 'Community not found');
+    }
+
+    if (community.ownerId !== actorId) {
+      throw new ApiError(403, 'Only the community owner can transfer ownership');
+    }
+
+    const targetMembership = await tx.communityMember.findUnique({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId: newOwnerId
+        }
+      }
+    });
+
+    if (!targetMembership) {
+      throw new ApiError(404, 'Target user is not a member of this community');
+    }
+
+    await tx.community.update({
+      where: { id: communityId },
+      data: { ownerId: newOwnerId }
+    });
+
+    await tx.communityMember.update({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId: actorId
+        }
+      },
+      data: { role: CommunityRole.ADMIN }
+    });
+
+    await tx.communityMember.update({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId: newOwnerId
+        }
+      },
+      data: { role: CommunityRole.OWNER }
+    });
+
+    return {
+      message: 'Community ownership transferred successfully',
+      communityId,
+      newOwnerId,
+      previousOwnerId: actorId
+    };
+  });
+};

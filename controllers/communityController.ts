@@ -12,7 +12,9 @@ import {
   searchUsersToInvite,
   listCommunityMembers,
   leaveCommunity,
-  removeCommunityMember
+  removeCommunityMember,
+  changeMemberRole,
+  transferCommunityOwnership
 } from '../services/communityService.js';
 import { ApiError } from '../utils/ApiError.js';
 
@@ -275,6 +277,47 @@ export const removeCommunityMemberController = async (req: Request, res: Respons
     const targetUserId = validateUserId(req.params.userId);
 
     const result = await removeCommunityMember(actorId, id, targetUserId);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const changeMemberRoleController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actorId = req.user?.id;
+    if (!actorId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const targetUserId = validateUserId(req.params.userId);
+    const { role } = req.body;
+
+    const result = await changeMemberRole(actorId, id, targetUserId, role);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const transferCommunityOwnershipController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actorId = req.user?.id;
+    if (!actorId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const targetUserId = validateUserId(req.body.newOwnerId);
+
+    const result = await transferCommunityOwnership(actorId, id, targetUserId);
     res.status(200).json({
       success: true,
       data: result
