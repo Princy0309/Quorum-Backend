@@ -84,3 +84,63 @@ export const getUserOrganizations = async (userId: string) => {
   }));
 };
 
+export const getOrganizationById = async (orgId: string) => {
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    include: {
+      owner: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          avatar: true,
+        },
+      },
+      _count: {
+        select: {
+          members: true,
+        },
+      },
+    },
+  });
+
+  if (!org) {
+    throw new ApiError(404, 'Organization not found');
+  }
+
+  return {
+    ...org,
+    memberCount: org._count.members,
+  };
+};
+
+interface UpdateOrgInput {
+  name?: string;
+  description?: string;
+  logo?: string;
+}
+
+export const updateOrganization = async (orgId: string, data: UpdateOrgInput) => {
+  const existingOrg = await prisma.organization.findUnique({ where: { id: orgId } });
+  if (!existingOrg) {
+    throw new ApiError(404, 'Organization not found');
+  }
+
+  if (data.name !== undefined && data.name.trim().length === 0) {
+    throw new ApiError(400, 'Organization name cannot be empty');
+  }
+
+  const updatedOrg = await prisma.organization.update({
+    where: { id: orgId },
+    data: {
+      name: data.name !== undefined ? data.name.trim() : undefined,
+      description: data.description !== undefined ? data.description.trim() : undefined,
+      logo: data.logo !== undefined ? data.logo : undefined,
+    },
+  });
+
+  return updatedOrg;
+};
+
+
+

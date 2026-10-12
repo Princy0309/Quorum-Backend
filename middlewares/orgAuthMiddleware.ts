@@ -18,19 +18,23 @@ export const requireOrgMember = (allowedRoles?: OrgRole[]) => {
         return next(new ApiError(401, 'Unauthorized, login required'));
       }
 
-      const orgId = req.params.orgId || req.params.id;
-      if (!orgId || typeof orgId !== 'string' || orgId.trim().length === 0) {
+      const rawId = req.params.orgId || req.params.id;
+      const orgId = typeof rawId === 'string' ? rawId.trim() : undefined;
+      
+      if (!orgId) {
         return next(new ApiError(400, 'Valid Organization ID is required'));
       }
+
 
       const membership = await prisma.organizationMember.findUnique({
         where: {
           organizationId_userId: {
-            organizationId: orgId.trim(),
+            organizationId: orgId,
             userId: req.user.id,
           },
         },
       });
+
 
       if (!membership) {
         return next(new ApiError(403, 'Access denied: You are not a member of this organization'));
