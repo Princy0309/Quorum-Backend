@@ -5,6 +5,7 @@ import { env } from '../config/env.js';
 import { MeetingStatus } from '@prisma/client';
 import { closeMeetingRoom } from '../sockets/meetingPresence.js';
 
+
 const generateCode = (): string => {
   const letters = 'abcdefghijklmnopqrstuvwxyz';
   const part = () =>

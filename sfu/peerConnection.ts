@@ -91,6 +91,10 @@ export class PeerConnectionManager {
 
     const pc = new RTCPeerConnection({
       iceServers,
+      icePortRange: [40000, 40100],
+      iceAdditionalHostAddresses: [
+        process.env.ANNOUNCED_IP || '13.126.35.230',
+      ],
     });
 
     const earlyCandidates = (this.earlyIceCandidates.get(key) || []).slice(0, 50);

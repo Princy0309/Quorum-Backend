@@ -3,6 +3,7 @@ import { Server as HTTPServer } from 'http';
 import { verifyAccessToken } from '../services/tokenService.js';
 import prisma from '../config/prisma.js';
 import env from '../config/env.js';
+import logger from '../utils/logger.js';
 import { handleJoinMeeting, handleLeaveMeeting, handleEndMeeting, handleDisconnectCleanup } from './meetingPresence.js';
 import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.js';
 import { handleToggleMic, handleToggleCam, handleMuteParticipant, handleSendMeetingMessage, MuteParticipantPayload } from './meetingControls.js';
@@ -62,51 +63,58 @@ export const initSocketServer = (httpServer: HTTPServer): SocketIOServer => {
     },
   });
 
-
   ioServer.use(async (socket, next) => {
     try {
-      const rawToken =
-        socket.handshake.auth?.token ||
-        socket.handshake.headers?.authorization;
+      const auth = socket.handshake.auth || {};
+      const query = socket.handshake.query || {};
 
-      if (!rawToken || typeof rawToken !== 'string') {
+      let rawToken =
+        auth.token ||
+        (typeof socket.handshake.headers.authorization === 'string' ? socket.handshake.headers.authorization : '') ||
+        (typeof query.token === 'string' ? query.token : '');
+
+      let token = typeof rawToken === 'string' ? rawToken.replace(/^Bearer\s+/i, '').trim() : '';
+
+      if (!token) {
         return next(new Error('Authentication error: Missing token'));
       }
 
-      const token = rawToken.startsWith('Bearer ')
-        ? rawToken.slice(7).trim()
-        : rawToken.trim();
+      let decoded: any;
+      try {
+        decoded = verifyAccessToken(token);
+      } catch (err: any) {
+        return next(new Error('Authentication error: Invalid or expired token'));
+      }
 
-      const payload = verifyAccessToken(token);
+      if (!decoded || !decoded.id) {
+        return next(new Error('Authentication error: Invalid token payload'));
+      }
 
       const user = await prisma.user.findUnique({
-        where: { id: payload.id },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          role: true,
-        },
+        where: { id: decoded.id },
+        select: { id: true, name: true, email: true },
       });
 
       if (!user) {
         return next(new Error('Authentication error: User not found'));
       }
 
-      socket.data.user = user;
+      socket.data.user = {
+        id: user.id,
+        name: user.name || auth.name || 'User',
+        email: user.email,
+        role: decoded.role || 'user',
+      };
+
+      socket.join(`user:${user.id}`);
       next();
     } catch (err: any) {
-      next(new Error('Authentication error: Invalid token'));
+      next(new Error(`Authentication error: ${err.message}`));
     }
   });
 
   ioServer.on('connection', (socket) => {
-    console.log(`Socket connected: ${socket.id} (User: ${socket.data.user?.id})`);
-
-    const userId = socket.data.user?.id;
-    if (userId) {
-      socket.join(`user:${userId}`);
-    }
+    logger.info(`[Socket] Client connected: ${socket.id}`);
 
     registerMessageHandler(ioServer!, socket as any);
     registerTypingHandler(ioServer!, socket as any);
@@ -151,7 +159,7 @@ export const initSocketServer = (httpServer: HTTPServer): SocketIOServer => {
     registerSfuSignalingHandler(ioServer!, socket);
 
     socket.on('disconnect', () => {
-      console.log(`Socket disconnected: ${socket.id}`);
+      logger.info(`[Socket] Client disconnected: ${socket.id}`);
       handleDisconnectCleanup(ioServer!, socket);
     });
   });
