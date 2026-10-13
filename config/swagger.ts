@@ -6,7 +6,7 @@ const swaggerDocument = {
   info: {
     title: 'Quorum Backend API Documentation',
     version: '1.0.0',
-    description: 'Interactive API documentation for Quorum Authentication, OTP verification, and session management.',
+    description: 'Interactive API documentation for Quorum Authentication, OTP verification, User Search, Conversations, Direct Messaging, and Session Management.',
   },
   servers: [
     {
@@ -208,48 +208,85 @@ const swaggerDocument = {
         },
       },
     },
-          '/api/users/onboarding': {
-        patch: {
-          tags: ['User Profile & Onboarding'],
-          summary: 'Save user onboarding use cases',
-          description: 'Saves user choices for how they want to use Quorum (Organization, Freelance, Hire & Collaborate, Community). Requires JWT Bearer authentication.',
-          security: [{ BearerAuth: [] }],
-          requestBody: {
+    '/api/users/search': {
+      get: {
+        tags: ['User Profile & Search'],
+        summary: 'Search users by name or email',
+        description: 'Performs a case-insensitive search across user names and email addresses. Automatically excludes the requesting user and supports limit/page pagination.',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'q',
+            in: 'query',
             required: false,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    useCases: {
-                      type: 'array',
-                      items: {
-                        type: 'string',
-                        enum: ['ORGANIZATION', 'FREELANCE', 'HIRE_COLLABORATE', 'COMMUNITY'],
-                      },
-                      example: ['ORGANIZATION', 'COMMUNITY'],
+            schema: { type: 'string' },
+            description: 'Search term for name or email (e.g., "john" or "john@example.com")',
+          },
+          {
+            name: 'page',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 1 },
+            description: 'Page number for pagination',
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 100 },
+            description: 'Number of user results per page',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Matching users retrieved successfully with pagination details',
+          },
+          401: { description: 'Unauthorized' },
+        },
+      },
+    },
+    '/api/users/onboarding': {
+      patch: {
+        tags: ['User Profile & Search'],
+        summary: 'Save user onboarding use cases',
+        description: 'Saves user choices for how they want to use Quorum (Organization, Freelance, Hire & Collaborate, Community). Requires JWT Bearer authentication.',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  useCases: {
+                    type: 'array',
+                    items: {
+                      type: 'string',
+                      enum: ['ORGANIZATION', 'FREELANCE', 'HIRE_COLLABORATE', 'COMMUNITY'],
                     },
+                    example: ['ORGANIZATION', 'COMMUNITY'],
                   },
                 },
               },
             },
           },
-          responses: {
-            200: {
-              description: 'Onboarding preferences saved successfully',
-            },
-            400: {
-              description: 'Validation error: invalid use cases',
-            },
-            401: {
-              description: 'Unauthorized: missing or invalid JWT token',
-            },
-            403: {
-              description: 'Email not verified',
-            },
+        },
+        responses: {
+          200: {
+            description: 'Onboarding preferences saved successfully',
+          },
+          400: {
+            description: 'Validation error: invalid use cases',
+          },
+          401: {
+            description: 'Unauthorized: missing or invalid JWT token',
+          },
+          403: {
+            description: 'Email not verified',
           },
         },
       },
+    },
 
     '/api/otp/send-verification': {
       post: {
@@ -352,6 +389,202 @@ const swaggerDocument = {
         },
       },
     },
+    '/api/conversations': {
+      get: {
+        tags: ['Conversations'],
+        summary: 'Get user conversations',
+        description: 'Retrieves all conversations for the authenticated user, ordered by last activity, including unread message counts and last message preview.',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          200: { description: 'Conversations retrieved successfully' },
+          401: { description: 'Unauthorized' }
+        }
+      }
+    },
+    '/api/conversations/{id}/messages': {
+      get: {
+        tags: ['Conversations'],
+        summary: 'Get conversation messages',
+        description: 'Fetches paginated message history for a specific conversation using cursor-based pagination.',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Conversation UUID'
+          },
+          {
+            name: 'cursor',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Message ID cursor for fetching older messages'
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+            description: 'Number of messages to retrieve per page'
+          }
+        ],
+        responses: {
+          200: { description: 'Messages retrieved successfully' },
+          401: { description: 'Unauthorized' },
+          403: { description: 'Forbidden, not a conversation participant' },
+          404: { description: 'Conversation not found' }
+        }
+      }
+    },
+    '/api/conversations/{id}/search': {
+      get: {
+        tags: ['Conversations'],
+        summary: 'Search conversation messages',
+        description: 'Performs full-text keyword search across messages in a conversation using cursor-based pagination.',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Conversation UUID'
+          },
+          {
+            name: 'q',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Search query keyword'
+          },
+          {
+            name: 'cursor',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Message ID cursor for pagination'
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+            description: 'Number of matching messages to retrieve'
+          }
+        ],
+        responses: {
+          200: { description: 'Search results retrieved successfully' },
+          401: { description: 'Unauthorized' },
+          403: { description: 'Forbidden, not a conversation participant' }
+        }
+      }
+    },
+    '/api/dm': {
+      post: {
+        tags: ['Direct Messaging'],
+        summary: 'Create or get direct message conversation',
+        description: 'Initiates or retrieves a 1-on-1 direct message conversation with another registered user.',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['targetUserId'],
+                properties: {
+                  targetUserId: { type: 'string', example: 'uuid-user-id' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Direct message conversation retrieved or created successfully' },
+          400: { description: 'Cannot message yourself or invalid target user ID' },
+          401: { description: 'Unauthorized' },
+          404: { description: 'Target user not found' }
+        }
+      }
+    },
+    '/api/devices': {
+      post: {
+        tags: ['Push Notifications & Devices'],
+        summary: 'Register FCM device token',
+        description: 'Registers an FCM device registration token for offline push notifications.',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['token'],
+                properties: {
+                  token: { type: 'string', example: 'fcm-registration-token-123' },
+                  platform: { type: 'string', enum: ['web', 'android', 'ios'], default: 'web' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Device token registered successfully' },
+          401: { description: 'Unauthorized' }
+        }
+      },
+      delete: {
+        tags: ['Push Notifications & Devices'],
+        summary: 'Unregister FCM device token',
+        description: 'Removes an FCM device registration token upon logout or device unregistration.',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['token'],
+                properties: {
+                  token: { type: 'string', example: 'fcm-registration-token-123' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Device token unregistered successfully' },
+          401: { description: 'Unauthorized' }
+        }
+      }
+    },
+    '/api/uploads/sign': {
+      post: {
+        tags: ['Media & Uploads'],
+        summary: 'Generate signed media upload signature',
+        description: 'Generates a secure timestamped signature for uploading media files directly to Cloudinary.',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  folder: { type: 'string', example: 'avatars' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Upload signature generated successfully' },
+          401: { description: 'Unauthorized' }
+        }
+      }
+    }
   },
 };
 

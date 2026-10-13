@@ -6,6 +6,10 @@ import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.j
 import logger from '../utils/logger.js';
 import { verifyAccessToken } from '../services/tokenService.js';
 import prisma from '../config/prisma.js';
+import { registerMessageHandler } from './handlers/messageHandler.js';
+import { registerTypingHandler } from './handlers/typingHandler.js';
+import { registerPresenceHandler } from './handlers/presenceHandler.js';
+
 
 let ioInstance: Server | null = null;
 
@@ -54,7 +58,7 @@ export const initSocketServer = (httpServer: any) => {
       userId = String(auth.userId);
     }
 
-        if (userId && (!name || name === 'Participant')) {
+    if (userId && (!name || name === 'Participant')) {
       try {
         const dbUser = await prisma.user.findUnique({
           where: { id: userId },
@@ -84,6 +88,16 @@ export const initSocketServer = (httpServer: any) => {
   io.on('connection', (socket) => {
     logger.info(`[Socket] Client connected: ${socket.id}`);
 
+    const userId = socket.data.user?.id;
+    if (userId) {
+      socket.join(`user:${userId}`);
+    }
+
+    registerMessageHandler(io, socket as any);
+    registerTypingHandler(io, socket as any);
+    registerPresenceHandler(io, socket as any);
+
+
 
     registerSfuSignaling(io, socket);
 
@@ -110,3 +124,5 @@ export const initSocketServer = (httpServer: any) => {
 
   return io;
 };
+
+

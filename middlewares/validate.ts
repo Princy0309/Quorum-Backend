@@ -12,3 +12,14 @@ export const validate = (schema: ZodSchema) => {
     next();
   };
 };
+
+export const validateJoi = (schema: any) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const { error, value } = schema.validate(req.body);
+    if (error) {
+      return next(new ApiError(400, error.details[0].message));
+    }
+    req.body = value;
+    next();
+  };
+};
