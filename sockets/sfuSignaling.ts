@@ -125,14 +125,26 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           await consumerPc.addIceCandidate(candidate);
           logger.debug(`[Signaling] Added subscriber ICE candidate for track ${trackId}`);
         }
-      } else {
+            } else if (target === 'publisher') {
         const room = roomBroker.getOrCreateRoom(roomCode);
         const peer = room.peers.get(peerId);
         if (peer?.peerConnection) {
           await peer.peerConnection.addIceCandidate(candidate);
           logger.debug(`[Signaling] Added publisher ICE candidate for peer ${peerId}`);
         }
+      } else {
+        const room = roomBroker.getOrCreateRoom(roomCode);
+        const peer = room.peers.get(peerId);
+        if (peer?.peerConnection) {
+          peer.peerConnection.addIceCandidate(candidate).catch(() => {});
+        }
+        for (const [key, pc] of subscriberPeerConnections.entries()) {
+          if (key.startsWith(`${roomCode}:${peerId}:`)) {
+            pc.addIceCandidate(candidate).catch(() => {});
+          }
+        }
       }
+
     } catch (err) {
       logger.error(`[Signaling] Error adding ICE candidate for peer ${peerId}:`, err);
     }
@@ -179,8 +191,13 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           }
         });
 
-        const transceiver = consumerPc.addTransceiver(publishedTrack.kind, {
+                const transceiver = consumerPc.addTransceiver(publishedTrack.kind, {
           direction: 'sendonly',
+        });
+
+        transceiver.sender.onPictureLossIndication.subscribe(() => {
+          logger.info(`[Signaling] PLI received: requesting keyframe from publisher ${publishedTrack.peerId}`);
+          roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
         });
 
         roomBroker.subscribeToTrack(
@@ -204,9 +221,17 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           },
         });
 
+        if (publishedTrack.kind === 'video') {
+          roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
+          setTimeout(() => {
+            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
+          }, 600);
+        }
+
         logger.info(
           `[Signaling] Peer ${subscriberPeerId} subscribed to track ${trackId}`
         );
+
       } catch (err) {
         logger.error(`[Signaling] Error subscribing to track:`, err);
         socket.emit('sfu:error', { message: 'Failed to subscribe to track' });

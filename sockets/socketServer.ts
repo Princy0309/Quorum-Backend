@@ -5,6 +5,7 @@ import { handleToggleMic, handleToggleCam, handleMuteParticipant, handleSendMeet
 import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.js';
 import logger from '../utils/logger.js';
 import { verifyAccessToken } from '../services/tokenService.js';
+import prisma from '../config/prisma.js';
 
 let ioInstance: Server | null = null;
 
@@ -25,7 +26,7 @@ export const initSocketServer = (httpServer: any) => {
 
   ioInstance = io;
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const auth = socket.handshake.auth || {};
     const query = socket.handshake.query || {};
     let userId: string | null = null;
@@ -52,6 +53,21 @@ export const initSocketServer = (httpServer: any) => {
     if (!userId && auth.userId) {
       userId = String(auth.userId);
     }
+
+        if (userId && (!name || name === 'Participant')) {
+      try {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { name: true },
+        });
+        if (dbUser?.name) {
+          name = dbUser.name;
+        }
+      } catch (err: any) {
+        logger.warn(`[Socket Auth] Could not fetch user name for ${userId}: ${err.message}`);
+      }
+    }
+
 
     socket.data.user = {
       id: String(userId || socket.id),

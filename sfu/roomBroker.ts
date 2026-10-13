@@ -135,6 +135,26 @@ export class RoomBroker extends EventEmitter {
     }
   }
 
+  public requestKeyframe(roomCode: string, publisherPeerId: string): void {
+    const room = this.rooms.get(roomCode);
+    if (!room) return;
+    const peer = room.peers.get(publisherPeerId);
+    if (!peer?.peerConnection) return;
+    const receivers = peer.peerConnection.getReceivers();
+    for (const receiver of receivers) {
+      if (receiver.kind === 'video') {
+        const ssrc = receiver.track?.ssrc || (receiver.tracks[0]?.ssrc);
+        if (ssrc) {
+          receiver.sendRtcpPLI(ssrc).catch((err) => {
+            logger.error(`[SFU Broker] Failed to send RTCP PLI to ${publisherPeerId}:`, err);
+          });
+          logger.info(`[SFU Broker] Requested keyframe from publisher ${publisherPeerId} (ssrc: ${ssrc})`);
+        }
+      }
+    }
+  }
+
+
   public getRoomTracks(roomCode: string): PublishedTrack[] {
     const room = this.rooms.get(roomCode);
     if (!room) return [];

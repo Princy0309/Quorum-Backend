@@ -28,6 +28,10 @@ export const createPeerConnection = (): RTCPeerConnection => {
         urls: 'stun:stun.l.google.com:19302',
       },
     ],
+    icePortRange: [40000, 40100],
+    iceAdditionalHostAddresses: [
+      process.env.ANNOUNCED_IP || '13.126.35.230',
+    ],
   });
 
   pc.connectionStateChange.subscribe((state) => {
@@ -48,8 +52,8 @@ class PeerConnectionManager {
     let room = this.muteStates.get(roomCode);
     if (!room) {
       room = new Map();
-      this.muteStates.set(roomCode, room);
     }
+    this.muteStates.set(roomCode, room);
     room.set(userId, isMuted);
   }
 
