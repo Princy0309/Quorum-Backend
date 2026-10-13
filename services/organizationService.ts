@@ -142,5 +142,200 @@ export const updateOrganization = async (orgId: string, data: UpdateOrgInput) =>
   return updatedOrg;
 };
 
+//organization-creation
+
+export const getOrganizationMembers = async (orgId: string) => {
+  
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { id: true },
+  });
+
+  if (!org) {
+    throw new ApiError(404, 'Organization not found');
+  }
+
+  
+  const members = await prisma.organizationMember.findMany({
+    where: { organizationId: orgId },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          avatar: true,
+        },
+      },
+    },
+    orderBy: {
+      joinedAt: 'asc',
+    },
+  });
+
+  return members.map((m) => ({
+    id: m.id,
+    userId: m.userId,
+    role: m.role,
+    joinedAt: m.joinedAt,
+    user: m.user,
+  }));
+};
+
+export const updateMemberRole = async (
+  orgId: string,
+  currentUserId: string,
+  targetUserId: string,
+  newRole: OrgRole
+) => {
+  if (!Object.values(OrgRole).includes(newRole)) {
+    throw new ApiError(400, `Invalid role. Allowed roles are: ${Object.values(OrgRole).join(', ')}`);
+  }
+
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { id: true, ownerId: true },
+  });
+
+  if (!org) {
+    throw new ApiError(404, 'Organization not found');
+  }
+
+  if (org.ownerId === targetUserId) {
+    throw new ApiError(400, 'Cannot change the role of the organization owner');
+  }
+
+  if (currentUserId === targetUserId && newRole !== OrgRole.ORG_ADMIN) {
+    const adminCount = await prisma.organizationMember.count({
+      where: { organizationId: orgId, role: OrgRole.ORG_ADMIN },
+    });
+    if (adminCount <= 1) {
+      throw new ApiError(400, 'Cannot demote yourself: organization must have at least one admin');
+    }
+  }
+
+  const membership = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId: targetUserId,
+      },
+    },
+  });
+
+  if (!membership) {
+    throw new ApiError(404, 'Member not found in this organization');
+  }
+
+  const updatedMembership = await prisma.organizationMember.update({
+    where: { id: membership.id },
+    data: { role: newRole },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          avatar: true,
+        },
+      },
+    },
+  });
+
+  return {
+    id: updatedMembership.id,
+    userId: updatedMembership.userId,
+    role: updatedMembership.role,
+    joinedAt: updatedMembership.joinedAt,
+    user: updatedMembership.user,
+  };
+};
+
+export const removeMember = async (
+  orgId: string,
+  currentUserId: string,
+  targetUserId: string
+) => {
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { id: true, ownerId: true },
+  });
+
+  if (!org) {
+    throw new ApiError(404, 'Organization not found');
+  }
+
+  if (org.ownerId === targetUserId) {
+    throw new ApiError(400, 'Cannot remove the organization owner');
+  }
+
+  if (currentUserId === targetUserId) {
+    throw new ApiError(400, 'Cannot remove yourself. Use the leave organization option instead');
+  }
+
+  const membership = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId: targetUserId,
+      },
+    },
+  });
+
+  if (!membership) {
+    throw new ApiError(404, 'Member not found in this organization');
+  }
+
+ 
+  await prisma.organizationMember.delete({
+    where: { id: membership.id },
+  });
+
+  return { message: 'Member removed successfully' };
+};
+
+export const leaveOrganization = async (orgId: string, userId: string) => {
+
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { id: true, ownerId: true },
+  });
+
+  if (!org) {
+    throw new ApiError(404, 'Organization not found');
+  }
+
+ 
+  if (org.ownerId === userId) {
+    throw new ApiError(
+      400,
+      'The organization owner cannot leave. Transfer ownership or delete the organization instead'
+    );
+  }
+
+
+  const membership = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId,
+      },
+    },
+  });
+
+  if (!membership) {
+    throw new ApiError(404, 'You are not a member of this organization');
+  }
+
+
+  await prisma.organizationMember.delete({
+    where: { id: membership.id },
+  });
+
+  return { message: 'Left organization successfully' };
+};
+
+
+
 
 
