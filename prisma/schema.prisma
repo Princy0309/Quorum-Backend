@@ -47,6 +47,8 @@ model User {
   hostedMeetings      Meeting[]
   ownedOrganizations  Organization[]       @relation("OrgOwner")
   memberships         OrganizationMember[]
+  sentOrgInvites      OrganizationInvite[] @relation("OrgInviter")
+
 
 }
 
@@ -102,6 +104,8 @@ model Organization {
   updatedAt    DateTime    @updatedAt
   owner        User        @relation("OrgOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members      OrganizationMember[]
+  invites      OrganizationInvite[]
+
 
   @@index([slug])
   @@index([ownerId])
@@ -120,4 +124,26 @@ model OrganizationMember {
   @@unique([organizationId, userId])
   @@index([organizationId])
   @@index([userId])
+}
+
+model OrganizationInvite {
+  id              String       @id @default(uuid())
+  organizationId  String
+  inviterId       String
+  email           String?
+  role            OrgRole      @default(MEMBER)
+  token           String       @unique
+  expiresAt       DateTime
+  maxUses         Int          @default(1)
+  usedCount       Int          @default(0)
+  isRevoked       Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inviter         User         @relation("OrgInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([token])
+  @@index([email])
 }
