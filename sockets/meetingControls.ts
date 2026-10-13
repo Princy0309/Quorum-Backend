@@ -1,6 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { meetingRooms, SocketAckResponse } from './meetingPresence.js';
 import { peerConnectionManager } from '../sfu/peerConnection.js';
+import { checkMeetingToggleRateLimit } from '../middlewares/rateLimiter.js';
 
 export type MuteAction = 'mute' | 'unmute' | 'allow-unmute';
 
@@ -13,7 +14,7 @@ export interface MuteParticipantPayload {
 
 const messageRateLimits = new Map<string, number[]>();
 
-export const handleToggleMic = (
+export const handleToggleMic = async (
   io: Server,
   socket: Socket,
   payload: { meetingCode: string; isMuted: boolean },
@@ -22,6 +23,14 @@ export const handleToggleMic = (
   const user = socket.data.user;
   if (!user || !user.id) {
     const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  const isToggleAllowed = await checkMeetingToggleRateLimit(user.id);
+  if (!isToggleAllowed) {
+    const err = { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many media toggle requests. Please slow down.' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
     return;
@@ -188,7 +197,7 @@ export const handleMuteParticipant = (
   });
 };
 
-export const handleToggleCam = (
+export const handleToggleCam = async (
   io: Server,
   socket: Socket,
   payload: { meetingCode: string; isVideoOff: boolean },
@@ -197,6 +206,14 @@ export const handleToggleCam = (
   const user = socket.data.user;
   if (!user || !user.id) {
     const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  const isToggleAllowed = await checkMeetingToggleRateLimit(user.id);
+  if (!isToggleAllowed) {
+    const err = { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many media toggle requests. Please slow down.' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
     return;

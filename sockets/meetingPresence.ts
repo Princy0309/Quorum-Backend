@@ -5,6 +5,7 @@ import { getIO } from './socketServer.js';
 import { roomBroker } from '../sfu/roomBroker.js';
 import { peerConnectionManager } from '../sfu/peerConnection.js';
 import { endMeeting } from '../services/meetingService.js';
+import { checkMeetingJoinRateLimit } from '../middlewares/rateLimiter.js';
 
 export interface Participant {
     userId: string;
@@ -122,6 +123,14 @@ export const handleJoinMeeting = async (
     const user = socket.data.user;
     if (!user || !user.id) {
         const errorPayload = { code: 'UNAUTHORIZED', message: 'Authentication required' };
+        socket.emit('meeting:error', errorPayload);
+        ack?.({ success: false, ...errorPayload });
+        return;
+    }
+
+    const isJoinAllowed = await checkMeetingJoinRateLimit(user.id);
+    if (!isJoinAllowed) {
+        const errorPayload = { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many join attempts. Please slow down.' };
         socket.emit('meeting:error', errorPayload);
         ack?.({ success: false, ...errorPayload });
         return;

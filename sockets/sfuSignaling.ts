@@ -2,6 +2,11 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { roomBroker } from '../sfu/roomBroker.js';
 import { peerConnectionManager } from '../sfu/peerConnection.js';
 import { meetingRooms } from './meetingPresence.js';
+import {
+  checkMeetingJoinRateLimit,
+  checkSfuSignalingRateLimit,
+  checkSfuIceRateLimit,
+} from '../middlewares/rateLimiter.js';
 
 export const registerSfuSignalingHandler = (io: SocketIOServer, socket: Socket) => {
   const validateParticipant = (meetingCode: string): boolean => {
@@ -20,10 +25,20 @@ export const registerSfuSignalingHandler = (io: SocketIOServer, socket: Socket) 
     return true;
   };
 
-  socket.on('sfu:join-media', (payload: { meetingCode: string }, ack?: (res: any) => void) => {
+  socket.on('sfu:join-media', async (payload: { meetingCode: string }, ack?: (res: any) => void) => {
     const user = socket.data.user;
     if (!user || !user.id || !payload?.meetingCode) {
       ack?.({ success: false, code: 'UNAUTHORIZED', message: 'Authentication required' });
+      return;
+    }
+
+    const isJoinAllowed = await checkMeetingJoinRateLimit(user.id);
+    if (!isJoinAllowed) {
+      ack?.({
+        success: false,
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: 'Too many media join requests. Please slow down.',
+      });
       return;
     }
 
@@ -56,6 +71,16 @@ export const registerSfuSignalingHandler = (io: SocketIOServer, socket: Socket) 
       const user = socket.data.user;
       if (!user || !user.id || !payload?.meetingCode || !payload?.offer) {
         ack?.({ success: false, code: 'INVALID_PAYLOAD', message: 'Meeting code and offer required' });
+        return;
+      }
+
+      const isSignalAllowed = await checkSfuSignalingRateLimit(user.id);
+      if (!isSignalAllowed) {
+        ack?.({
+          success: false,
+          code: 'RATE_LIMIT_EXCEEDED',
+          message: 'Signaling rate limit exceeded. Please wait.',
+        });
         return;
       }
 
@@ -106,6 +131,16 @@ export const registerSfuSignalingHandler = (io: SocketIOServer, socket: Socket) 
         return;
       }
 
+      const isSignalAllowed = await checkSfuSignalingRateLimit(user.id);
+      if (!isSignalAllowed) {
+        ack?.({
+          success: false,
+          code: 'RATE_LIMIT_EXCEEDED',
+          message: 'Signaling rate limit exceeded. Please wait.',
+        });
+        return;
+      }
+
       const normalizedCode = payload.meetingCode.trim();
       if (!validateParticipant(normalizedCode)) {
         ack?.({
@@ -138,6 +173,16 @@ export const registerSfuSignalingHandler = (io: SocketIOServer, socket: Socket) 
         return;
       }
 
+      const isSignalAllowed = await checkSfuSignalingRateLimit(user.id);
+      if (!isSignalAllowed) {
+        ack?.({
+          success: false,
+          code: 'RATE_LIMIT_EXCEEDED',
+          message: 'Signaling rate limit exceeded. Please wait.',
+        });
+        return;
+      }
+
       const normalizedCode = payload.meetingCode.trim();
       if (!validateParticipant(normalizedCode)) {
         ack?.({
@@ -167,6 +212,16 @@ export const registerSfuSignalingHandler = (io: SocketIOServer, socket: Socket) 
       const user = socket.data.user;
       if (!user || !user.id || !payload?.meetingCode || !payload?.candidate) {
         ack?.({ success: false, code: 'INVALID_PAYLOAD', message: 'Meeting code and candidate required' });
+        return;
+      }
+
+      const isIceAllowed = await checkSfuIceRateLimit(user.id);
+      if (!isIceAllowed) {
+        ack?.({
+          success: false,
+          code: 'RATE_LIMIT_EXCEEDED',
+          message: 'ICE candidate exchange rate limit exceeded',
+        });
         return;
       }
 
