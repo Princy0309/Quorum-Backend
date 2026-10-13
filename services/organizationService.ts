@@ -1,6 +1,7 @@
 import prisma from "../config/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
 import { OrgRole } from '@prisma/client';
+import crypto from 'crypto';
 
 function slugify(text: string): string{
     return text
@@ -333,6 +334,249 @@ export const leaveOrganization = async (orgId: string, userId: string) => {
   });
 
   return { message: 'Left organization successfully' };
+};
+
+
+//invitations and join system
+
+interface CreateInviteInput {
+  email?: string;
+  role?: OrgRole;
+  maxUses?: number;
+  expiresInDays?: number;
+}
+
+export const createOrganizationInvite = async (
+  orgId: string,
+  inviterId: string,
+  data: CreateInviteInput
+) => {
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { id: true, name: true },
+  });
+
+  if (!org) {
+    throw new ApiError(404, 'Organization not found');
+  }
+
+  const targetRole = data.role || OrgRole.MEMBER;
+  if (!Object.values(OrgRole).includes(targetRole)) {
+    throw new ApiError(400, `Invalid role. Allowed roles: ${Object.values(OrgRole).join(', ')}`);
+  }
+
+  const normalizedEmail = data.email?.trim().toLowerCase();
+
+  if (normalizedEmail) {
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { id: true },
+    });
+
+    if (existingUser) {
+      const existingMember = await prisma.organizationMember.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId: orgId,
+            userId: existingUser.id,
+          },
+        },
+      });
+
+      if (existingMember) {
+        throw new ApiError(400, 'This user is already a member of this organization');
+      }
+    }
+
+    const pendingInvite = await prisma.organizationInvite.findFirst({
+      where: {
+        organizationId: orgId,
+        email: normalizedEmail,
+        isRevoked: false,
+        expiresAt: { gt: new Date() },
+      },
+    });
+
+    if (pendingInvite) {
+      throw new ApiError(400, 'An active invite has already been sent to this email');
+    }
+  }
+
+  const token = crypto.randomBytes(24).toString('hex');
+  const days = data.expiresInDays && data.expiresInDays > 0 ? Math.min(data.expiresInDays, 30) : 7;
+  const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+
+  const invite = await prisma.organizationInvite.create({
+    data: {
+      organizationId: orgId,
+      inviterId,
+      email: normalizedEmail || null,
+      role: targetRole,
+      token,
+      expiresAt,
+      maxUses: data.maxUses && data.maxUses > 0 ? data.maxUses : 1,
+    },
+    include: {
+      organization: {
+        select: { id: true, name: true, slug: true, logo: true },
+      },
+      inviter: {
+        select: { id: true, name: true, email: true, avatar: true },
+      },
+    },
+  });
+
+  return invite;
+};
+
+export const getInvitePreview = async (token: string) => {
+  const invite = await prisma.organizationInvite.findUnique({
+    where: { token },
+    include: {
+      organization: {
+        select: { id: true, name: true, slug: true, logo: true, description: true },
+      },
+      inviter: {
+        select: { id: true, name: true, email: true, avatar: true },
+      },
+    },
+  });
+
+  if (!invite) {
+    throw new ApiError(404, 'Invalid or non-existent invite link');
+  }
+
+  if (invite.isRevoked) {
+    throw new ApiError(400, 'This invite link has been revoked by an administrator');
+  }
+
+  if (invite.expiresAt < new Date()) {
+    throw new ApiError(400, 'This invite link has expired');
+  }
+
+  if (invite.usedCount >= invite.maxUses) {
+    throw new ApiError(400, 'This invite link has reached its maximum usage limit');
+  }
+
+  return {
+    id: invite.id,
+    organization: invite.organization,
+    inviter: invite.inviter,
+    role: invite.role,
+    email: invite.email,
+    expiresAt: invite.expiresAt,
+  };
+};
+
+export const acceptOrganizationInvite = async (
+  token: string,
+  userId: string,
+  userEmail: string
+) => {
+  const invite = await prisma.organizationInvite.findUnique({
+    where: { token },
+  });
+
+  if (!invite) {
+    throw new ApiError(404, 'Invalid or non-existent invite link');
+  }
+
+  if (invite.isRevoked) {
+    throw new ApiError(400, 'This invite link has been revoked');
+  }
+
+  if (invite.expiresAt < new Date()) {
+    throw new ApiError(400, 'This invite link has expired');
+  }
+
+  if (invite.usedCount >= invite.maxUses) {
+    throw new ApiError(400, 'This invite link has reached its maximum usage limit');
+  }
+
+  // Edge Case: Email Hijacking Protection
+  if (invite.email && invite.email.toLowerCase() !== userEmail.toLowerCase()) {
+    throw new ApiError(
+      403,
+      `This invite was sent specifically to ${invite.email}. Please sign in with that email address.`
+    );
+  }
+
+  // Edge Case: Check if user is already a member
+  const existingMember = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: invite.organizationId,
+        userId,
+      },
+    },
+  });
+
+  if (existingMember) {
+    throw new ApiError(400, 'You are already a member of this organization');
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const member = await tx.organizationMember.create({
+      data: {
+        organizationId: invite.organizationId,
+        userId,
+        role: invite.role,
+      },
+      include: {
+        organization: true,
+      },
+    });
+
+    await tx.organizationInvite.update({
+      where: { id: invite.id },
+      data: {
+        usedCount: { increment: 1 },
+      },
+    });
+
+    return member;
+  });
+
+  return result;
+};
+
+export const getOrganizationInvites = async (orgId: string) => {
+  const invites = await prisma.organizationInvite.findMany({
+    where: {
+      organizationId: orgId,
+      isRevoked: false,
+    },
+    include: {
+      inviter: {
+        select: { id: true, name: true, email: true },
+      },
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+  });
+
+  return invites;
+};
+
+export const revokeOrganizationInvite = async (orgId: string, inviteId: string) => {
+  const invite = await prisma.organizationInvite.findFirst({
+    where: {
+      id: inviteId,
+      organizationId: orgId,
+    },
+  });
+
+  if (!invite) {
+    throw new ApiError(404, 'Invite not found');
+  }
+
+  await prisma.organizationInvite.update({
+    where: { id: invite.id },
+    data: { isRevoked: true },
+  });
+
+  return { message: 'Invite revoked successfully' };
 };
 
 
