@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import prisma from '../config/prisma.js';
 import { registerSchema, loginSchema } from '../validators/authValidators.js';
 import { ApiError } from '../utils/ApiError.js';
-import { sendSuccess } from '../utils/apiResponse.js';
+import { sendSuccess } from '../utils/ApiResponse.js';
 import { rotateRefreshToken, revokeRefreshToken, revokeAllSessions, revokeAccessToken } from '../services/tokenService.js';
 import { registerUser, loginUser } from '../services/authService.js';
 import { refreshCookieOptions } from '../utils/cookieOptions.js';

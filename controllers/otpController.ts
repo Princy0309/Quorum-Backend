@@ -4,7 +4,7 @@ import prisma from '../config/prisma.js';
 import redis from '../config/redis.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
-import { sendSuccess } from '../utils/apiResponse.js';
+import { sendSuccess } from '../utils/ApiResponse.js';
 import { storeAndSendOTP, verifyOTPFromRedis } from '../services/otpService.js';
 import { issueTokens, revokeAllSessions } from '../services/tokenService.js';
 import { refreshCookieOptions } from '../utils/cookieOptions.js';

@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { saveUserOnboarding } from '../services/userService.js';
-import { sendSuccess } from '../utils/apiResponse.js';
+import { sendSuccess } from '../utils/ApiResponse.js';
 
 export const updateOnboarding = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     if(!req.user?.id){
