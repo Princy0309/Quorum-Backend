@@ -7,7 +7,6 @@ import {
   addGroupParticipants,
   removeGroupParticipant,
   updateGroupConversation,
-  transferGroupOwnership,
   getConversationById,
   makeGroupAdmin,
   dismissGroupAdmin
@@ -224,7 +223,7 @@ export const updateGroupConversationController = async (req: Request, res: Respo
   }
 };
 
-export const transferGroupOwnershipController = async (req: Request, res: Response, next: NextFunction) => {
+export const leaveGroupConversationController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.id;
     if (!userId) {
@@ -237,16 +236,11 @@ export const transferGroupOwnershipController = async (req: Request, res: Respon
       throw new ApiError(400, 'conversationId is required');
     }
 
-    const { newOwnerId } = req.body;
-    if (!newOwnerId || typeof newOwnerId !== 'string') {
-      throw new ApiError(400, 'newOwnerId is required');
-    }
-
-    const conversation = await transferGroupOwnership(userId, conversationId, newOwnerId.trim());
+    const result = await removeGroupParticipant(userId, conversationId, userId);
 
     res.status(200).json({
       success: true,
-      data: conversation
+      data: result
     });
   } catch (err) {
     next(err);

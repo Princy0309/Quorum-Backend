@@ -801,7 +801,6 @@ export const createGroupConversation = async (
         type: 'group',
         name: name.trim(),
         avatar: avatar || null,
-        ownerId: creatorId,
         participants: {
           create: uniqueUserIds.map((userId) => ({
             userId,
@@ -834,52 +833,24 @@ export const createGroupConversation = async (
   return conversation;
 };
 
-const ensureGroupOwner = async (tx: any, conversation: any) => {
-  if (conversation && conversation.type === 'group' && conversation.participants && conversation.participants.length > 0) {
-    let ownerId = conversation.ownerId;
-    const hasValidOwner = ownerId && conversation.participants.some((p: any) => p.userId === ownerId);
-    if (!hasValidOwner) {
-      const sorted = [...conversation.participants].sort(
-        (a: any, b: any) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
-      );
-      const existingAdmin = conversation.participants.find((p: any) => p.role === 'admin');
-      const newAdmin = existingAdmin || sorted[0];
-      if (newAdmin) {
-        ownerId = newAdmin.userId;
-        await tx.conversation.update({
-          where: { id: conversation.id },
-          data: { ownerId }
-        });
-        await tx.conversationParticipant.update({
-          where: { id: newAdmin.id },
-          data: { role: 'admin' }
-        });
-        conversation.ownerId = ownerId;
-        newAdmin.role = 'admin';
-      }
-    }
-  }
-  return conversation;
-};
-
 export const addGroupParticipants = async (
   userId: string,
   conversationId: string,
   participantIds: string[]
 ) => {
   const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
-    const rawConversation = await tx.conversation.findUnique({
+    await tx.$executeRaw`SELECT id FROM "Conversation" WHERE id = ${conversationId} FOR UPDATE`;
+
+    const conversation = await tx.conversation.findUnique({
       where: { id: conversationId },
       include: {
         participants: true
       }
     });
 
-    if (!rawConversation) {
+    if (!conversation) {
       throw new ApiError(404, 'Conversation not found');
     }
-
-    const conversation = await ensureGroupOwner(tx, rawConversation);
 
     if (conversation.type !== 'group') {
       throw new ApiError(400, 'Cannot add participants to a direct conversation');
@@ -890,9 +861,8 @@ export const addGroupParticipants = async (
       throw new ApiError(403, 'You are not a member of this conversation');
     }
 
-    const isUserAdmin = userParticipant.role === 'admin' || conversation.ownerId === userId;
-    if (!isUserAdmin) {
-      throw new ApiError(403, 'Only group admins can add new members');
+    if (userParticipant.role !== 'admin') {
+      throw new ApiError(403, 'Only group admins can add participants to this group');
     }
 
     const existingParticipantIds = new Set(conversation.participants.map((p: any) => p.userId));
@@ -959,18 +929,18 @@ export const removeGroupParticipant = async (
   targetUserId: string
 ) => {
   const result = await prisma.$transaction(async (tx) => {
-    const rawConversation = await tx.conversation.findUnique({
+    await tx.$executeRaw`SELECT id FROM "Conversation" WHERE id = ${conversationId} FOR UPDATE`;
+
+    const conversation = await tx.conversation.findUnique({
       where: { id: conversationId },
       include: {
         participants: true
       }
     });
 
-    if (!rawConversation) {
+    if (!conversation) {
       throw new ApiError(404, 'Conversation not found');
     }
-
-    const conversation = await ensureGroupOwner(tx, rawConversation);
 
     if (conversation.type !== 'group') {
       throw new ApiError(400, 'Cannot remove participants from a direct conversation');
@@ -987,26 +957,28 @@ export const removeGroupParticipant = async (
     }
 
     const isSelfRemoval = userId === targetUserId;
-    const isUserAdmin = userParticipant.role === 'admin' || conversation.ownerId === userId;
 
-    if (!isSelfRemoval && !isUserAdmin) {
-      throw new ApiError(403, 'Only group admins can remove other participants');
+    if (!isSelfRemoval) {
+      if (userParticipant.role !== 'admin') {
+        throw new ApiError(403, 'Only group admins can remove participants');
+      }
+
+      if (targetParticipant.role === 'admin') {
+        const remainingAdmins = conversation.participants.filter(
+          (p: any) => p.userId !== targetUserId && p.role === 'admin'
+        );
+        if (remainingAdmins.length === 0) {
+          throw new ApiError(400, 'Cannot remove the last admin of the group');
+        }
+      }
     }
 
-    if (!isSelfRemoval && conversation.ownerId === targetUserId && userId !== targetUserId) {
-      throw new ApiError(403, 'Cannot remove the group owner');
-    }
+    const remainingParticipants = conversation.participants.filter((p: any) => p.userId !== targetUserId);
 
-    const initialRemaining = conversation.participants.filter((p: any) => p.userId !== targetUserId);
-    const isTargetAdmin = targetParticipant.role === 'admin' || conversation.ownerId === targetUserId;
-
-    if (isTargetAdmin && initialRemaining.length > 0) {
-      const remainingAdmins = initialRemaining.filter(
-        (p: any) => p.role === 'admin' && p.userId !== targetUserId
-      );
-
+    if (isSelfRemoval && userParticipant.role === 'admin' && remainingParticipants.length > 0) {
+      const remainingAdmins = remainingParticipants.filter((p: any) => p.role === 'admin');
       if (remainingAdmins.length === 0) {
-        const sorted = [...initialRemaining].sort(
+        const sorted = [...remainingParticipants].sort(
           (a: any, b: any) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
         );
         const nextAdmin = sorted[0];
@@ -1015,17 +987,8 @@ export const removeGroupParticipant = async (
             where: { id: nextAdmin.id },
             data: { role: 'admin' }
           });
-          await tx.conversation.update({
-            where: { id: conversationId },
-            data: { ownerId: nextAdmin.userId }
-          });
           nextAdmin.role = 'admin';
         }
-      } else if (conversation.ownerId === targetUserId) {
-        await tx.conversation.update({
-          where: { id: conversationId },
-          data: { ownerId: remainingAdmins[0].userId }
-        });
       }
     }
 
@@ -1096,30 +1059,30 @@ export const updateGroupConversation = async (
   updates: { name?: string; avatar?: string | null }
 ) => {
   const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
-    const rawConversation = await tx.conversation.findUnique({
+    await tx.$executeRaw`SELECT id FROM "Conversation" WHERE id = ${conversationId} FOR UPDATE`;
+
+    const conversation = await tx.conversation.findUnique({
       where: { id: conversationId },
       include: {
         participants: true
       }
     });
 
-    if (!rawConversation) {
+    if (!conversation) {
       throw new ApiError(404, 'Conversation not found');
     }
-
-    const conversation = await ensureGroupOwner(tx, rawConversation);
 
     if (conversation.type !== 'group') {
       throw new ApiError(400, 'Cannot modify direct conversation details');
     }
 
-    const isUserMember = conversation.participants.some((p: any) => p.userId === userId);
-    if (!isUserMember) {
+    const userParticipant = conversation.participants.find((p: any) => p.userId === userId);
+    if (!userParticipant) {
       throw new ApiError(403, 'You are not a member of this conversation');
     }
 
-    if (!conversation.ownerId || conversation.ownerId !== userId) {
-      throw new ApiError(403, 'Only the group owner can update group details');
+    if (userParticipant.role !== 'admin') {
+      throw new ApiError(403, 'Only group admins can update group details');
     }
 
     const dataToUpdate: any = {};
@@ -1162,99 +1125,24 @@ export const updateGroupConversation = async (
   return updated;
 };
 
-export const transferGroupOwnership = async (
-  userId: string,
-  conversationId: string,
-  newOwnerId: string
-) => {
-  const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
-    const rawConversation = await tx.conversation.findUnique({
-      where: { id: conversationId },
-      include: {
-        participants: true
-      }
-    });
-
-    if (!rawConversation) {
-      throw new ApiError(404, 'Conversation not found');
-    }
-
-    const conversation = await ensureGroupOwner(tx, rawConversation);
-
-    if (conversation.type !== 'group') {
-      throw new ApiError(400, 'Cannot transfer ownership of a direct conversation');
-    }
-
-    const isUserMember = conversation.participants.some((p: any) => p.userId === userId);
-    if (!isUserMember) {
-      throw new ApiError(403, 'You are not a member of this conversation');
-    }
-
-    if (!conversation.ownerId || conversation.ownerId !== userId) {
-      throw new ApiError(403, 'Only the group owner can transfer ownership');
-    }
-
-    const isNewOwnerMember = conversation.participants.some((p: any) => p.userId === newOwnerId);
-    if (!isNewOwnerMember) {
-      throw new ApiError(400, 'Target user is not a participant in this group');
-    }
-
-    if (newOwnerId === userId) {
-      throw new ApiError(400, 'User is already the group owner');
-    }
-
-    const updatedConv = await tx.conversation.update({
-      where: { id: conversationId },
-      data: {
-        ownerId: newOwnerId,
-        updatedAt: new Date()
-      },
-      include: {
-        participants: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                avatar: true
-              }
-            }
-          }
-        },
-        messages: {
-          take: 1,
-          orderBy: [{ seq: 'desc' }, { id: 'desc' }]
-        }
-      }
-    });
-
-    const allParticipantIds = updatedConv.participants.map((p) => p.userId);
-    return { updated: updatedConv, allParticipantIds };
-  });
-
-  notifyConversationUpdate(allParticipantIds, updated);
-
-  return updated;
-};
-
 export const makeGroupAdmin = async (
   userId: string,
   conversationId: string,
   targetUserId: string
 ) => {
   const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
-    const rawConversation = await tx.conversation.findUnique({
+    await tx.$executeRaw`SELECT id FROM "Conversation" WHERE id = ${conversationId} FOR UPDATE`;
+
+    const conversation = await tx.conversation.findUnique({
       where: { id: conversationId },
       include: {
         participants: true
       }
     });
 
-    if (!rawConversation) {
+    if (!conversation) {
       throw new ApiError(404, 'Conversation not found');
     }
-
-    const conversation = await ensureGroupOwner(tx, rawConversation);
 
     if (conversation.type !== 'group') {
       throw new ApiError(400, 'Cannot manage admins in a direct conversation');
@@ -1265,8 +1153,7 @@ export const makeGroupAdmin = async (
       throw new ApiError(403, 'You are not a member of this conversation');
     }
 
-    const isRequesterAdmin = requester.role === 'admin' || conversation.ownerId === userId;
-    if (!isRequesterAdmin) {
+    if (requester.role !== 'admin') {
       throw new ApiError(403, 'Only group admins can promote members to admin');
     }
 
@@ -1318,18 +1205,18 @@ export const dismissGroupAdmin = async (
   targetUserId: string
 ) => {
   const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
-    const rawConversation = await tx.conversation.findUnique({
+    await tx.$executeRaw`SELECT id FROM "Conversation" WHERE id = ${conversationId} FOR UPDATE`;
+
+    const conversation = await tx.conversation.findUnique({
       where: { id: conversationId },
       include: {
         participants: true
       }
     });
 
-    if (!rawConversation) {
+    if (!conversation) {
       throw new ApiError(404, 'Conversation not found');
     }
-
-    const conversation = await ensureGroupOwner(tx, rawConversation);
 
     if (conversation.type !== 'group') {
       throw new ApiError(400, 'Cannot manage admins in a direct conversation');
@@ -1340,9 +1227,12 @@ export const dismissGroupAdmin = async (
       throw new ApiError(403, 'You are not a member of this conversation');
     }
 
-    const isRequesterAdmin = requester.role === 'admin' || conversation.ownerId === userId;
-    if (!isRequesterAdmin) {
+    if (requester.role !== 'admin') {
       throw new ApiError(403, 'Only group admins can remove admin privileges');
+    }
+
+    if (targetUserId === userId) {
+      throw new ApiError(400, 'Admins cannot demote themselves directly. Use Leave Group to leave.');
     }
 
     const target = conversation.participants.find((p: any) => p.userId === targetUserId);
@@ -1350,15 +1240,15 @@ export const dismissGroupAdmin = async (
       throw new ApiError(404, 'Target user is not a participant in this group');
     }
 
-    if (conversation.ownerId === targetUserId && userId !== targetUserId) {
-      throw new ApiError(403, 'Group owner admin privileges cannot be revoked');
+    if (target.role !== 'admin') {
+      throw new ApiError(400, 'User is not an admin');
     }
 
-    const otherAdmins = conversation.participants.filter(
-      (p: any) => p.userId !== targetUserId && (p.role === 'admin' || p.userId === conversation.ownerId)
+    const remainingAdmins = conversation.participants.filter(
+      (p: any) => p.userId !== targetUserId && p.role === 'admin'
     );
-    if (otherAdmins.length === 0) {
-      throw new ApiError(400, 'Cannot dismiss the last admin in the group');
+    if (remainingAdmins.length === 0) {
+      throw new ApiError(400, 'Cannot demote the last admin of the group');
     }
 
     await tx.conversationParticipant.update({

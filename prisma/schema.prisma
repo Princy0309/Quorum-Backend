@@ -42,7 +42,6 @@ model User {
   messagesSent             Message[]
   deviceTokens             DeviceToken[]
   hostedMeetings           Meeting[]
-  ownedConversations       Conversation[]            @relation("GroupOwner")
   ownedCommunities         Community[]               @relation("CommunityOwner")
   communityMemberships     CommunityMember[]
   sentCommunityInvites     CommunityInvite[]
@@ -85,11 +84,9 @@ model Conversation {
   directKey    String?                   @unique
   name         String?
   avatar       String?
-  ownerId      String?
   lastSeq      Int                       @default(0)
   createdAt    DateTime                  @default(now())
   updatedAt    DateTime                  @updatedAt
-  owner        User?                     @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   participants ConversationParticipant[]
   messages     Message[]
 }
