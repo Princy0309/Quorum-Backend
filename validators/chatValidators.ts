@@ -12,6 +12,19 @@ const isTrustedMediaUrl = (value: string, helpers: Joi.CustomHelpers) => {
     'storage.googleapis.com'
   ];
 
+  if (process.env.AWS_S3_CUSTOM_DOMAIN) {
+    try {
+      const parsedCustom = new URL(
+        process.env.AWS_S3_CUSTOM_DOMAIN.startsWith('http')
+          ? process.env.AWS_S3_CUSTOM_DOMAIN
+          : `https://${process.env.AWS_S3_CUSTOM_DOMAIN}`
+      );
+      allowedHosts.push(parsedCustom.hostname.toLowerCase());
+    } catch (e) {
+      allowedHosts.push(process.env.AWS_S3_CUSTOM_DOMAIN.toLowerCase());
+    }
+  }
+
   try {
     const parsed = new URL(value);
     const host = parsed.hostname.toLowerCase();
@@ -40,12 +53,29 @@ export const sendMessageSchema = Joi.object({
     })
     .allow('', null)
     .optional(),
-  url: Joi.string().uri({ scheme: ['http', 'https'] }).max(2048).allow('', null).optional(),
+  url: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .max(2048)
+    .custom(isTrustedMediaUrl)
+    .messages({
+      'any.invalid': 'url must originate from an authorized media storage provider (Cloudinary/S3)'
+    })
+    .allow('', null)
+    .optional(),
   fileType: Joi.string().allow(null, '').optional(),
   type: Joi.string().allow(null, '').optional(),
   fileName: Joi.string().trim().max(255).allow(null, '').optional(),
   fileSize: Joi.number().integer().min(0).max(26214400).allow(null).optional()
-}).unknown(true);
+})
+  .custom((value, helpers) => {
+    const hasText = Boolean((value.content && value.content.trim()) || (value.caption && value.caption.trim()));
+    const hasMedia = Boolean((value.fileUrl && value.fileUrl.trim()) || (value.url && value.url.trim()));
+    if (!hasText && !hasMedia) {
+      return helpers.message({ custom: 'Message must contain either non-empty text content or an attachment URL' });
+    }
+    return value;
+  })
+  .unknown(true);
 
 export const readMessageSchema = Joi.object({
   conversationId: Joi.string().trim().max(100).required(),

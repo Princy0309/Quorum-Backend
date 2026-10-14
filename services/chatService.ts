@@ -268,6 +268,12 @@ export const saveMessage = async (
   fileName?: string,
   fileSize?: number
 ) => {
+  const hasText = Boolean(content && content.trim().length > 0);
+  const hasMedia = Boolean(fileUrl && fileUrl.trim().length > 0);
+  if (!hasText && !hasMedia) {
+    throw new ApiError(400, 'Message cannot be empty. Must include text content or an attachment URL.');
+  }
+
   const derivedType = fileType || deriveFileTypeFromUrl(fileUrl);
   return await prisma.$transaction(async (tx) => {
     let resolvedConversationId = conversationId;

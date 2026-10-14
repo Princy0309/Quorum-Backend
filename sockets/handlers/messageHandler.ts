@@ -164,13 +164,13 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           return;
         }
 
-        io.to(`conversation:${message.conversationId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
+        const conversationRooms = [`conversation:${message.conversationId}`];
         if (conversationId !== message.conversationId) {
-          io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
+          conversationRooms.push(`conversation:${conversationId}`);
         }
+        io.to(conversationRooms).emit(CHAT_EVENTS.MESSAGE_NEW, message);
 
         participants.forEach((p) => {
-          io.to(`user:${p.userId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
           io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
             conversationId: message.conversationId,
             lastMessage: message
@@ -238,22 +238,17 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         const result = await markMessageAsRead(userId, conversationId, messageId);
 
         if (result.updated) {
-          io.to(`conversation:${result.conversationId}`).emit(CHAT_EVENTS.MESSAGE_READ, {
+          const readRooms = [`conversation:${result.conversationId}`];
+          if (conversationId !== result.conversationId) {
+            readRooms.push(`conversation:${conversationId}`);
+          }
+          io.to(readRooms).emit(CHAT_EVENTS.MESSAGE_READ, {
             conversationId: result.conversationId,
             userId: result.userId,
             lastReadSeq: result.lastReadSeq,
             lastReadMessageId: result.lastReadMessageId,
             messageId: result.lastReadMessageId
           });
-          if (conversationId !== result.conversationId) {
-            io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_READ, {
-              conversationId,
-              userId: result.userId,
-              lastReadSeq: result.lastReadSeq,
-              lastReadMessageId: result.lastReadMessageId,
-              messageId: result.lastReadMessageId
-            });
-          }
         }
 
         if (callback) {
