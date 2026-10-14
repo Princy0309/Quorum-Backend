@@ -14,7 +14,18 @@ import {
   acceptInviteController,
   getOrganizationInvitesController,
   revokeInviteController,
+  
 } from '../controllers/organizationController.js';
+import {
+  createTeamController,
+  getOrganizationTeamsController,
+  getTeamController,
+  updateTeamController,
+  deleteTeamController,
+  addTeamMemberController,
+  removeTeamMemberController,
+} from '../controllers/teamController.js';
+
 import { authMiddleware } from '../middlewares/authMiddleware.js';
 import { requireOrgMember } from '../middlewares/orgAuthMiddleware.js';
 
@@ -72,6 +83,56 @@ router.delete(
   authMiddleware,
   requireOrgMember([OrgRole.ORG_ADMIN]),
   revokeInviteController
+);
+
+
+router.post(
+  '/:id/teams',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  createTeamController
+);
+
+router.get(
+  '/:id/teams',
+  authMiddleware,
+  requireOrgMember(),
+  getOrganizationTeamsController
+);
+
+router.get(
+  '/:id/teams/:teamId',
+  authMiddleware,
+  requireOrgMember(),
+  getTeamController
+);
+
+router.patch(
+  '/:id/teams/:teamId',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  updateTeamController
+);
+
+router.delete(
+  '/:id/teams/:teamId',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  deleteTeamController
+);
+
+router.post(
+  '/:id/teams/:teamId/members',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  addTeamMemberController
+);
+
+router.delete(
+  '/:id/teams/:teamId/members/:userId',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  removeTeamMemberController
 );
 
 
