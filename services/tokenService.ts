@@ -6,6 +6,7 @@ import { hashToken } from '../utils/hashToken.js';
 import { ApiError } from '../utils/ApiError.js';
 import { encryptPayload, decryptPayload } from '../utils/encryption.js';
 
+
 import env from '../config/env.js';
 
 const JWT_ISSUER = env.JWT_ISSUER;
@@ -14,26 +15,9 @@ const REFRESH_TTL_SECONDS = env.REFRESH_TOKEN_TTL_SECONDS;
 const JWT_SECRET = env.JWT_SECRET;
 const JWT_REFRESH_SECRET = env.JWT_REFRESH_SECRET;
 
-export interface AccessTokenPayload {
-  id: string;
-  type: 'access';
-  sid: string;
-  jti: string;
-  iat?: number;
-  exp?: number;
-  iss?: string;
-  aud?: string;
-}
+import { AccessTokenPayload, RefreshTokenPayload } from '../types/auth.js';
+export { AccessTokenPayload, RefreshTokenPayload };
 
-export interface RefreshTokenPayload {
-  id: string;
-  type: 'refresh';
-  jti: string;
-  iat?: number;
-  exp?: number;
-  iss?: string;
-  aud?: string;
-}
 
 export const generateAccessToken = (userId: string, sid: string): string => {
   return jwt.sign({ id: userId, type: 'access', sid, jti: crypto.randomUUID() }, JWT_SECRET, {

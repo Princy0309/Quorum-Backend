@@ -2,6 +2,8 @@ import prisma from "../config/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
 import { OrgRole } from '@prisma/client';
 import crypto from 'crypto';
+import { CreateOrgInput, UpdateOrgInput, CreateInviteInput } from '../types/organization.js';
+
 
 function slugify(text: string): string{
     return text
@@ -10,11 +12,6 @@ function slugify(text: string): string{
     .replace(/[^\w\s-]/g, '')
     .replace(/[\s_-]+/g, '-')
     .replace(/^-+|-+$/g, '');
-}
-interface CreateOrgInput {
-  name: string;
-  description?: string;
-  logo?: string;
 }
 
 export const createOrganization = async (userId: string, data: CreateOrgInput) => {
@@ -114,12 +111,6 @@ export const getOrganizationById = async (orgId: string) => {
     memberCount: org._count.members,
   };
 };
-
-interface UpdateOrgInput {
-  name?: string;
-  description?: string;
-  logo?: string;
-}
 
 export const updateOrganization = async (orgId: string, data: UpdateOrgInput) => {
   const existingOrg = await prisma.organization.findUnique({ where: { id: orgId } });
@@ -336,15 +327,6 @@ export const leaveOrganization = async (orgId: string, userId: string) => {
   return { message: 'Left organization successfully' };
 };
 
-
-//invitations and join system
-
-interface CreateInviteInput {
-  email?: string;
-  role?: OrgRole;
-  maxUses?: number;
-  expiresInDays?: number;
-}
 
 export const createOrganizationInvite = async (
   orgId: string,

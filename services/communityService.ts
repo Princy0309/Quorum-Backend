@@ -1,23 +1,8 @@
 import crypto from 'crypto';
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
-
-export const CommunityRole = {
-  OWNER: 'OWNER',
-  ADMIN: 'ADMIN',
-  MEMBER: 'MEMBER'
-} as const;
-export type CommunityRole = (typeof CommunityRole)[keyof typeof CommunityRole];
-
-export interface CreateCommunityInput {
-  name: string;
-  description?: string;
-}
-
-export interface UpdateCommunityInput {
-  name?: string;
-  description?: string;
-}
+import { CommunityRole, CreateCommunityInput, UpdateCommunityInput } from '../types/community.js';
+export { CommunityRole, CreateCommunityInput, UpdateCommunityInput };
 
 export const createCommunity = async (userId: string, data: CreateCommunityInput) => {
   return await prisma.$transaction(async (tx) => {
