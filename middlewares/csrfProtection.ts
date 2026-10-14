@@ -26,6 +26,18 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
     return next();
   }
 
+  const isAuthEndpoint = 
+    req.path.includes('/login') ||
+    req.path.includes('/register') ||
+    req.path.includes('/refresh') ||
+    req.path.includes('/forgot-password') ||
+    req.path.includes('/reset-password') ||
+    req.path.includes('/otp');
+
+  if (isAuthEndpoint) {
+    return next();
+  }
+
   let csrfToken = req.cookies['XSRF-TOKEN'];
   if (!csrfToken) {
     csrfToken = crypto.randomBytes(32).toString('hex');

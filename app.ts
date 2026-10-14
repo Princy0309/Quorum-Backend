@@ -113,6 +113,7 @@ app.use('/api/v1/community-comments', commentRoutes);
 app.use('/api/feed', postRoutes);
 app.use('/feed', postRoutes);
 app.get('/api/csrf-token', (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.json({ csrfToken: res.locals.csrfToken || req.cookies['XSRF-TOKEN'] });
 });
 setupSwagger(app);
