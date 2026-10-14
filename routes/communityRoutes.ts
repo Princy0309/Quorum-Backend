@@ -29,7 +29,8 @@ import {
 } from '../controllers/communityController.js';
 import {
   createPostController,
-  getCommunityPostsController
+  getCommunityPostsController,
+  getCommunityFeedController
 } from '../controllers/postController.js';
 
 const router = Router();
@@ -37,6 +38,7 @@ const router = Router();
 router.post('/', authMiddleware, validateJoi(createCommunitySchema), createCommunityController);
 router.get('/', authMiddleware, getUserCommunitiesController);
 router.get('/search', authMiddleware, searchCommunitiesController);
+router.get('/feed', authMiddleware, getCommunityFeedController);
 
 router.get('/invites/:token', validateInviteTokenController);
 router.post('/invites/:token/join', authMiddleware, joinCommunityViaInviteController);
@@ -53,6 +55,7 @@ router.delete('/:id/members/:userId', authMiddleware, removeCommunityMemberContr
 
 router.post('/:id/posts', authMiddleware, validateJoi(createPostSchema), createPostController);
 router.get('/:id/posts', authMiddleware, getCommunityPostsController);
+router.get('/:id/feed', authMiddleware, getCommunityPostsController);
 
 router.get('/:id', authMiddleware, getCommunityDetailsController);
 router.patch('/:id', authMiddleware, validateJoi(updateCommunitySchema), updateCommunityController);

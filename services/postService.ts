@@ -130,6 +130,75 @@ export const getCommunityPosts = async (
   };
 };
 
+export const getCommunityFeed = async (
+  userId: string,
+  cursor?: string,
+  limit: number = 20,
+  scope?: string
+) => {
+  const userMemberships = await prisma.communityMember.findMany({
+    where: { userId },
+    select: { communityId: true }
+  });
+
+  const joinedCommunityIds = userMemberships.map((m) => m.communityId);
+  const take = Math.min(Math.max(limit, 1), 50);
+
+  let whereClause: any = {};
+  if (scope !== 'all' && joinedCommunityIds.length > 0) {
+    whereClause = { communityId: { in: joinedCommunityIds } };
+  }
+
+  if (cursor) {
+    const cursorPost = await prisma.communityPost.findUnique({
+      where: { id: cursor }
+    });
+
+    if (!cursorPost) {
+      throw new ApiError(400, 'Invalid pagination cursor');
+    }
+  }
+
+  const posts = await prisma.communityPost.findMany({
+    where: whereClause,
+    take: take + 1,
+    skip: cursor ? 1 : 0,
+    cursor: cursor ? { id: cursor } : undefined,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    include: {
+      community: {
+        select: {
+          id: true,
+          name: true,
+          description: true
+        }
+      },
+      author: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      },
+      _count: {
+        select: {
+          comments: true
+        }
+      }
+    }
+  });
+
+  const hasNextPage = posts.length > take;
+  const pagedPosts = hasNextPage ? posts.slice(0, take) : posts;
+  const nextCursor = hasNextPage && pagedPosts.length > 0 ? pagedPosts[pagedPosts.length - 1].id : null;
+
+  return {
+    posts: pagedPosts,
+    nextCursor,
+    hasNextPage
+  };
+};
+
 export const updateCommunityPost = async (
   userId: string,
   postId: string,

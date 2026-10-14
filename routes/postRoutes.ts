@@ -7,7 +7,8 @@ import {
 } from '../validators/postValidators.js';
 import {
   updatePostController,
-  deletePostController
+  deletePostController,
+  getCommunityFeedController
 } from '../controllers/postController.js';
 import {
   createCommentController,
@@ -15,6 +16,9 @@ import {
 } from '../controllers/commentController.js';
 
 const router = Router();
+
+router.get('/feed', authMiddleware, getCommunityFeedController);
+router.get('/', authMiddleware, getCommunityFeedController);
 
 router.post('/:postId/comments', authMiddleware, validateJoi(createCommentSchema), createCommentController);
 router.get('/:postId/comments', authMiddleware, getPostCommentsController);
