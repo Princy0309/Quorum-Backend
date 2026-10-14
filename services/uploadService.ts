@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import path from 'path';
-import { generateS3PresignedUpload, bucketName } from '../config/s3.js';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { generateS3PresignedUpload, getS3Client, getBucketName } from '../config/s3.js';
 import { ApiError } from '../utils/ApiError.js';
 import { resolveConversationId } from './chatService.js';
 
@@ -114,3 +115,54 @@ export const authorizeChatFileUpload = async (
     }
   };
 };
+
+export const uploadBufferToS3 = async (
+  buffer: Buffer,
+  originalName: string,
+  folder: string = 'chat',
+  mimeTypeOverride?: string
+) => {
+  const cleanName = path.basename(originalName.trim());
+  const ext = path.extname(cleanName).toLowerCase() || '.jpg';
+
+  if (BLOCKED_EXTENSIONS.has(ext)) {
+    throw new ApiError(400, 'File type is not permitted');
+  }
+
+  const mimeType = mimeTypeOverride || MIME_TYPES[ext] || 'application/octet-stream';
+  const category = resolveFileCategory(ext);
+  const maxAllowedSize = CATEGORY_LIMITS[category] || CATEGORY_LIMITS.file;
+
+  if (buffer.length > maxAllowedSize) {
+    throw new ApiError(400, `File size exceeds allowed limit (${Math.floor(maxAllowedSize / (1024 * 1024))}MB)`);
+  }
+
+  const s3Key = `uploads/${folder}/${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${cleanName}`;
+  const currentBucket = getBucketName();
+  const region = process.env.AWS_REGION || 'ap-south-1';
+  const customDomain = process.env.AWS_S3_CUSTOM_DOMAIN || '';
+  const client = getS3Client();
+
+  await client.send(new PutObjectCommand({
+    Bucket: currentBucket,
+    Key: s3Key,
+    Body: buffer,
+    ContentType: mimeType
+  }));
+
+  const publicUrl = customDomain
+    ? `https://${customDomain.replace(/^https?:\/\//, '')}/${s3Key}`
+    : `https://${currentBucket}.s3.${region}.amazonaws.com/${s3Key}`;
+
+  return {
+    publicUrl,
+    s3Key,
+    cleanName,
+    category,
+    ext,
+    mimeType,
+    bucket: currentBucket,
+    fileSize: buffer.length
+  };
+};
+
