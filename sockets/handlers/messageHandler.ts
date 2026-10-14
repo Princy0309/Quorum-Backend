@@ -1,6 +1,6 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket } from '../socketAuth.js';
-import { saveMessage, markMessageAsRead, isParticipant } from '../../services/chatService.js';
+import { saveMessage, markMessageAsRead, isParticipant, resolveConversationId } from '../../services/chatService.js';
 import { sendPushToOfflineUsers } from '../../services/notificationService.js';
 import { checkSocketMessageRateLimit } from '../../middlewares/rateLimiter.js';
 import { sendMessageSchema, readMessageSchema } from '../../validators/chatValidators.js';
@@ -55,14 +55,17 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           return;
         }
 
-        const valid = await isParticipant(userId, payload.conversationId);
-        if (!valid) {
+        const resolvedId = await resolveConversationId(userId, payload.conversationId);
+        if (!resolvedId) {
           if (callback) callback(formatErrorResponse('NOT_PARTICIPANT', 'User is not a participant in this conversation'));
           return;
         }
 
         socket.join(`conversation:${payload.conversationId}`);
-        if (callback) callback({ success: true });
+        if (resolvedId !== payload.conversationId) {
+          socket.join(`conversation:${resolvedId}`);
+        }
+        if (callback) callback({ success: true, data: { conversationId: resolvedId } });
       } catch (err: any) {
         logger.error('Error joining conversation room', { error: err.message });
         if (callback) {
@@ -79,13 +82,20 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
 
   socket.on(
     CHAT_EVENTS.CONVERSATION_LEAVE,
-    (
+    async (
       payload: { conversationId: string },
       callback?: (response: SocketCallbackResponse) => void
     ) => {
       try {
         if (payload?.conversationId) {
           socket.leave(`conversation:${payload.conversationId}`);
+          const userId = socket.data.user?.id;
+          if (userId) {
+            const resolvedId = await resolveConversationId(userId, payload.conversationId);
+            if (resolvedId && resolvedId !== payload.conversationId) {
+              socket.leave(`conversation:${resolvedId}`);
+            }
+          }
         }
         if (callback) callback({ success: true });
       } catch (err: any) {
@@ -138,14 +148,23 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           return;
         }
 
-        io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
+        io.to(`conversation:${message.conversationId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
+        if (conversationId !== message.conversationId) {
+          io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
+        }
 
         participants.forEach((p) => {
           io.to(`user:${p.userId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
           io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
-            conversationId,
+            conversationId: message.conversationId,
             lastMessage: message
           });
+          if (conversationId !== message.conversationId) {
+            io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+              conversationId,
+              lastMessage: message
+            });
+          }
         });
 
         const recipientUserIds = participants.map((p) => p.userId).filter((id) => id !== senderId);
@@ -153,7 +172,7 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           recipientUserIds,
           `New message from ${message.sender.name}`,
           content || 'Sent an attachment',
-          { conversationId, messageId: message.id }
+          { conversationId: message.conversationId, messageId: message.id }
         ).catch((err) => {
           logger.error('Background FCM notification dispatch error', { error: err.message });
         });
@@ -162,7 +181,11 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           callback({ success: true, data: message });
         }
       } catch (err: any) {
-        logger.error('Error sending message via socket', { error: err.message });
+        logger.error('Error sending message via socket', {
+          error: err.message,
+          senderId: socket.data.user?.id,
+          conversationId: payload?.conversationId
+        });
         if (callback) {
           if (err instanceof ApiError) {
             const code = err.statusCode === 403 ? 'NOT_PARTICIPANT' : 'INVALID_PAYLOAD';
@@ -199,13 +222,22 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         const result = await markMessageAsRead(userId, conversationId, messageId);
 
         if (result.updated) {
-          io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_READ, {
+          io.to(`conversation:${result.conversationId}`).emit(CHAT_EVENTS.MESSAGE_READ, {
             conversationId: result.conversationId,
             userId: result.userId,
             lastReadSeq: result.lastReadSeq,
             lastReadMessageId: result.lastReadMessageId,
             messageId: result.lastReadMessageId
           });
+          if (conversationId !== result.conversationId) {
+            io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_READ, {
+              conversationId,
+              userId: result.userId,
+              lastReadSeq: result.lastReadSeq,
+              lastReadMessageId: result.lastReadMessageId,
+              messageId: result.lastReadMessageId
+            });
+          }
         }
 
         if (callback) {

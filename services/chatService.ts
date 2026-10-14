@@ -146,6 +146,70 @@ export const isParticipant = async (userId: string, conversationId: string): Pro
   return !!participant;
 };
 
+export const resolveConversationId = async (
+  userId: string,
+  conversationIdOrUserId: string
+): Promise<string | null> => {
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: {
+      conversationId_userId: {
+        conversationId: conversationIdOrUserId,
+        userId
+      }
+    }
+  });
+
+  if (participant) {
+    return conversationIdOrUserId;
+  }
+
+  const targetUser = await prisma.user.findUnique({
+    where: { id: conversationIdOrUserId }
+  });
+
+  if (targetUser && targetUser.id !== userId) {
+    const directConv = await getOrCreateDirectConversation(userId, targetUser.id);
+    return directConv ? directConv.id : null;
+  }
+
+  return null;
+};
+
+export const getConversationById = async (userId: string, conversationIdOrUserId: string) => {
+  const resolvedId = await resolveConversationId(userId, conversationIdOrUserId);
+  if (!resolvedId) {
+    throw new ApiError(404, 'Conversation not found');
+  }
+
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: resolvedId },
+    include: {
+      participants: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              avatar: true
+            }
+          }
+        }
+      },
+      messages: {
+        take: 1,
+        orderBy: [{ seq: 'desc' }, { id: 'desc' }]
+      }
+    }
+  });
+
+  if (!conversation) {
+    throw new ApiError(404, 'Conversation not found');
+  }
+
+  return conversation;
+};
+
 export const getCoParticipantUserIds = async (userId: string): Promise<string[]> => {
   const results: { userId: string }[] = await prisma.$queryRaw`
     SELECT DISTINCT cp2."userId"
@@ -204,14 +268,67 @@ export const saveMessage = async (
 ) => {
   const derivedType = deriveFileTypeFromUrl(fileUrl);
   return await prisma.$transaction(async (tx) => {
-    const participant = await tx.conversationParticipant.findUnique({
+    let resolvedConversationId = conversationId;
+    let participant = await tx.conversationParticipant.findUnique({
       where: {
         conversationId_userId: {
-          conversationId,
+          conversationId: resolvedConversationId,
           userId: senderId
         }
       }
     });
+
+    if (!participant) {
+      const targetUser = await tx.user.findUnique({
+        where: { id: conversationId }
+      });
+
+      if (targetUser && targetUser.id !== senderId) {
+        const sortedIds = [senderId, targetUser.id].sort();
+        const directKey = `${sortedIds[0]}_${sortedIds[1]}`;
+
+        let directConv = await tx.conversation.findUnique({
+          where: { directKey }
+        });
+
+        if (!directConv) {
+          try {
+            directConv = await tx.conversation.create({
+              data: {
+                type: 'direct',
+                directKey,
+                participants: {
+                  create: [
+                    { userId: senderId },
+                    { userId: targetUser.id }
+                  ]
+                }
+              }
+            });
+          } catch (createErr: any) {
+            if (createErr?.code === 'P2002') {
+              directConv = await tx.conversation.findUnique({
+                where: { directKey }
+              });
+            } else {
+              throw createErr;
+            }
+          }
+        }
+
+        if (directConv) {
+          resolvedConversationId = directConv.id;
+          participant = await tx.conversationParticipant.findUnique({
+            where: {
+              conversationId_userId: {
+                conversationId: resolvedConversationId,
+                userId: senderId
+              }
+            }
+          });
+        }
+      }
+    }
 
     if (!participant) {
       throw new ApiError(403, 'User is not a participant in this conversation');
@@ -221,7 +338,7 @@ export const saveMessage = async (
       const existingMessage = await tx.message.findUnique({
         where: {
           conversationId_senderId_clientMessageId: {
-            conversationId,
+            conversationId: resolvedConversationId,
             senderId,
             clientMessageId
           }
@@ -239,15 +356,15 @@ export const saveMessage = async (
 
       if (existingMessage) {
         const participants = await tx.conversationParticipant.findMany({
-          where: { conversationId },
+          where: { conversationId: resolvedConversationId },
           select: { userId: true }
         });
-        return { message: existingMessage, participants, isDuplicate: true };
+        return { message: existingMessage, participants, isDuplicate: true, conversationId: resolvedConversationId };
       }
     }
 
     const updatedConversation = await tx.conversation.update({
-      where: { id: conversationId },
+      where: { id: resolvedConversationId },
       data: {
         updatedAt: new Date(),
         lastSeq: { increment: 1 }
@@ -258,7 +375,7 @@ export const saveMessage = async (
     try {
       message = await tx.message.create({
         data: {
-          conversationId,
+          conversationId: resolvedConversationId,
           senderId,
           content,
           fileUrl,
@@ -281,7 +398,7 @@ export const saveMessage = async (
         const existingMessage = await tx.message.findUnique({
           where: {
             conversationId_senderId_clientMessageId: {
-              conversationId,
+              conversationId: resolvedConversationId,
               senderId,
               clientMessageId
             }
@@ -299,21 +416,21 @@ export const saveMessage = async (
 
         if (existingMessage) {
           const participants = await tx.conversationParticipant.findMany({
-            where: { conversationId },
+            where: { conversationId: resolvedConversationId },
             select: { userId: true }
           });
-          return { message: existingMessage, participants, isDuplicate: true };
+          return { message: existingMessage, participants, isDuplicate: true, conversationId: resolvedConversationId };
         }
       }
       throw err;
     }
 
     const participants = await tx.conversationParticipant.findMany({
-      where: { conversationId },
+      where: { conversationId: resolvedConversationId },
       select: { userId: true }
     });
 
-    return { message, participants, isDuplicate: false };
+    return { message, participants, isDuplicate: false, conversationId: resolvedConversationId };
   });
 };
 
@@ -323,9 +440,14 @@ export const getConversationMessages = async (
   cursor?: string,
   limit: number = 20
 ) => {
-  const participantExists = await isParticipant(userId, conversationId);
+  let targetConversationId = conversationId;
+  const participantExists = await isParticipant(userId, targetConversationId);
   if (!participantExists) {
-    throw new ApiError(403, 'User is not a participant in this conversation');
+    const resolvedId = await resolveConversationId(userId, conversationId);
+    if (!resolvedId) {
+      throw new ApiError(403, 'User is not a participant in this conversation');
+    }
+    targetConversationId = resolvedId;
   }
 
   const queryLimit = Math.min(Math.max(limit, 1), 50);
@@ -333,7 +455,7 @@ export const getConversationMessages = async (
   let cursorSeq: number | null = null;
   if (cursor) {
     const cursorMsg = await prisma.message.findFirst({
-      where: { id: cursor, conversationId },
+      where: { id: cursor, conversationId: targetConversationId },
       select: { seq: true }
     });
     if (!cursorMsg) {
@@ -344,7 +466,7 @@ export const getConversationMessages = async (
 
   const messages = await prisma.message.findMany({
     where: {
-      conversationId,
+      conversationId: targetConversationId,
       ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
     },
     take: queryLimit + 1,
@@ -485,14 +607,39 @@ export const markMessageAsRead = async (
   messageId: string
 ) => {
   return await prisma.$transaction(async (tx) => {
-    const participant = await tx.conversationParticipant.findUnique({
+    let targetConversationId = conversationId;
+    let participant = await tx.conversationParticipant.findUnique({
       where: {
         conversationId_userId: {
-          conversationId,
+          conversationId: targetConversationId,
           userId
         }
       }
     });
+
+    if (!participant) {
+      const targetUser = await tx.user.findUnique({
+        where: { id: conversationId }
+      });
+      if (targetUser && targetUser.id !== userId) {
+        const sortedIds = [userId, targetUser.id].sort();
+        const directKey = `${sortedIds[0]}_${sortedIds[1]}`;
+        const directConv = await tx.conversation.findUnique({
+          where: { directKey }
+        });
+        if (directConv) {
+          targetConversationId = directConv.id;
+          participant = await tx.conversationParticipant.findUnique({
+            where: {
+              conversationId_userId: {
+                conversationId: targetConversationId,
+                userId
+              }
+            }
+          });
+        }
+      }
+    }
 
     if (!participant) {
       throw new ApiError(403, 'User is not a participant in this conversation');
@@ -501,7 +648,7 @@ export const markMessageAsRead = async (
     const targetMessage = await tx.message.findFirst({
       where: {
         id: messageId,
-        conversationId
+        conversationId: targetConversationId
       }
     });
 
@@ -511,7 +658,7 @@ export const markMessageAsRead = async (
 
     const updateResult = await tx.conversationParticipant.updateMany({
       where: {
-        conversationId,
+        conversationId: targetConversationId,
         userId,
         lastReadSeq: { lt: targetMessage.seq }
       },
@@ -528,19 +675,19 @@ export const markMessageAsRead = async (
       : (await tx.conversationParticipant.findUnique({
           where: {
             conversationId_userId: {
-              conversationId,
+              conversationId: targetConversationId,
               userId
             }
           }
         })) || participant;
 
     const participants = await tx.conversationParticipant.findMany({
-      where: { conversationId },
+      where: { conversationId: targetConversationId },
       select: { userId: true }
     });
 
     return {
-      conversationId,
+      conversationId: targetConversationId,
       userId,
       lastReadSeq: currentParticipant.lastReadSeq,
       lastReadMessageId: currentParticipant.lastReadMessageId || messageId,
@@ -558,9 +705,14 @@ export const searchConversationMessages = async (
   cursor?: string,
   limit: number = 20
 ) => {
-  const participantExists = await isParticipant(userId, conversationId);
+  let targetConversationId = conversationId;
+  const participantExists = await isParticipant(userId, targetConversationId);
   if (!participantExists) {
-    throw new ApiError(403, 'User is not a participant in this conversation');
+    const resolvedId = await resolveConversationId(userId, conversationId);
+    if (!resolvedId) {
+      throw new ApiError(403, 'User is not a participant in this conversation');
+    }
+    targetConversationId = resolvedId;
   }
 
   const sanitizedQuery = query ? query.trim() : '';
@@ -573,7 +725,7 @@ export const searchConversationMessages = async (
   let cursorSeq: number | null = null;
   if (cursor) {
     const cursorMsg = await prisma.message.findFirst({
-      where: { id: cursor, conversationId },
+      where: { id: cursor, conversationId: targetConversationId },
       select: { seq: true }
     });
     if (!cursorMsg) {
@@ -583,7 +735,7 @@ export const searchConversationMessages = async (
   }
 
   const whereClause = {
-    conversationId,
+    conversationId: targetConversationId,
     content: {
       contains: sanitizedQuery,
       mode: 'insensitive' as const

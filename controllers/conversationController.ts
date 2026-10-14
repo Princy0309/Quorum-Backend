@@ -7,7 +7,8 @@ import {
   addGroupParticipants,
   removeGroupParticipant,
   updateGroupConversation,
-  transferGroupOwnership
+  transferGroupOwnership,
+  getConversationById
 } from '../services/chatService.js';
 import { ApiError } from '../utils/ApiError.js';
 
@@ -244,6 +245,30 @@ export const transferGroupOwnershipController = async (req: Request, res: Respon
     res.status(200).json({
       success: true,
       data: conversation
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getConversationDetailsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const conversation = await getConversationById(userId, conversationId);
+    res.status(200).json({
+      success: true,
+      data: conversation,
+      conversation
     });
   } catch (err) {
     next(err);

@@ -1,6 +1,6 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket } from '../socketAuth.js';
-import { isParticipant } from '../../services/chatService.js';
+import { isParticipant, resolveConversationId } from '../../services/chatService.js';
 import { typingSchema } from '../../validators/chatValidators.js';
 import { checkSocketTypingRateLimit } from '../../middlewares/rateLimiter.js';
 import { CHAT_EVENTS } from '../../utils/constants.js';
@@ -25,7 +25,10 @@ export const registerTypingHandler = (io: SocketIOServer, socket: AuthenticatedS
       const { conversationId } = value;
       const room = `conversation:${conversationId}`;
 
-      if (!socket.rooms.has(room)) {
+      const resolvedId = await resolveConversationId(userId, conversationId);
+      const isMember = socket.rooms.has(room) || (resolvedId ? socket.rooms.has(`conversation:${resolvedId}`) : false);
+
+      if (!isMember) {
         return;
       }
 
@@ -33,6 +36,13 @@ export const registerTypingHandler = (io: SocketIOServer, socket: AuthenticatedS
         conversationId,
         userId
       });
+
+      if (resolvedId && resolvedId !== conversationId) {
+        socket.to(`conversation:${resolvedId}`).emit(event, {
+          conversationId: resolvedId,
+          userId
+        });
+      }
     } catch (err: any) {
       logger.error('Unexpected error in typing handler', { error: err.message, event });
     }
