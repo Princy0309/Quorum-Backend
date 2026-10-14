@@ -57,6 +57,7 @@ model User {
   ownedOrganizations       Organization[]            @relation("OrgOwner")
   memberships              OrganizationMember[]
   sentOrgInvites           OrganizationInvite[]      @relation("OrgInviter")
+  teamMemberships          TeamMember[]
 }
 
 model RefreshToken {
@@ -174,6 +175,7 @@ model Organization {
   owner        User        @relation("OrgOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members      OrganizationMember[]
   invites      OrganizationInvite[]
+  teams        Team[]
 
   @@index([slug])
   @@index([ownerId])
@@ -296,3 +298,34 @@ model CommunityComment {
   @@index([authorId])
   @@index([createdAt])
 }
+
+model Team {
+  id             String       @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        TeamMember[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model TeamMember {
+  id        String   @id @default(uuid())
+  teamId    String
+  userId    String
+  role      String   @default("member")
+  joinedAt  DateTime @default(now())
+
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+}
+
