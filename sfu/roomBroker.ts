@@ -77,11 +77,19 @@ export class RoomBroker extends EventEmitter {
 
     peer.publishedTracks.set(trackId, publishedTrack);
 
-    if (!room.channels.has(trackId)) {
+        if (!room.channels.has(trackId)) {
       room.channels.set(trackId, []);
     }
 
     track.onReceiveRtp.subscribe((packet: RtpPacket) => {
+      if (!publishedTrack.ssrc && packet.header?.ssrc) {
+        publishedTrack.ssrc = packet.header.ssrc;
+        (track as any).ssrc = packet.header.ssrc;
+        logger.info(
+          `[SFU Broker] Captured SSRC ${packet.header.ssrc} for track ${trackId} (${track.kind})`
+        );
+      }
+
       const subscribers = room.channels.get(trackId);
       if (subscribers && subscribers.length > 0) {
         for (const sub of subscribers) {
@@ -123,11 +131,16 @@ export class RoomBroker extends EventEmitter {
       room.channels.set(trackId, subscribers);
     }
 
-    const alreadySubscribed = subscribers.some(
+    const existingIndex = subscribers.findIndex(
       (s) => s.subscriberPeerId === subscriberPeerId
     );
 
-    if (!alreadySubscribed) {
+    if (existingIndex >= 0) {
+      subscribers[existingIndex].sender = sender;
+      logger.info(
+        `[SFU Broker] Updated subscription for peer ${subscriberPeerId} to track ${trackId}`
+      );
+    } else {
       subscribers.push({ subscriberPeerId, sender });
       logger.info(
         `[SFU Broker] Peer ${subscriberPeerId} subscribed to track ${trackId}`
@@ -140,15 +153,27 @@ export class RoomBroker extends EventEmitter {
     if (!room) return;
     const peer = room.peers.get(publisherPeerId);
     if (!peer?.peerConnection) return;
+
+    let videoSsrc: number | undefined;
+    for (const track of peer.publishedTracks.values()) {
+      if (track.kind === 'video' && track.ssrc) {
+        videoSsrc = track.ssrc;
+        break;
+      }
+    }
+
     const receivers = peer.peerConnection.getReceivers();
     for (const receiver of receivers) {
       if (receiver.kind === 'video') {
-        const ssrc = receiver.track?.ssrc || (receiver.tracks[0]?.ssrc);
+        const ssrc = videoSsrc || receiver.track?.ssrc || (receiver.tracks[0]?.ssrc);
         if (ssrc) {
-          receiver.sendRtcpPLI(ssrc).catch((err) => {
+          receiver.sendRtcpPLI(ssrc).then(() => {
+            logger.info(`[SFU Broker] Sent RTCP PLI keyframe request to publisher ${publisherPeerId} (ssrc: ${ssrc})`);
+          }).catch((err) => {
             logger.error(`[SFU Broker] Failed to send RTCP PLI to ${publisherPeerId}:`, err);
           });
-          logger.info(`[SFU Broker] Requested keyframe from publisher ${publisherPeerId} (ssrc: ${ssrc})`);
+        } else {
+          logger.warn(`[SFU Broker] Cannot send RTCP PLI to ${publisherPeerId}: SSRC not yet received`);
         }
       }
     }

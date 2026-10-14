@@ -7,7 +7,13 @@ import helmet from 'helmet';
 import userRoutes from './routes/userRoutes.js';
 import meetingRoutes from './routes/meetingRoutes.js';
 import organizationRoutes from './routes/organizationRoutes.js';
-
+import communityRoutes from './routes/communityRoutes.js';
+import postRoutes from './routes/postRoutes.js';
+import commentRoutes from './routes/commentRoutes.js';
+import dmRoutes from './routes/dmRoutes.js';
+import conversationRoutes from './routes/conversationRoutes.js';
+import uploadRoutes from './routes/uploadRoutes.js';
+import deviceRoutes from './routes/deviceRoutes.js';
 
 dotenv.config();
 
@@ -53,13 +59,12 @@ app.use(cors({
   },
   credentials: true,
   exposedHeaders: ['authorization'],
-}));
+  }));
 
 app.use(helmet());
 app.use(express.json({limit: "10kb"}));
 app.use(cookieParser());
 app.use(verifyCSRF);
-
 
 app.use(expressWinston.logger({
   winstonInstance: logger,
@@ -76,6 +81,17 @@ app.use('/api/user', userRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/organizations', organizationRoutes);
+app.use('/api/dm', dmRoutes);
+app.use('/api/conversations', conversationRoutes);
+app.use('/api/chat/conversations', conversationRoutes);
+app.use('/api/v1/conversations', conversationRoutes);
+app.use('/api/v1/chat/conversations', conversationRoutes);
+app.use('/api/uploads', uploadRoutes);
+app.use('/api/devices', deviceRoutes);
+app.use('/api/communities', communityRoutes);
+app.use('/api/community-posts', postRoutes);
+app.use('/api/community-comments', commentRoutes);
+
 app.get('/api/csrf-token', (req: Request, res: Response) => {
   res.json({ csrfToken: res.locals.csrfToken || req.cookies['XSRF-TOKEN'] });
 });

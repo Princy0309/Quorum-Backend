@@ -15,6 +15,8 @@ export interface PublishedTrack {
     kind: 'audio' | 'video';
     peerId: string;
     mediaStreamTrack: MediaStreamTrack;
+    ssrc?: number;
+
 }
 
 export interface SfuRoom {

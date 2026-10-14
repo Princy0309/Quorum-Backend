@@ -41,6 +41,14 @@ export const registerRateLimiter = new RateLimiterRedis({
   blockDuration: 15 * 60,
 });
 
+export const searchRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'search_v1',
+  points: 30,
+  duration: 60,
+  blockDuration: 60,
+});
+
 export const loginLimiter = async (req: Request, res: Response, next: NextFunction): Promise<any> => {
   try {
     const ip = req.ip || '127.0.0.1';
@@ -86,6 +94,18 @@ export const registerLimiter = (req: Request, res: Response, next: NextFunction)
     });
 };
 
+export const searchLimiter = (req: Request, res: Response, next: NextFunction): void => {
+  const key = (req.user as any)?.id || req.ip || '127.0.0.1';
+  searchRateLimiter.consume(key)
+    .then(() => next())
+    .catch((err) => {
+      if (err instanceof Error) {
+        return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
+      }
+      res.status(429).json({ success: false, statusCode: 429, message: 'Too many search requests, please slow down.' });
+    });
+};
+
 export const otpRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
   keyPrefix: 'otp_v2',
@@ -104,3 +124,131 @@ export const otpLimiter = (req: Request, res: Response, next: NextFunction): voi
       res.status(429).json({ success: false, statusCode: 429, message: 'Too many OTP requests, try again after 15 minutes.' });
     });
 };
+
+export const chatRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'chat_api_v1',
+  points: 30,
+  duration: 60
+});
+
+export const chatLimiter = (req: Request, res: Response, next: NextFunction): void => {
+  const key = req.user?.id || req.ip || '127.0.0.1';
+  chatRateLimiter.consume(key)
+    .then(() => next())
+    .catch((err) => {
+      if (err instanceof Error) {
+        return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
+      }
+      res.status(429).json({ success: false, statusCode: 429, message: 'Too many requests, please slow down.' });
+    });
+};
+
+export const socketMessageRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'socket_msg_v1',
+  points: 10,
+  duration: 5,
+  blockDuration: 5
+});
+
+export const checkSocketMessageRateLimit = async (userId: string): Promise<boolean> => {
+  try {
+    await socketMessageRateLimiter.consume(userId);
+    return true;
+  } catch (err) {
+    return false;
+  }
+};
+
+export const socketTypingRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'socket_typing_v1',
+  points: 15,
+  duration: 5,
+  blockDuration: 3
+});
+
+export const checkSocketTypingRateLimit = async (userId: string): Promise<boolean> => {
+  try {
+    await socketTypingRateLimiter.consume(userId);
+    return true;
+  } catch (err) {
+    return false;
+  }
+};
+
+export const meetingJoinRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'socket_meeting_join_v1',
+  points: 6,
+  duration: 10,
+  blockDuration: 5
+});
+
+export const checkMeetingJoinRateLimit = async (userId: string): Promise<boolean> => {
+  try {
+    await meetingJoinRateLimiter.consume(userId);
+    return true;
+  } catch (err: any) {
+    if (err instanceof Error) return true;
+    return false;
+  }
+};
+
+export const meetingToggleRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'socket_meeting_toggle_v1',
+  points: 8,
+  duration: 3,
+  blockDuration: 2
+});
+
+export const checkMeetingToggleRateLimit = async (userId: string): Promise<boolean> => {
+  try {
+    await meetingToggleRateLimiter.consume(userId);
+    return true;
+  } catch (err: any) {
+    if (err instanceof Error) return true;
+    return false;
+  }
+};
+
+export const sfuSignalingRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'socket_sfu_signal_v1',
+  points: 15,
+  duration: 10,
+  blockDuration: 5
+});
+
+export const checkSfuSignalingRateLimit = async (userId: string): Promise<boolean> => {
+  try {
+    await sfuSignalingRateLimiter.consume(userId);
+    return true;
+  } catch (err: any) {
+    if (err instanceof Error) return true;
+    return false;
+  }
+};
+
+export const sfuIceRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'socket_sfu_ice_v1',
+  points: 80,
+  duration: 5,
+  blockDuration: 3
+});
+
+export const checkSfuIceRateLimit = async (userId: string): Promise<boolean> => {
+  try {
+    await sfuIceRateLimiter.consume(userId);
+    return true;
+  } catch (err: any) {
+    if (err instanceof Error) return true;
+    return false;
+  }
+};
+
+
+
