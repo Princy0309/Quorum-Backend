@@ -27,12 +27,13 @@ export const searchUsersController = asyncHandler(async (req: Request, res: Resp
   const limit = Number(req.query.limit) || 20;
 
   const result = await searchUsers(req.user.id, query, page, limit);
+  const isMobile = req.headers['x-client-platform'] === 'mobile';
 
   return res.status(200).json({
     success: true,
     statusCode: 200,
     message: 'Users retrieved successfully',
-    data: {
+    data: isMobile ? result.users : {
       users: result.users,
       pagination: result.pagination
     },
