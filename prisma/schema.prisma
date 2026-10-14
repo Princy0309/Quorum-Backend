@@ -110,6 +110,8 @@ model Message {
   content         String
   fileUrl         String?
   fileType        String?
+  fileName        String?
+  fileSize        Int?
   clientMessageId String?
   seq             Int          @default(0)
   createdAt       DateTime     @default(now())

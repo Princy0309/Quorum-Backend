@@ -12,8 +12,15 @@ interface SendMessagePayload {
   conversationId: string;
   clientMessageId?: string;
   content?: string;
+  caption?: string;
   fileUrl?: string;
+  url?: string;
   fileType?: string;
+  type?: string;
+  fileName?: string;
+  name?: string;
+  fileSize?: number;
+  size?: number;
 }
 
 interface ReadMessagePayload {
@@ -126,19 +133,28 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
 
         const { error, value } = sendMessageSchema.validate(payload);
         if (error) {
+          logger.warn('Socket message validation failed', { error: error.details[0].message, payload });
           if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', error.details[0].message));
           return;
         }
 
-        const { conversationId, clientMessageId, content, fileUrl, fileType } = value;
+        const conversationId = value.conversationId;
+        const clientMessageId = value.clientMessageId;
+        const rawContent = (typeof value.content === 'string' ? value.content : '') || value.caption || '';
+        const fileUrl = value.fileUrl || value.url;
+        const fileType = value.fileType || value.type;
+        const fileName = value.fileName || value.name;
+        const fileSize = typeof value.fileSize === 'number' ? value.fileSize : (typeof value.size === 'number' ? value.size : undefined);
 
         const { message, participants, isDuplicate } = await saveMessage(
           senderId,
           conversationId,
-          content ? content.trim() : '',
+          rawContent.trim(),
           fileUrl,
           fileType,
-          clientMessageId
+          clientMessageId,
+          fileName,
+          fileSize
         );
 
         if (isDuplicate) {
@@ -171,7 +187,7 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         sendPushToOfflineUsers(
           recipientUserIds,
           `New message from ${message.sender.name}`,
-          content || 'Sent an attachment',
+          rawContent || 'Sent an attachment',
           { conversationId: message.conversationId, messageId: message.id }
         ).catch((err) => {
           logger.error('Background FCM notification dispatch error', { error: err.message });

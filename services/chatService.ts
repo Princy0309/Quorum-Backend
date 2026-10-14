@@ -264,9 +264,11 @@ export const saveMessage = async (
   content: string,
   fileUrl?: string,
   fileType?: string,
-  clientMessageId?: string
+  clientMessageId?: string,
+  fileName?: string,
+  fileSize?: number
 ) => {
-  const derivedType = deriveFileTypeFromUrl(fileUrl);
+  const derivedType = fileType || deriveFileTypeFromUrl(fileUrl);
   return await prisma.$transaction(async (tx) => {
     let resolvedConversationId = conversationId;
     let participant = await tx.conversationParticipant.findUnique({
@@ -380,6 +382,8 @@ export const saveMessage = async (
           content,
           fileUrl,
           fileType: derivedType,
+          fileName: fileName ? fileName.trim() : null,
+          fileSize: typeof fileSize === 'number' ? fileSize : null,
           clientMessageId,
           seq: updatedConversation.lastSeq
         },

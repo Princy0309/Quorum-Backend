@@ -29,16 +29,23 @@ const isTrustedMediaUrl = (value: string, helpers: Joi.CustomHelpers) => {
 export const sendMessageSchema = Joi.object({
   conversationId: Joi.string().trim().max(100).required(),
   clientMessageId: Joi.string().trim().max(100).optional(),
-  content: Joi.string().trim().min(1).max(5000),
+  content: Joi.string().allow('', null).trim().max(5000).optional(),
+  caption: Joi.string().allow('', null).trim().max(5000).optional(),
   fileUrl: Joi.string()
-    .uri({ scheme: ['https'] })
+    .uri({ scheme: ['http', 'https'] })
     .max(2048)
     .custom(isTrustedMediaUrl)
     .messages({
       'any.invalid': 'fileUrl must originate from an authorized media storage provider (Cloudinary/S3)'
-    }),
-  fileType: Joi.string().valid('image', 'video', 'audio', 'file')
-}).or('content', 'fileUrl');
+    })
+    .allow('', null)
+    .optional(),
+  url: Joi.string().uri({ scheme: ['http', 'https'] }).max(2048).allow('', null).optional(),
+  fileType: Joi.string().allow(null, '').optional(),
+  type: Joi.string().allow(null, '').optional(),
+  fileName: Joi.string().trim().max(255).allow(null, '').optional(),
+  fileSize: Joi.number().integer().min(0).max(26214400).allow(null).optional()
+}).unknown(true);
 
 export const readMessageSchema = Joi.object({
   conversationId: Joi.string().trim().max(100).required(),
@@ -82,4 +89,13 @@ export const updateGroupSchema = Joi.object({
 export const transferOwnershipSchema = Joi.object({
   newOwnerId: Joi.string().trim().max(100).required()
 });
+
+export const signUploadSchema = Joi.object({
+  conversationId: Joi.string().trim().max(100).optional(),
+  communityId: Joi.string().trim().max(100).optional(),
+  fileName: Joi.string().trim().min(1).max(255).required(),
+  fileSize: Joi.number().integer().min(1).max(26214400).required(),
+  fileType: Joi.string().valid('image', 'file', 'document').optional(),
+  folder: Joi.string().trim().max(100).optional()
+}).unknown(true);
 
