@@ -803,7 +803,10 @@ export const createGroupConversation = async (
         avatar: avatar || null,
         ownerId: creatorId,
         participants: {
-          create: uniqueUserIds.map((userId) => ({ userId }))
+          create: uniqueUserIds.map((userId) => ({
+            userId,
+            role: userId === creatorId ? 'admin' : 'member'
+          }))
         }
       },
       include: {
@@ -832,17 +835,28 @@ export const createGroupConversation = async (
 };
 
 const ensureGroupOwner = async (tx: any, conversation: any) => {
-  if (conversation && conversation.type === 'group' && !conversation.ownerId && conversation.participants && conversation.participants.length > 0) {
-    const sorted = [...conversation.participants].sort(
-      (a: any, b: any) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
-    );
-    const oldest = sorted[0];
-    if (oldest) {
-      await tx.conversation.update({
-        where: { id: conversation.id },
-        data: { ownerId: oldest.userId }
-      });
-      conversation.ownerId = oldest.userId;
+  if (conversation && conversation.type === 'group' && conversation.participants && conversation.participants.length > 0) {
+    let ownerId = conversation.ownerId;
+    const hasValidOwner = ownerId && conversation.participants.some((p: any) => p.userId === ownerId);
+    if (!hasValidOwner) {
+      const sorted = [...conversation.participants].sort(
+        (a: any, b: any) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
+      );
+      const existingAdmin = conversation.participants.find((p: any) => p.role === 'admin');
+      const newAdmin = existingAdmin || sorted[0];
+      if (newAdmin) {
+        ownerId = newAdmin.userId;
+        await tx.conversation.update({
+          where: { id: conversation.id },
+          data: { ownerId }
+        });
+        await tx.conversationParticipant.update({
+          where: { id: newAdmin.id },
+          data: { role: 'admin' }
+        });
+        conversation.ownerId = ownerId;
+        newAdmin.role = 'admin';
+      }
     }
   }
   return conversation;
@@ -871,9 +885,14 @@ export const addGroupParticipants = async (
       throw new ApiError(400, 'Cannot add participants to a direct conversation');
     }
 
-    const isUserMember = conversation.participants.some((p: any) => p.userId === userId);
-    if (!isUserMember) {
+    const userParticipant = conversation.participants.find((p: any) => p.userId === userId);
+    if (!userParticipant) {
       throw new ApiError(403, 'You are not a member of this conversation');
+    }
+
+    const isUserAdmin = userParticipant.role === 'admin' || conversation.ownerId === userId;
+    if (!isUserAdmin) {
+      throw new ApiError(403, 'Only group admins can add new members');
     }
 
     const existingParticipantIds = new Set(conversation.participants.map((p: any) => p.userId));
@@ -895,7 +914,8 @@ export const addGroupParticipants = async (
     await tx.conversationParticipant.createMany({
       data: newParticipantIds.map((pId) => ({
         conversationId,
-        userId: pId
+        userId: pId,
+        role: 'member'
       })),
       skipDuplicates: true
     });
@@ -956,27 +976,55 @@ export const removeGroupParticipant = async (
       throw new ApiError(400, 'Cannot remove participants from a direct conversation');
     }
 
-    const isUserMember = conversation.participants.some((p: any) => p.userId === userId);
-    if (!isUserMember) {
+    const userParticipant = conversation.participants.find((p: any) => p.userId === userId);
+    if (!userParticipant) {
       throw new ApiError(403, 'You are not a member of this conversation');
     }
 
-    const isTargetMember = conversation.participants.some((p: any) => p.userId === targetUserId);
-    if (!isTargetMember) {
+    const targetParticipant = conversation.participants.find((p: any) => p.userId === targetUserId);
+    if (!targetParticipant) {
       throw new ApiError(404, 'Target user is not a participant in this conversation');
     }
 
     const isSelfRemoval = userId === targetUserId;
-    if (!isSelfRemoval && (!conversation.ownerId || conversation.ownerId !== userId)) {
-      throw new ApiError(403, 'Only the group owner can remove other participants');
+    const isUserAdmin = userParticipant.role === 'admin' || conversation.ownerId === userId;
+
+    if (!isSelfRemoval && !isUserAdmin) {
+      throw new ApiError(403, 'Only group admins can remove other participants');
     }
 
-    if (conversation.ownerId === targetUserId && conversation.participants.length > 1) {
-      const nextOwner = conversation.participants.find((p: any) => p.userId !== targetUserId);
-      if (nextOwner) {
+    if (!isSelfRemoval && conversation.ownerId === targetUserId && userId !== targetUserId) {
+      throw new ApiError(403, 'Cannot remove the group owner');
+    }
+
+    const initialRemaining = conversation.participants.filter((p: any) => p.userId !== targetUserId);
+    const isTargetAdmin = targetParticipant.role === 'admin' || conversation.ownerId === targetUserId;
+
+    if (isTargetAdmin && initialRemaining.length > 0) {
+      const remainingAdmins = initialRemaining.filter(
+        (p: any) => p.role === 'admin' && p.userId !== targetUserId
+      );
+
+      if (remainingAdmins.length === 0) {
+        const sorted = [...initialRemaining].sort(
+          (a: any, b: any) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
+        );
+        const nextAdmin = sorted[0];
+        if (nextAdmin) {
+          await tx.conversationParticipant.update({
+            where: { id: nextAdmin.id },
+            data: { role: 'admin' }
+          });
+          await tx.conversation.update({
+            where: { id: conversationId },
+            data: { ownerId: nextAdmin.userId }
+          });
+          nextAdmin.role = 'admin';
+        }
+      } else if (conversation.ownerId === targetUserId) {
         await tx.conversation.update({
           where: { id: conversationId },
-          data: { ownerId: nextOwner.userId }
+          data: { ownerId: remainingAdmins[0].userId }
         });
       }
     }
@@ -990,12 +1038,12 @@ export const removeGroupParticipant = async (
       }
     });
 
-    const remainingParticipants = await tx.conversationParticipant.findMany({
+    const finalRemaining = await tx.conversationParticipant.findMany({
       where: { conversationId },
       select: { userId: true }
     });
 
-    if (remainingParticipants.length === 0) {
+    if (finalRemaining.length === 0) {
       await tx.conversation.delete({
         where: { id: conversationId }
       });
@@ -1029,7 +1077,7 @@ export const removeGroupParticipant = async (
     return {
       conversationDeleted: false,
       updated: updatedConv,
-      remainingUserIds: remainingParticipants.map((p) => p.userId)
+      remainingUserIds: finalRemaining.map((p: any) => p.userId)
     };
   });
 
@@ -1188,6 +1236,166 @@ export const transferGroupOwnership = async (
 
   return updated;
 };
+
+export const makeGroupAdmin = async (
+  userId: string,
+  conversationId: string,
+  targetUserId: string
+) => {
+  const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
+    const rawConversation = await tx.conversation.findUnique({
+      where: { id: conversationId },
+      include: {
+        participants: true
+      }
+    });
+
+    if (!rawConversation) {
+      throw new ApiError(404, 'Conversation not found');
+    }
+
+    const conversation = await ensureGroupOwner(tx, rawConversation);
+
+    if (conversation.type !== 'group') {
+      throw new ApiError(400, 'Cannot manage admins in a direct conversation');
+    }
+
+    const requester = conversation.participants.find((p: any) => p.userId === userId);
+    if (!requester) {
+      throw new ApiError(403, 'You are not a member of this conversation');
+    }
+
+    const isRequesterAdmin = requester.role === 'admin' || conversation.ownerId === userId;
+    if (!isRequesterAdmin) {
+      throw new ApiError(403, 'Only group admins can promote members to admin');
+    }
+
+    const target = conversation.participants.find((p: any) => p.userId === targetUserId);
+    if (!target) {
+      throw new ApiError(404, 'Target user is not a participant in this group');
+    }
+
+    if (target.role !== 'admin') {
+      await tx.conversationParticipant.update({
+        where: { id: target.id },
+        data: { role: 'admin' }
+      });
+    }
+
+    const updatedConv = await tx.conversation.update({
+      where: { id: conversationId },
+      data: { updatedAt: new Date() },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true
+              }
+            }
+          }
+        },
+        messages: {
+          take: 1,
+          orderBy: [{ seq: 'desc' }, { id: 'desc' }]
+        }
+      }
+    });
+
+    const allParticipantIds = updatedConv.participants.map((p) => p.userId);
+    return { updated: updatedConv, allParticipantIds };
+  });
+
+  notifyConversationUpdate(allParticipantIds, updated);
+  return updated;
+};
+
+export const dismissGroupAdmin = async (
+  userId: string,
+  conversationId: string,
+  targetUserId: string
+) => {
+  const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
+    const rawConversation = await tx.conversation.findUnique({
+      where: { id: conversationId },
+      include: {
+        participants: true
+      }
+    });
+
+    if (!rawConversation) {
+      throw new ApiError(404, 'Conversation not found');
+    }
+
+    const conversation = await ensureGroupOwner(tx, rawConversation);
+
+    if (conversation.type !== 'group') {
+      throw new ApiError(400, 'Cannot manage admins in a direct conversation');
+    }
+
+    const requester = conversation.participants.find((p: any) => p.userId === userId);
+    if (!requester) {
+      throw new ApiError(403, 'You are not a member of this conversation');
+    }
+
+    const isRequesterAdmin = requester.role === 'admin' || conversation.ownerId === userId;
+    if (!isRequesterAdmin) {
+      throw new ApiError(403, 'Only group admins can remove admin privileges');
+    }
+
+    const target = conversation.participants.find((p: any) => p.userId === targetUserId);
+    if (!target) {
+      throw new ApiError(404, 'Target user is not a participant in this group');
+    }
+
+    if (conversation.ownerId === targetUserId && userId !== targetUserId) {
+      throw new ApiError(403, 'Group owner admin privileges cannot be revoked');
+    }
+
+    const otherAdmins = conversation.participants.filter(
+      (p: any) => p.userId !== targetUserId && (p.role === 'admin' || p.userId === conversation.ownerId)
+    );
+    if (otherAdmins.length === 0) {
+      throw new ApiError(400, 'Cannot dismiss the last admin in the group');
+    }
+
+    await tx.conversationParticipant.update({
+      where: { id: target.id },
+      data: { role: 'member' }
+    });
+
+    const updatedConv = await tx.conversation.update({
+      where: { id: conversationId },
+      data: { updatedAt: new Date() },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true
+              }
+            }
+          }
+        },
+        messages: {
+          take: 1,
+          orderBy: [{ seq: 'desc' }, { id: 'desc' }]
+        }
+      }
+    });
+
+    const allParticipantIds = updatedConv.participants.map((p) => p.userId);
+    return { updated: updatedConv, allParticipantIds };
+  });
+
+  notifyConversationUpdate(allParticipantIds, updated);
+  return updated;
+};
+
 
 
 

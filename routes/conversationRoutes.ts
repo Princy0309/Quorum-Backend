@@ -17,7 +17,9 @@ import {
   removeGroupParticipantController,
   updateGroupConversationController,
   transferGroupOwnershipController,
-  getConversationDetailsController
+  getConversationDetailsController,
+  makeGroupAdminController,
+  dismissGroupAdminController
 } from '../controllers/conversationController.js';
 import { createOrGetDMController } from '../controllers/dmController.js';
 
@@ -40,6 +42,13 @@ router.post('/:id/leave', authMiddleware, (req, res, next) => {
   req.params.userId = 'me';
   return removeGroupParticipantController(req, res, next);
 });
+router.post('/:id/admins', authMiddleware, makeGroupAdminController);
+router.post('/:id/admins/:userId', authMiddleware, makeGroupAdminController);
+router.post('/:id/make-admin', authMiddleware, makeGroupAdminController);
+router.post('/:id/participants/:userId/make-admin', authMiddleware, makeGroupAdminController);
+router.delete('/:id/admins/:userId', authMiddleware, dismissGroupAdminController);
+router.post('/:id/remove-admin', authMiddleware, dismissGroupAdminController);
+
 router.delete('/:id/participants/:userId', authMiddleware, removeGroupParticipantController);
 router.delete('/:id/members/:userId', authMiddleware, removeGroupParticipantController);
 
