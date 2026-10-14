@@ -43,6 +43,26 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
   let currentRoom: string | null = null;
   let currentPeerId: string | null = null;
 
+  const findSubscriberPc = (rCode?: string, pId?: string, tId?: string): RTCPeerConnection | undefined => {
+    if (!tId) return undefined;
+    if (rCode && pId) {
+      const pc = subscriberPeerConnections.get(`${rCode}:${pId}:${tId}`);
+      if (pc) return pc;
+    }
+    if (rCode && currentPeerId) {
+      const pc = subscriberPeerConnections.get(`${rCode}:${currentPeerId}:${tId}`);
+      if (pc) return pc;
+    }
+    for (const [key, pc] of subscriberPeerConnections.entries()) {
+      if (key.endsWith(`:${tId}`)) {
+        if (!rCode || key.startsWith(`${rCode}:`)) {
+          return pc;
+        }
+      }
+    }
+    return undefined;
+  };
+
   socket.on('sfu:join', ({ roomCode, peerId, name }: JoinPayload) => {
     currentRoom = roomCode;
     currentPeerId = peerId;
@@ -58,6 +78,16 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
 
     socket.emit('sfu:joined', { existingTracks });
     socket.to(roomCode).emit('sfu:peer-joined', { peerId, name });
+
+    for (const t of existingTracks) {
+      if (t.peerId !== peerId) {
+        socket.emit('sfu:new-producer', {
+          peerId: t.peerId,
+          trackId: t.trackId,
+          kind: t.kind,
+        });
+      }
+    }
 
     logger.info(`[Signaling] Peer ${peerId} joined SFU room ${roomCode}`);
   });
@@ -117,36 +147,62 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
   socket.on('sfu:ice-candidate', async ({ roomCode, peerId, candidate, target, trackId }: CandidatePayload) => {
     try {
       if (!candidate) return;
+      const rCode = roomCode || currentRoom;
+      const pId = peerId || currentPeerId;
 
-      if (target === 'subscriber' && trackId) {
-        const subKey = `${roomCode}:${peerId}:${trackId}`;
-        const consumerPc = subscriberPeerConnections.get(subKey);
+      if (target === 'subscriber' || trackId) {
+        const consumerPc = findSubscriberPc(rCode || undefined, pId || undefined, trackId);
         if (consumerPc) {
           await consumerPc.addIceCandidate(candidate);
           logger.debug(`[Signaling] Added subscriber ICE candidate for track ${trackId}`);
+          return;
         }
-            } else if (target === 'publisher') {
-        const room = roomBroker.getOrCreateRoom(roomCode);
-        const peer = room.peers.get(peerId);
-        if (peer?.peerConnection) {
-          await peer.peerConnection.addIceCandidate(candidate);
-          logger.debug(`[Signaling] Added publisher ICE candidate for peer ${peerId}`);
-        }
-      } else {
-        const room = roomBroker.getOrCreateRoom(roomCode);
-        const peer = room.peers.get(peerId);
-        if (peer?.peerConnection) {
-          peer.peerConnection.addIceCandidate(candidate).catch(() => {});
-        }
-        for (const [key, pc] of subscriberPeerConnections.entries()) {
-          if (key.startsWith(`${roomCode}:${peerId}:`)) {
-            pc.addIceCandidate(candidate).catch(() => {});
+      }
+
+      if (target === 'publisher' || !target) {
+        if (rCode && pId) {
+          const room = roomBroker.getOrCreateRoom(rCode);
+          const peer = room.peers.get(pId);
+          if (peer?.peerConnection) {
+            await peer.peerConnection.addIceCandidate(candidate);
+            logger.debug(`[Signaling] Added publisher ICE candidate for peer ${pId}`);
+            return;
           }
         }
       }
 
+      if (rCode && pId) {
+        for (const [key, pc] of subscriberPeerConnections.entries()) {
+          if (key.startsWith(`${rCode}:${pId}:`)) {
+            pc.addIceCandidate(candidate).catch(() => {});
+          }
+        }
+      }
     } catch (err) {
-      logger.error(`[Signaling] Error adding ICE candidate for peer ${peerId}:`, err);
+      logger.error(`[Signaling] Error adding ICE candidate:`, err);
+    }
+  });
+
+  socket.on('sfu:subscribe-ice-candidate', async ({ roomCode, peerId, trackId, candidate }: any) => {
+    try {
+      if (!candidate || !trackId) return;
+      const rCode = roomCode || currentRoom;
+      const pId = peerId || currentPeerId;
+      const consumerPc = findSubscriberPc(rCode || undefined, pId || undefined, trackId);
+      if (consumerPc) {
+        await consumerPc.addIceCandidate(candidate);
+        logger.debug(`[Signaling] Added subscriber ICE candidate via sfu:subscribe-ice-candidate for track ${trackId}`);
+      }
+    } catch (err) {
+      logger.error(`[Signaling] Error adding subscribe ICE candidate for track ${trackId}:`, err);
+    }
+  });
+
+  socket.on('sfu:request-keyframe', ({ roomCode, publisherPeerId }: { roomCode: string; publisherPeerId: string }) => {
+    const rCode = roomCode || currentRoom;
+    if (rCode && publisherPeerId) {
+      logger.info(`[Signaling] Manual keyframe requested for publisher ${publisherPeerId} in room ${rCode}`);
+      roomBroker.requestKeyframe(rCode, publisherPeerId);
     }
   });
 
@@ -191,14 +247,16 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           }
         });
 
-                const transceiver = consumerPc.addTransceiver(publishedTrack.kind, {
+        const transceiver = consumerPc.addTransceiver(publishedTrack.kind, {
           direction: 'sendonly',
         });
 
-        transceiver.sender.onPictureLossIndication.subscribe(() => {
-          logger.info(`[Signaling] PLI received: requesting keyframe from publisher ${publishedTrack.peerId}`);
-          roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
-        });
+        if (publishedTrack.kind === 'video') {
+          transceiver.sender.onPictureLossIndication.subscribe(() => {
+            logger.info(`[Signaling] PLI received: requesting keyframe from publisher ${publishedTrack.peerId}`);
+            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
+          });
+        }
 
         roomBroker.subscribeToTrack(
           roomCode,
@@ -225,7 +283,10 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
           setTimeout(() => {
             roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
-          }, 600);
+          }, 500);
+          setTimeout(() => {
+            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
+          }, 1200);
         }
 
         logger.info(
