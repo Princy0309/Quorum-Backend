@@ -376,13 +376,51 @@ export const getConversationMessages = async (
   };
 };
 
-export const getUserConversations = async (userId: string) => {
-  const conversations = await prisma.conversation.findMany({
-    where: {
-      participants: {
-        some: { userId }
+export const getUserConversations = async (userId: string, query?: string) => {
+  const trimmed = typeof query === 'string' ? query.trim() : '';
+
+  const whereClause: any = {
+    participants: {
+      some: { userId }
+    }
+  };
+
+  if (trimmed) {
+    whereClause.OR = [
+      {
+        name: {
+          contains: trimmed,
+          mode: 'insensitive'
+        }
+      },
+      {
+        participants: {
+          some: {
+            userId: { not: userId },
+            user: {
+              OR: [
+                { name: { contains: trimmed, mode: 'insensitive' } },
+                { email: { contains: trimmed, mode: 'insensitive' } }
+              ]
+            }
+          }
+        }
+      },
+      {
+        messages: {
+          some: {
+            content: {
+              contains: trimmed,
+              mode: 'insensitive'
+            }
+          }
+        }
       }
-    },
+    ];
+  }
+
+  const conversations = await prisma.conversation.findMany({
+    where: whereClause,
     orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
     include: {
       participants: {

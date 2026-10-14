@@ -45,10 +45,14 @@ export const getUserConversationsController = async (req: Request, res: Response
       throw new ApiError(401, 'Unauthorized');
     }
 
-    const conversations = await getUserConversations(userId);
+    const rawQuery = req.query.q ?? req.query.search ?? req.query.query;
+    const query = typeof rawQuery === 'string' ? rawQuery.trim() : undefined;
+
+    const conversations = await getUserConversations(userId, query);
     res.status(200).json({
       success: true,
-      data: conversations
+      data: conversations,
+      conversations: conversations
     });
   } catch (err) {
     next(err);

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
+import { searchLimiter } from '../middlewares/rateLimiter.js';
 import { validateJoi } from '../middlewares/validate.js';
 import {
   createGroupSchema,
@@ -21,6 +22,7 @@ import {
 const router = Router();
 
 router.get('/', authMiddleware, getUserConversationsController);
+router.get('/search', authMiddleware, searchLimiter, getUserConversationsController);
 router.post('/group', authMiddleware, validateJoi(createGroupSchema), createGroupConversationController);
 router.get('/:id/messages', authMiddleware, getConversationMessagesController);
 router.get('/:id/search', authMiddleware, searchConversationMessagesController);

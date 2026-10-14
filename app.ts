@@ -85,6 +85,9 @@ app.use('/api/uploads', uploadRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/chat/users', userRoutes);
+app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/chat/users', userRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.get('/api/csrf-token', (req: Request, res: Response) => {
   res.json({ csrfToken: res.locals.csrfToken || req.cookies['XSRF-TOKEN'] });

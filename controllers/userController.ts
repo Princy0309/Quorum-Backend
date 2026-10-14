@@ -21,11 +21,22 @@ export const searchUsersController = asyncHandler(async (req: Request, res: Resp
     return next(new ApiError(401, 'Unauthorized'));
   }
 
-  const query = typeof req.query.q === 'string' ? req.query.q : (typeof req.query.query === 'string' ? req.query.query : '');
+  const rawQuery = req.query.q ?? req.query.query ?? req.query.search ?? '';
+  const query = typeof rawQuery === 'string' ? rawQuery : '';
   const page = Number(req.query.page) || 1;
   const limit = Number(req.query.limit) || 20;
 
   const result = await searchUsers(req.user.id, query, page, limit);
 
-  return sendSuccess(res, 200, 'Users retrieved successfully', result);
+  return res.status(200).json({
+    success: true,
+    statusCode: 200,
+    message: 'Users retrieved successfully',
+    data: {
+      users: result.users,
+      pagination: result.pagination
+    },
+    users: result.users,
+    pagination: result.pagination
+  });
 });
