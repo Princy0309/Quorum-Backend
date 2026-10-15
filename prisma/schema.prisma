@@ -9,6 +9,10 @@ generator client {
 }
 
 enum UseCase {
+  ORGANIZATION
+  FREELANCE
+  HIRE_COLLABORATE
+  COMMUNITY
   WORK
   PERSONAL
   EDUCATION
