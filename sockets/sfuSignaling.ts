@@ -1,196 +1,322 @@
-import { Server as SocketIOServer, Socket } from 'socket.io';
+import { Server, Socket } from 'socket.io';
+import { RTCSessionDescription, RTCPeerConnection } from 'werift';
 import { roomBroker } from '../sfu/roomBroker.js';
-import { peerConnectionManager } from '../sfu/peerConnection.js';
-import { meetingRooms } from './meetingPresence.js';
+import { createPeerConnection } from '../sfu/peerConnection.js';
+import logger from '../utils/logger.js';
 
-export const registerSfuSignalingHandler = (io: SocketIOServer, socket: Socket) => {
-  const validateParticipant = (meetingCode: string): boolean => {
-    const user = socket.data.user;
-    if (!user || !user.id || !meetingCode) return false;
+interface JoinPayload {
+  roomCode: string;
+  peerId: string;
+  name?: string;
+}
 
-    const normalizedCode = meetingCode.trim();
-    const roomState = meetingRooms.get(normalizedCode);
-    if (!roomState) return false;
+interface OfferPayload {
+  roomCode: string;
+  peerId: string;
+  sdp: {
+    type: 'offer';
+    sdp: string;
+  };
+}
 
-    const participant = roomState.participants.get(user.id);
-    if (!participant || !participant.socketIds.has(socket.id)) {
-      return false;
+interface CandidatePayload {
+  roomCode: string;
+  peerId: string;
+  candidate: any;
+  target?: 'publisher' | 'subscriber';
+  trackId?: string;
+}
+
+interface SubscribePayload {
+  roomCode: string;
+  subscriberPeerId: string;
+  trackId: string;
+  sdp: {
+    type: 'offer';
+    sdp: string;
+  };
+}
+
+const subscriberPeerConnections = new Map<string, RTCPeerConnection>();
+
+export const registerSfuSignaling = (io: Server, socket: Socket) => {
+  let currentRoom: string | null = null;
+  let currentPeerId: string | null = null;
+
+  const findSubscriberPc = (rCode?: string, pId?: string, tId?: string): RTCPeerConnection | undefined => {
+    if (!tId) return undefined;
+    if (rCode && pId) {
+      const pc = subscriberPeerConnections.get(`${rCode}:${pId}:${tId}`);
+      if (pc) return pc;
     }
-
-    return true;
+    if (rCode && currentPeerId) {
+      const pc = subscriberPeerConnections.get(`${rCode}:${currentPeerId}:${tId}`);
+      if (pc) return pc;
+    }
+    for (const [key, pc] of subscriberPeerConnections.entries()) {
+      if (key.endsWith(`:${tId}`)) {
+        if (!rCode || key.startsWith(`${rCode}:`)) {
+          return pc;
+        }
+      }
+    }
+    return undefined;
   };
 
-  socket.on('sfu:join-media', (payload: { meetingCode: string }, ack?: (res: any) => void) => {
-    const user = socket.data.user;
-    if (!user || !user.id || !payload?.meetingCode) {
-      ack?.({ success: false, code: 'UNAUTHORIZED', message: 'Authentication required' });
-      return;
+  socket.on('sfu:join', ({ roomCode, peerId, name }: JoinPayload) => {
+    currentRoom = roomCode;
+    currentPeerId = peerId;
+
+    socket.join(roomCode);
+    roomBroker.addPeer(roomCode, peerId, socket.id, name);
+
+    const existingTracks = roomBroker.getRoomTracks(roomCode).map((t) => ({
+      trackId: t.trackId,
+      kind: t.kind,
+      peerId: t.peerId,
+    }));
+
+    socket.emit('sfu:joined', { existingTracks });
+    socket.to(roomCode).emit('sfu:peer-joined', { peerId, name });
+
+    for (const t of existingTracks) {
+      if (t.peerId !== peerId) {
+        socket.emit('sfu:new-producer', {
+          peerId: t.peerId,
+          trackId: t.trackId,
+          kind: t.kind,
+        });
+      }
     }
 
-    const normalizedCode = payload.meetingCode.trim();
-    if (!validateParticipant(normalizedCode)) {
-      ack?.({
-        success: false,
-        code: 'NOT_ACTIVE_PARTICIPANT',
-        message: 'You must be an active admitted participant to join media',
+    logger.info(`[Signaling] Peer ${peerId} joined SFU room ${roomCode}`);
+  });
+
+  socket.on('sfu:offer', async ({ roomCode, peerId, sdp }: OfferPayload) => {
+    try {
+      const room = roomBroker.getOrCreateRoom(roomCode);
+      const peer = room.peers.get(peerId);
+
+      if (!peer) {
+        logger.error(`[Signaling] Peer ${peerId} not found in room ${roomCode}`);
+        return;
+      }
+
+      const pc = createPeerConnection();
+      peer.peerConnection = pc;
+
+      pc.onTrack.subscribe((track) => {
+        const publishedTrack = roomBroker.publishTrack(roomCode, peerId, track);
+
+        socket.to(roomCode).emit('sfu:new-producer', {
+          peerId,
+          trackId: publishedTrack.trackId,
+          kind: publishedTrack.kind,
+        });
       });
-      return;
+
+      pc.onIceCandidate.subscribe((candidate) => {
+        if (candidate) {
+          socket.emit('sfu:ice-candidate', {
+            roomCode,
+            peerId,
+            target: 'publisher',
+            candidate: candidate.toJSON ? candidate.toJSON() : candidate,
+          });
+        }
+      });
+
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp.sdp, sdp.type));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      socket.emit('sfu:answer', {
+        sdp: {
+          type: answer.type,
+          sdp: answer.sdp,
+        },
+      });
+
+      logger.info(`[Signaling] Negotiated publishing offer/answer for peer ${peerId}`);
+    } catch (err) {
+      logger.error(`[Signaling] Error handling offer from peer ${peerId}:`, err);
+      socket.emit('sfu:error', { message: 'Failed to process SDP offer' });
     }
+  });
 
-    roomBroker.addPeer(normalizedCode, {
-      userId: user.id,
-      socketId: socket.id,
-      joinedAt: new Date(),
-      tracks: new Map(),
-    });
+  socket.on('sfu:ice-candidate', async ({ roomCode, peerId, candidate, target, trackId }: CandidatePayload) => {
+    try {
+      if (!candidate) return;
+      const rCode = roomCode || currentRoom;
+      const pId = peerId || currentPeerId;
 
-    ack?.({ success: true });
+      if (target === 'subscriber' || trackId) {
+        const consumerPc = findSubscriberPc(rCode || undefined, pId || undefined, trackId);
+        if (consumerPc) {
+          await consumerPc.addIceCandidate(candidate);
+          logger.debug(`[Signaling] Added subscriber ICE candidate for track ${trackId}`);
+          return;
+        }
+      }
+
+      if (target === 'publisher' || !target) {
+        if (rCode && pId) {
+          const room = roomBroker.getOrCreateRoom(rCode);
+          const peer = room.peers.get(pId);
+          if (peer?.peerConnection) {
+            await peer.peerConnection.addIceCandidate(candidate);
+            logger.debug(`[Signaling] Added publisher ICE candidate for peer ${pId}`);
+            return;
+          }
+        }
+      }
+
+      if (rCode && pId) {
+        for (const [key, pc] of subscriberPeerConnections.entries()) {
+          if (key.startsWith(`${rCode}:${pId}:`)) {
+            pc.addIceCandidate(candidate).catch(() => {});
+          }
+        }
+      }
+    } catch (err) {
+      logger.error(`[Signaling] Error adding ICE candidate:`, err);
+    }
+  });
+
+  socket.on('sfu:subscribe-ice-candidate', async ({ roomCode, peerId, trackId, candidate }: any) => {
+    try {
+      if (!candidate || !trackId) return;
+      const rCode = roomCode || currentRoom;
+      const pId = peerId || currentPeerId;
+      const consumerPc = findSubscriberPc(rCode || undefined, pId || undefined, trackId);
+      if (consumerPc) {
+        await consumerPc.addIceCandidate(candidate);
+        logger.debug(`[Signaling] Added subscriber ICE candidate via sfu:subscribe-ice-candidate for track ${trackId}`);
+      }
+    } catch (err) {
+      logger.error(`[Signaling] Error adding subscribe ICE candidate for track ${trackId}:`, err);
+    }
+  });
+
+  socket.on('sfu:request-keyframe', ({ roomCode, publisherPeerId }: { roomCode: string; publisherPeerId: string }) => {
+    const rCode = roomCode || currentRoom;
+    if (rCode && publisherPeerId) {
+      logger.info(`[Signaling] Manual keyframe requested for publisher ${publisherPeerId} in room ${rCode}`);
+      roomBroker.requestKeyframe(rCode, publisherPeerId);
+    }
   });
 
   socket.on(
-    'sfu:send-offer',
-    async (
-      payload: { meetingCode: string; offer: any },
-      ack?: (res: any) => void
-    ) => {
-      const user = socket.data.user;
-      if (!user || !user.id || !payload?.meetingCode || !payload?.offer) {
-        ack?.({ success: false, code: 'INVALID_PAYLOAD', message: 'Meeting code and offer required' });
-        return;
-      }
-
-      const normalizedCode = payload.meetingCode.trim();
-      if (!validateParticipant(normalizedCode)) {
-        ack?.({
-          success: false,
-          code: 'NOT_ACTIVE_PARTICIPANT',
-          message: 'You must be an active admitted participant to negotiate media',
-        });
-        return;
-      }
-
+    'sfu:subscribe',
+    async ({ roomCode, subscriberPeerId, trackId, sdp }: SubscribePayload) => {
       try {
-        const answer = await peerConnectionManager.handleOffer(
-          normalizedCode,
-          socket.id,
-          user.id,
-          payload.offer,
-          (candidate) => {
-            socket.emit('sfu:ice-candidate', { meetingCode: normalizedCode, candidate });
-          },
-          (targetSocketId, offer) => {
-            io.to(targetSocketId).emit('sfu:renegotiate-offer', {
-              meetingCode: normalizedCode,
-              offer,
+        const room = roomBroker.getOrCreateRoom(roomCode);
+        const peer = room.peers.get(subscriberPeerId);
+
+        if (!peer) {
+          logger.error(`[Signaling] Subscriber peer ${subscriberPeerId} not found`);
+          return;
+        }
+
+        const publishedTrack = roomBroker
+          .getRoomTracks(roomCode)
+          .find((t) => t.trackId === trackId);
+
+        if (!publishedTrack) {
+          logger.error(`[Signaling] Track ${trackId} not found in room ${roomCode}`);
+          return;
+        }
+
+        const consumerPc = createPeerConnection();
+        const subKey = `${roomCode}:${subscriberPeerId}:${trackId}`;
+        subscriberPeerConnections.set(subKey, consumerPc);
+
+        consumerPc.onIceCandidate.subscribe((candidate) => {
+          if (candidate) {
+            socket.emit('sfu:ice-candidate', {
+              roomCode,
+              peerId: subscriberPeerId,
+              target: 'subscriber',
+              trackId,
+              candidate: candidate.toJSON ? candidate.toJSON() : candidate,
+            });
+            socket.emit('sfu:subscribe-ice-candidate', {
+              trackId,
+              candidate: candidate.toJSON ? candidate.toJSON() : candidate,
             });
           }
+        });
+
+        const transceiver = consumerPc.addTransceiver(publishedTrack.kind, {
+          direction: 'sendonly',
+        });
+
+        if (publishedTrack.kind === 'video') {
+          transceiver.sender.onPictureLossIndication.subscribe(() => {
+            logger.info(`[Signaling] PLI received: requesting keyframe from publisher ${publishedTrack.peerId}`);
+            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
+          });
+        }
+
+        roomBroker.subscribeToTrack(
+          roomCode,
+          subscriberPeerId,
+          trackId,
+          transceiver.sender
         );
 
-        ack?.({ success: true, data: { answer } });
-      } catch (err: any) {
-        console.error('Failed to handle SFU offer:', err);
-        ack?.({ success: false, code: 'SFU_OFFER_FAILED', message: err.message || 'Failed to process offer' });
-      }
-    }
-  );
+        await consumerPc.setRemoteDescription(
+          new RTCSessionDescription(sdp.sdp, sdp.type)
+        );
+        const answer = await consumerPc.createAnswer();
+        await consumerPc.setLocalDescription(answer);
 
-  socket.on(
-    'sfu:send-answer',
-    async (
-      payload: { meetingCode: string; answer: any },
-      ack?: (res: any) => void
-    ) => {
-      const user = socket.data.user;
-      if (!user || !user.id || !payload?.meetingCode || !payload?.answer) {
-        ack?.({ success: false, code: 'INVALID_PAYLOAD', message: 'Meeting code and answer required' });
-        return;
-      }
-
-      const normalizedCode = payload.meetingCode.trim();
-      if (!validateParticipant(normalizedCode)) {
-        ack?.({
-          success: false,
-          code: 'NOT_ACTIVE_PARTICIPANT',
-          message: 'You must be an active admitted participant to negotiate media',
+        socket.emit('sfu:subscribed', {
+          trackId,
+          sdp: {
+            type: answer.type,
+            sdp: answer.sdp,
+          },
         });
-        return;
-      }
 
-      try {
-        await peerConnectionManager.handleAnswer(normalizedCode, socket.id, payload.answer);
-        ack?.({ success: true });
-      } catch (err: any) {
-        console.error('Failed to handle SFU answer:', err);
-        ack?.({ success: false, code: 'SFU_ANSWER_FAILED', message: err.message || 'Failed to process answer' });
-      }
-    }
-  );
+        if (publishedTrack.kind === 'video') {
+          roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
+          setTimeout(() => {
+            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
+          }, 500);
+          setTimeout(() => {
+            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
+          }, 1200);
+        }
 
-  socket.on(
-    'sfu:send-renegotiate-answer',
-    async (
-      payload: { meetingCode: string; answer: any },
-      ack?: (res: any) => void
-    ) => {
-      const user = socket.data.user;
-      if (!user || !user.id || !payload?.meetingCode || !payload?.answer) {
-        ack?.({ success: false, code: 'INVALID_PAYLOAD', message: 'Meeting code and answer required' });
-        return;
-      }
+        logger.info(
+          `[Signaling] Peer ${subscriberPeerId} subscribed to track ${trackId}`
+        );
 
-      const normalizedCode = payload.meetingCode.trim();
-      if (!validateParticipant(normalizedCode)) {
-        ack?.({
-          success: false,
-          code: 'NOT_ACTIVE_PARTICIPANT',
-          message: 'You must be an active admitted participant to negotiate media',
-        });
-        return;
-      }
-
-      try {
-        await peerConnectionManager.handleAnswer(normalizedCode, socket.id, payload.answer);
-        ack?.({ success: true });
-      } catch (err: any) {
-        console.error('Failed to handle SFU answer:', err);
-        ack?.({ success: false, code: 'SFU_ANSWER_FAILED', message: err.message || 'Failed to process answer' });
+      } catch (err) {
+        logger.error(`[Signaling] Error subscribing to track:`, err);
+        socket.emit('sfu:error', { message: 'Failed to subscribe to track' });
       }
     }
   );
 
-  socket.on(
-    'sfu:send-ice-candidate',
-    async (
-      payload: { meetingCode: string; candidate: any },
-      ack?: (res: any) => void
-    ) => {
-      const user = socket.data.user;
-      if (!user || !user.id || !payload?.meetingCode || !payload?.candidate) {
-        ack?.({ success: false, code: 'INVALID_PAYLOAD', message: 'Meeting code and candidate required' });
-        return;
+  const handleLeave = () => {
+    if (currentRoom && currentPeerId) {
+      for (const [key, pc] of subscriberPeerConnections.entries()) {
+        if (key.includes(`:${currentPeerId}:`)) {
+          pc.close();
+          subscriberPeerConnections.delete(key);
+        }
       }
 
-      const normalizedCode = payload.meetingCode.trim();
-      if (!validateParticipant(normalizedCode)) {
-        ack?.({
-          success: false,
-          code: 'NOT_ACTIVE_PARTICIPANT',
-          message: 'You must be an active admitted participant to exchange ICE candidates',
-        });
-        return;
-      }
-
-      try {
-        await peerConnectionManager.handleIceCandidate(normalizedCode, socket.id, payload.candidate);
-        ack?.({ success: true });
-      } catch (err: any) {
-        console.error('Failed to handle SFU ICE candidate:', err);
-        ack?.({ success: false, code: 'SFU_ICE_FAILED', message: err.message || 'Failed to process ICE candidate' });
-      }
+      roomBroker.removePeer(currentRoom, currentPeerId);
+      socket.to(currentRoom).emit('sfu:peer-left', { peerId: currentPeerId });
+      logger.info(`[Signaling] Peer ${currentPeerId} left room ${currentRoom}`);
+      currentRoom = null;
+      currentPeerId = null;
     }
-  );
+  };
 
-  socket.on('disconnect', () => {
-    peerConnectionManager.closeAllSocketConnections(socket.id);
-  });
+  socket.on('sfu:leave', handleLeave);
+  socket.on('disconnect', handleLeave);
 };

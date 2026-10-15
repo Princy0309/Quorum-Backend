@@ -4,27 +4,14 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import expressWinston from 'express-winston';
 import helmet from 'helmet';
-import userRoutes from './routes/userRoutes.js';
-import meetingRoutes from './routes/meetingRoutes.js';
-import communityRoutes from './routes/communityRoutes.js';
-import postRoutes from './routes/postRoutes.js';
-import commentRoutes from './routes/commentRoutes.js';
-
-
+import apiRouter from './routes/index.js';
 
 dotenv.config();
 
 import setupSwagger from './config/swagger.js';
-import authRoutes from './routes/authRoutes.js';
-import otpRoutes from './routes/otpRoutes.js';
-import dmRoutes from './routes/dmRoutes.js';
-import conversationRoutes from './routes/conversationRoutes.js';
-import uploadRoutes from './routes/uploadRoutes.js';
-import deviceRoutes from './routes/deviceRoutes.js';
 import errorHandler from './middlewares/errorHandler.js';
 import verifyCSRF from './middlewares/csrfProtection.js';
 import logger from './utils/logger.js';
-
 import env from './config/env.js';
 
 const app = express();
@@ -67,7 +54,6 @@ app.use(express.json({ limit: "10kb" }));
 app.use(cookieParser());
 app.use(verifyCSRF);
 
-
 app.use(expressWinston.logger({
   winstonInstance: logger,
   meta: true,
@@ -77,51 +63,9 @@ app.use(expressWinston.logger({
   ignoreRoute: function (req, res) { return req.path === '/health'; }
 }));
 
-app.use('/api/auth', authRoutes);
-app.use('/api/otp', otpRoutes);
-app.use('/api/dm', dmRoutes);
-app.use('/dm', dmRoutes);
-app.use('/api/conversations', conversationRoutes);
-app.use('/conversations', conversationRoutes);
-app.use('/api/chat/conversations', conversationRoutes);
-app.use('/chat/conversations', conversationRoutes);
-app.use('/api/v1/conversations', conversationRoutes);
-app.use('/api/v1/chat/conversations', conversationRoutes);
-app.use('/api/uploads', uploadRoutes);
-app.use('/api/devices', deviceRoutes);
-app.use('/api/user', userRoutes);
-app.use('/user', userRoutes);
-app.use('/api/users', userRoutes);
-app.use('/users', userRoutes);
-app.use('/api/chat/users', userRoutes);
-app.use('/chat/users', userRoutes);
-app.use('/api/v1/users', userRoutes);
-app.use('/api/v1/chat/users', userRoutes);
-app.use('/api/meetings', meetingRoutes);
-app.use('/api/communities', communityRoutes);
-app.use('/communities', communityRoutes);
-app.use('/api/community', communityRoutes);
-app.use('/community', communityRoutes);
-app.use('/api/v1/communities', communityRoutes);
-app.use('/api/v1/community', communityRoutes);
-app.use('/api/community-posts', postRoutes);
-app.use('/community-posts', postRoutes);
-app.use('/api/posts', postRoutes);
-app.use('/posts', postRoutes);
-app.use('/api/v1/posts', postRoutes);
-app.use('/api/v1/community-posts', postRoutes);
-app.use('/api/community-comments', commentRoutes);
-app.use('/community-comments', commentRoutes);
-app.use('/api/comments', commentRoutes);
-app.use('/comments', commentRoutes);
-app.use('/api/v1/comments', commentRoutes);
-app.use('/api/v1/community-comments', commentRoutes);
-app.use('/api/feed', postRoutes);
-app.use('/feed', postRoutes);
-app.get('/api/csrf-token', (req: Request, res: Response) => {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.json({ csrfToken: res.locals.csrfToken || req.cookies['XSRF-TOKEN'] });
-});
+app.use('/api', apiRouter);
+app.use('/', apiRouter);
+
 setupSwagger(app);
 
 app.get('/health', (req: Request, res: Response) => {

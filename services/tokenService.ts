@@ -7,6 +7,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { encryptPayload, decryptPayload } from '../utils/encryption.js';
 import logger from '../utils/logger.js';
 
+
 import env from '../config/env.js';
 
 const JWT_ISSUER = env.JWT_ISSUER;
@@ -16,26 +17,10 @@ const JWT_SECRET = env.JWT_SECRET;
 const JWT_REFRESH_SECRET = env.JWT_REFRESH_SECRET;
 const ROTATION_GRACE_PERIOD_MS = 30 * 1000;
 
-export interface AccessTokenPayload {
-  id: string;
-  type: 'access';
-  sid: string;
-  jti: string;
-  iat?: number;
-  exp?: number;
-  iss?: string;
-  aud?: string;
-}
+import type { AccessTokenPayload, RefreshTokenPayload } from '../types/auth.js';
+export type { AccessTokenPayload, RefreshTokenPayload };
 
-export interface RefreshTokenPayload {
-  id: string;
-  type: 'refresh';
-  jti: string;
-  iat?: number;
-  exp?: number;
-  iss?: string;
-  aud?: string;
-}
+
 
 export const generateAccessToken = (userId: string, sid: string): string => {
   return jwt.sign({ id: userId, type: 'access', sid, jti: crypto.randomUUID() }, JWT_SECRET, {

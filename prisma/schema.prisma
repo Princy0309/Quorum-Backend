@@ -1,23 +1,28 @@
-generator client {
-  provider      = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x", "rhel-openssl-3.0.x"]
-}
-
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
 enum UseCase {
-  ORGANIZATION
-  FREELANCE
-  HIRE_COLLABORATE
-  COMMUNITY
+  WORK
+  PERSONAL
+  EDUCATION
 }
 
 enum MeetingStatus {
   ACTIVE
   ENDED
+}
+
+enum OrgRole {
+  ORG_ADMIN
+  TEAM_HEAD
+  MEMBER
 }
 
 model User {
@@ -47,6 +52,10 @@ model User {
   sentCommunityInvites     CommunityInvite[]
   communityPosts           CommunityPost[]
   communityComments        CommunityComment[]
+  ownedOrganizations       Organization[]            @relation("OrgOwner")
+  memberships              OrganizationMember[]
+  sentOrgInvites           OrganizationInvite[]      @relation("OrgInviter")
+  teamMemberships          TeamMember[]
 }
 
 model RefreshToken {
@@ -153,6 +162,61 @@ model Meeting {
   @@index([code])
 }
 
+model Organization {
+  id           String      @id @default(uuid())
+  name         String     
+  slug         String      @unique
+  description  String? 
+  logo         String?
+  ownerId      String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  owner        User        @relation("OrgOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members      OrganizationMember[]
+  invites      OrganizationInvite[]
+  teams        Team[]
+
+  @@index([slug])
+  @@index([ownerId])
+}
+
+model OrganizationMember {
+  id                 String           @id @default(uuid())
+  organizationId     String 
+  userId             String 
+  role               OrgRole          @default(MEMBER)
+  joinedAt           DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  organization       Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model OrganizationInvite {
+  id              String       @id @default(uuid())
+  organizationId  String
+  inviterId       String
+  email           String?
+  role            OrgRole      @default(MEMBER)
+  token           String       @unique
+  expiresAt       DateTime
+  maxUses         Int          @default(1)
+  usedCount       Int          @default(0)
+  isRevoked       Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inviter         User         @relation("OrgInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([token])
+  @@index([email])
+}
+
 enum CommunityRole {
   OWNER
   ADMIN
@@ -238,3 +302,32 @@ model CommunityComment {
   @@index([createdAt])
 }
 
+model Team {
+  id             String       @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        TeamMember[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model TeamMember {
+  id        String   @id @default(uuid())
+  teamId    String
+  userId    String
+  role      String   @default("member")
+  joinedAt  DateTime @default(now())
+
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+}
