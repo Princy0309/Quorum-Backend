@@ -15,12 +15,12 @@ const envSchema = z.object({
   JWT_ISSUER: z.string().default('quorum-api'),
   JWT_AUDIENCE: z.string().default('quorum-app'),
 
-  CLIENT_URL: z.string().url().default('http://localhost:3000'),
+  CLIENT_URL: z.string().url().optional(),
   SMTP_HOST: z.string().default('smtp.gmail.com'),
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional().default(''),
   SMTP_PASS: z.string().optional().default(''),
-  ALLOWED_ORIGINS: z.string().optional(),
+  ALLOWED_ORIGINS: z.string().min(1, 'ALLOWED_ORIGINS is required in environment configuration'),
   REDIS_URL: z.string().url(),
 }).passthrough();
 
@@ -32,23 +32,37 @@ if (!envVars.success) {
 }
 const data = envVars.data;
 
+export const allowedOrigins: string[] = (data?.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin: string) => origin.trim())
+  .filter(Boolean);
+
+export const isOriginAllowed = (origin?: string | null): boolean => {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (data?.NODE_ENV !== 'production') {
+    return origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:');
+  }
+  return false;
+};
 
 export const env = {
   PORT: data?.PORT || 5000,
   NODE_ENV: data?.NODE_ENV || 'production',
   DATABASE_URL: data?.DATABASE_URL,
-  JWT_SECRET: data?.JWT_SECRET ,
-  JWT_REFRESH_SECRET: data?.JWT_REFRESH_SECRET ,
+  JWT_SECRET: data?.JWT_SECRET,
+  JWT_REFRESH_SECRET: data?.JWT_REFRESH_SECRET,
   JWT_EXPIRES_IN: data?.JWT_EXPIRES_IN || '15m',
   REFRESH_TOKEN_TTL_SECONDS: data?.REFRESH_TOKEN_TTL_SECONDS || 604800,
   JWT_ISSUER: data?.JWT_ISSUER || 'quorum-api',
   JWT_AUDIENCE: data?.JWT_AUDIENCE || 'quorum-app',
-  CLIENT_URL: data?.CLIENT_URL || 'https://newquorum.me',
+  CLIENT_URL: data?.CLIENT_URL || allowedOrigins[0] || 'http://localhost:3000',
   SMTP_HOST: data?.SMTP_HOST || 'smtp.gmail.com',
   SMTP_PORT: data?.SMTP_PORT || 587,
   SMTP_USER: data?.SMTP_USER || '',
   SMTP_PASS: data?.SMTP_PASS || '',
-  ALLOWED_ORIGINS: data?.ALLOWED_ORIGINS,
+  ALLOWED_ORIGINS: data?.ALLOWED_ORIGINS || '',
+  allowedOrigins,
   REDIS_URL: data?.REDIS_URL,
 };
 

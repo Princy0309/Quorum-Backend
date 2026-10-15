@@ -6,6 +6,7 @@ import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.j
 import logger from '../utils/logger.js';
 import { verifyAccessToken } from '../services/tokenService.js';
 import prisma from '../config/prisma.js';
+import { isOriginAllowed } from '../config/env.js';
 import { registerMessageHandler } from './handlers/messageHandler.js';
 import { registerTypingHandler } from './handlers/typingHandler.js';
 import { registerPresenceHandler } from './handlers/presenceHandler.js';
@@ -23,7 +24,11 @@ export const initSocketServer = (httpServer: any) => {
   const io = new Server(httpServer, {
     cors: {
       origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-        callback(null, true);
+        if (isOriginAllowed(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
       },
       credentials: true,
     },

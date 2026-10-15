@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import prisma from '../config/prisma.js';
+import env from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
 
 export const CommunityRole = {
@@ -282,7 +283,7 @@ export const createInviteLink = async (userId: string, communityId: string, expi
       }
     });
 
-    const baseUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || 'https://newquorum.me';
+    const baseUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || env.CLIENT_URL;
     const cleanBase = baseUrl.replace(/\/$/, '');
     const inviteUrl = `${cleanBase}/communities/invites/${invite.token}`;
 

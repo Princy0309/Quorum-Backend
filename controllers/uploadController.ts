@@ -22,14 +22,15 @@ export const signUploadController = async (req: Request, res: Response, next: Ne
     }
 
     if (req.body?.conversationId && req.body?.fileName && req.body?.fileSize) {
-      const { error, value } = signUploadSchema.validate(req.body);
-      if (error) {
-        throw new ApiError(400, error.details[0].message);
+      const parsed = signUploadSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new ApiError(400, parsed.error.issues[0]?.message || 'Validation failed');
       }
+      const value = parsed.data;
 
       const uploadData = await authorizeChatFileUpload(
         userId,
-        value.conversationId,
+        value.conversationId!,
         value.fileName,
         value.fileSize,
         value.fileType
@@ -52,7 +53,7 @@ export const signUploadController = async (req: Request, res: Response, next: Ne
       .digest('hex');
 
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-    const host = req.get('host') || 'api.newquorum.me';
+    const host = req.get('host') || 'localhost';
     const uploadUrl = `${protocol}://${host}/api/uploads/s3`;
 
     res.status(200).json({
