@@ -12,34 +12,17 @@ import setupSwagger from './config/swagger.js';
 import errorHandler from './middlewares/errorHandler.js';
 import verifyCSRF from './middlewares/csrfProtection.js';
 import logger from './utils/logger.js';
-import env from './config/env.js';
+import env, { isOriginAllowed } from './config/env.js';
+import prisma from './config/prisma.js';
 
 const app = express();
 
 const trustProxy = process.env.TRUST_PROXY || 1;
 app.set('trust proxy', isNaN(Number(trustProxy)) ? trustProxy : Number(trustProxy));
 
-const allowedOrigins = env.ALLOWED_ORIGINS
-  ? env.ALLOWED_ORIGINS.split(',').map((o: string) => o.trim()).filter(Boolean)
-  : [
-    'https://quorum-web-omega.vercel.app',
-    'https://newquorum.me',
-    'https://www.newquorum.me',
-    'https://api.newquorum.me',
-    'http://localhost:3000',
-    'http://localhost:5173',
-  ];
-
 app.use(cors({
   origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
-    if (!origin) return callback(null, true);
-
-    const isAllowedDomain = allowedOrigins.includes(origin);
-    const isLocalDev = env.NODE_ENV !== 'production' && (
-      origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')
-    );
-
-    if (isAllowedDomain || isLocalDev) {
+    if (isOriginAllowed(origin)) {
       callback(null, true);
     } else {
       callback(null, false);
@@ -68,14 +51,18 @@ app.use('/', apiRouter);
 
 setupSwagger(app);
 
-app.get('/health', (req: Request, res: Response) => {
-  res.json({
+app.get('/health', async (req: Request, res: Response) => {
+  let dbStatus = 'connected';
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+  } catch {
+    dbStatus = 'disconnected';
+  }
+
+  res.status(200).json({
     status: 'ok',
-    hasDbUrl: !!process.env.DATABASE_URL,
-    hasRedisUrl: !!process.env.REDIS_URL,
-    hasJwtSecret: !!process.env.JWT_SECRET,
-    hasSmtpUser: !!process.env.SMTP_USER,
-    hasSmtpPass: !!process.env.SMTP_PASS,
+    database: dbStatus,
+    timestamp: new Date().toISOString()
   });
 });
 

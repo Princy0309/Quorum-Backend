@@ -5,13 +5,18 @@ services:
     container_name: quorum_postgres
     restart: always
     environment:
-      POSTGRES_USER: quorum_user
-      POSTGRES_PASSWORD: quorum_password
-      POSTGRES_DB: quorum_db
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-quorum_db}
     expose:
       - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -21,6 +26,11 @@ services:
       - "6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   app:
     build: .
@@ -32,13 +42,15 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql://quorum_user:quorum_password@postgres:5432/quorum_db?schema=public
-      - REDIS_URL=redis://redis:6379
-      - PORT=5000
-      - ANNOUNCED_IP=13.126.35.230
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - PORT=${PORT:-5000}
+      - ANNOUNCED_IP=${ANNOUNCED_IP}
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
 volumes:
   postgres_data:
