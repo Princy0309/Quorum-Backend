@@ -169,6 +169,9 @@ model Organization {
   slug         String      @unique
   description  String? 
   logo         String?
+  email        String?
+  industry     String?
+  teamSize     String?
   ownerId      String
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
