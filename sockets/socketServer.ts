@@ -22,7 +22,9 @@ export const getIO = (): Server => {
 export const initSocketServer = (httpServer: any) => {
   const io = new Server(httpServer, {
     cors: {
-      origin: '*',
+      origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+        callback(null, true);
+      },
       credentials: true,
     },
   });
@@ -49,11 +51,8 @@ export const initSocketServer = (httpServer: any) => {
         }
       } catch (err: any) {
         logger.warn(`[Socket Auth] Token verification failed for socket ${socket.id}: ${err.message}`);
+        return next(new Error('Authentication error: jwt expired'));
       }
-    }
-
-    if (!userId && auth.userId) {
-      userId = String(auth.userId);
     }
 
     if (userId && (!name || name === 'Participant')) {
@@ -91,6 +90,43 @@ export const initSocketServer = (httpServer: any) => {
     registerMessageHandler(io, socket as any);
     registerTypingHandler(io, socket as any);
     registerPresenceHandler(io, socket as any);
+
+    const handleDynamicAuth = async (data: { token?: string }, ack?: (res: any) => void) => {
+      try {
+        const raw = data?.token;
+        const freshToken = typeof raw === 'string' ? raw.replace(/^Bearer\s+/i, '').trim() : '';
+        if (!freshToken) {
+          ack?.({ success: false, message: 'Token required' });
+          return;
+        }
+        const decoded = verifyAccessToken(freshToken);
+        if (!decoded?.id) {
+          ack?.({ success: false, message: 'Invalid token payload' });
+          return;
+        }
+        const dbUser = await prisma.user.findUnique({
+          where: { id: decoded.id },
+          select: { id: true, name: true }
+        });
+        if (!dbUser) {
+          ack?.({ success: false, message: 'User not found' });
+          return;
+        }
+        socket.data.user = {
+          id: dbUser.id,
+          name: dbUser.name || 'User',
+          isAuthenticated: true,
+        };
+        socket.join(`user:${dbUser.id}`);
+        logger.info(`[Socket Auth] Client ${socket.id} dynamically authenticated as userId=${dbUser.id}`);
+        ack?.({ success: true, user: socket.data.user });
+      } catch (err: any) {
+        ack?.({ success: false, message: err.message });
+      }
+    };
+
+    socket.on('socket:authenticate', handleDynamicAuth);
+    socket.on('authenticate', handleDynamicAuth);
 
     registerSfuSignaling(io, socket);
 

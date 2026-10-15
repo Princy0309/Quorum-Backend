@@ -14,7 +14,7 @@ export const registerTypingHandler = (io: SocketIOServer, socket: AuthenticatedS
   const handleTypingEvent = async (event: string, payload: TypingPayload) => {
     try {
       const userId = socket.data.user?.id;
-      if (!userId) return;
+      if (!userId || !socket.data.user?.isAuthenticated) return;
 
       const allowed = await checkSocketTypingRateLimit(userId);
       if (!allowed) return;

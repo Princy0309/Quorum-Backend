@@ -52,8 +52,8 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
     ) => {
       try {
         const userId = socket.data.user?.id;
-        if (!userId) {
-          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+        if (!userId || !socket.data.user?.isAuthenticated) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
           return;
         }
 
@@ -120,8 +120,8 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
     ) => {
       try {
         const senderId = socket.data.user?.id;
-        if (!senderId) {
-          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+        if (!senderId || !socket.data.user?.isAuthenticated) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
           return;
         }
 
