@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
 import { searchLimiter, chatLimiter } from '../middlewares/rateLimiter.js';
-import { validateJoi } from '../middlewares/validate.js';
+import { validate } from '../middlewares/validate.js';
 import {
   createGroupSchema,
   addParticipantsSchema,
@@ -29,13 +29,13 @@ router.post('/', authMiddleware, chatLimiter, createOrGetDMController);
 router.post('/direct', authMiddleware, chatLimiter, createOrGetDMController);
 router.post('/dm', authMiddleware, chatLimiter, createOrGetDMController);
 router.get('/search', authMiddleware, searchLimiter, getUserConversationsController);
-router.post('/group', authMiddleware, validateJoi(createGroupSchema), createGroupConversationController);
+router.post('/group', authMiddleware, validate(createGroupSchema), createGroupConversationController);
 router.get('/:id', authMiddleware, getConversationDetailsController);
 router.get('/:id/messages', authMiddleware, getConversationMessagesController);
 router.get('/:id/search', authMiddleware, searchConversationMessagesController);
-router.patch('/:id', authMiddleware, validateJoi(updateGroupSchema), updateGroupConversationController);
-router.post('/:id/participants', authMiddleware, validateJoi(addParticipantsSchema), addGroupParticipantsController);
-router.post('/:id/members', authMiddleware, validateJoi(addParticipantsSchema), addGroupParticipantsController);
+router.patch('/:id', authMiddleware, validate(updateGroupSchema), updateGroupConversationController);
+router.post('/:id/participants', authMiddleware, validate(addParticipantsSchema), addGroupParticipantsController);
+router.post('/:id/members', authMiddleware, validate(addParticipantsSchema), addGroupParticipantsController);
 router.delete('/:id/leave', authMiddleware, leaveGroupConversationController);
 router.post('/:id/leave', authMiddleware, leaveGroupConversationController);
 router.post('/:id/admins', authMiddleware, makeGroupAdminController);

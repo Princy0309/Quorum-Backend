@@ -19,10 +19,10 @@ export const registerTypingHandler = (io: SocketIOServer, socket: AuthenticatedS
       const allowed = await checkSocketTypingRateLimit(userId);
       if (!allowed) return;
 
-      const { error, value } = typingSchema.validate(payload);
-      if (error) return;
+      const parsed = typingSchema.safeParse(payload);
+      if (!parsed.success) return;
 
-      const { conversationId } = value;
+      const { conversationId } = parsed.data;
       const room = `conversation:${conversationId}`;
 
       const resolvedId = await resolveConversationId(userId, conversationId);

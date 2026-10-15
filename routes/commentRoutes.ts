@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
-import { validateJoi } from '../middlewares/validate.js';
+import { validate } from '../middlewares/validate.js';
 import { updateCommentSchema } from '../validators/postValidators.js';
 import {
   updateCommentController,
@@ -9,7 +9,7 @@ import {
 
 const router = Router();
 
-router.patch('/:commentId', authMiddleware, validateJoi(updateCommentSchema), updateCommentController);
+router.patch('/:commentId', authMiddleware, validate(updateCommentSchema), updateCommentController);
 router.delete('/:commentId', authMiddleware, deleteCommentController);
 
 export default router;

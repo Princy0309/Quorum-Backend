@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
-import { validateJoi } from '../middlewares/validate.js';
+import { validate } from '../middlewares/validate.js';
 import {
   updatePostSchema,
   createCommentSchema
@@ -20,10 +20,10 @@ const router = Router();
 router.get('/feed', authMiddleware, getCommunityFeedController);
 router.get('/', authMiddleware, getCommunityFeedController);
 
-router.post('/:postId/comments', authMiddleware, validateJoi(createCommentSchema), createCommentController);
+router.post('/:postId/comments', authMiddleware, validate(createCommentSchema), createCommentController);
 router.get('/:postId/comments', authMiddleware, getPostCommentsController);
 
-router.patch('/:postId', authMiddleware, validateJoi(updatePostSchema), updatePostController);
+router.patch('/:postId', authMiddleware, validate(updatePostSchema), updatePostController);
 router.delete('/:postId', authMiddleware, deletePostController);
 
 export default router;

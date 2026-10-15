@@ -131,20 +131,23 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           return;
         }
 
-        const { error, value } = sendMessageSchema.validate(payload);
-        if (error) {
-          logger.warn('Socket message validation failed', { error: error.details[0].message, payload });
-          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', error.details[0].message));
+        const parsed = sendMessageSchema.safeParse(payload);
+        if (!parsed.success) {
+          const errMsg = parsed.error.issues[0]?.message || 'Invalid payload';
+          logger.warn('Socket message validation failed', { error: errMsg, payload });
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', errMsg));
           return;
         }
+
+        const value = parsed.data;
 
         const conversationId = value.conversationId;
         const clientMessageId = value.clientMessageId;
         const rawContent = (typeof value.content === 'string' ? value.content : '') || value.caption || '';
-        const fileUrl = value.fileUrl || value.url;
-        const fileType = value.fileType || value.type;
-        const fileName = value.fileName || value.name;
-        const fileSize = typeof value.fileSize === 'number' ? value.fileSize : (typeof value.size === 'number' ? value.size : undefined);
+        const fileUrl = (value.fileUrl || value.url) || undefined;
+        const fileType = (value.fileType || value.type) || undefined;
+        const fileName = (value.fileName || (value as any).name) || undefined;
+        const fileSize = typeof value.fileSize === 'number' ? value.fileSize : (typeof (value as any).size === 'number' ? (value as any).size : undefined);
 
         const { message, participants, isDuplicate } = await saveMessage(
           senderId,
@@ -152,7 +155,7 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           rawContent.trim(),
           fileUrl,
           fileType,
-          clientMessageId,
+          clientMessageId || undefined,
           fileName,
           fileSize
         );
@@ -227,11 +230,14 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           return;
         }
 
-        const { error, value } = readMessageSchema.validate(payload);
-        if (error) {
-          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', error.details[0].message));
+        const parsed = readMessageSchema.safeParse(payload);
+        if (!parsed.success) {
+          const errMsg = parsed.error.issues[0]?.message || 'Invalid payload';
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', errMsg));
           return;
         }
+
+        const value = parsed.data;
 
         const { conversationId, messageId } = value;
 

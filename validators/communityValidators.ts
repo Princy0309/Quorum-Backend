@@ -1,23 +1,26 @@
-import Joi from 'joi';
+import { z } from 'zod';
 
-export const createCommunitySchema = Joi.object({
-  name: Joi.string().trim().min(2).max(100).required(),
-  description: Joi.string().trim().max(1000).allow('', null).optional()
+export const createCommunitySchema = z.object({
+  name: z.string().trim().min(2).max(100),
+  description: z.string().trim().max(1000).optional().nullable()
 });
 
-export const updateCommunitySchema = Joi.object({
-  name: Joi.string().trim().min(2).max(100).optional(),
-  description: Joi.string().trim().max(1000).allow('', null).optional()
-}).min(1);
-
-export const createInviteSchema = Joi.object({
-  expiresInDays: Joi.number().integer().min(1).max(30).optional()
+export const updateCommunitySchema = z.object({
+  name: z.string().trim().min(2).max(100).optional(),
+  description: z.string().trim().max(1000).optional().nullable()
+}).refine((data) => data.name !== undefined || data.description !== undefined, {
+  message: 'At least one field (name or description) must be provided'
 });
 
-export const updateMemberRoleSchema = Joi.object({
-  role: Joi.string().valid('ADMIN', 'MEMBER').required()
+export const createInviteSchema = z.object({
+  expiresInDays: z.coerce.number().int().min(1).max(30).optional()
 });
 
-export const transferOwnershipSchema = Joi.object({
-  newOwnerId: Joi.string().trim().required()
+export const updateMemberRoleSchema = z.object({
+  role: z.enum(['ADMIN', 'MEMBER'])
 });
+
+export const transferOwnershipSchema = z.object({
+  newOwnerId: z.string().trim().min(1)
+});
+
