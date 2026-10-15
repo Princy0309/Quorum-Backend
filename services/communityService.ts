@@ -282,11 +282,17 @@ export const createInviteLink = async (userId: string, communityId: string, expi
       }
     });
 
+    const baseUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || 'https://newquorum.me';
+    const cleanBase = baseUrl.replace(/\/$/, '');
+    const inviteUrl = `${cleanBase}/communities/invites/${invite.token}`;
+
     return {
       id: invite.id,
       communityId: invite.communityId,
       communityName: invite.community.name,
       token: invite.token,
+      inviteUrl,
+      link: inviteUrl,
       expiresAt: invite.expiresAt,
       createdAt: invite.createdAt
     };
