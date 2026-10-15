@@ -1,6 +1,6 @@
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
-import { CreateTeamInput, UpdateTeamInput } from '../types/team.js';
+import type { CreateTeamInput, UpdateTeamInput } from '../types/team.js';
 
 
 export const createTeam = async (

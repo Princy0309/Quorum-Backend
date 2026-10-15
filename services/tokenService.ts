@@ -15,8 +15,9 @@ const REFRESH_TTL_SECONDS = env.REFRESH_TOKEN_TTL_SECONDS;
 const JWT_SECRET = env.JWT_SECRET;
 const JWT_REFRESH_SECRET = env.JWT_REFRESH_SECRET;
 
-import { AccessTokenPayload, RefreshTokenPayload } from '../types/auth.js';
-export { AccessTokenPayload, RefreshTokenPayload };
+import type { AccessTokenPayload, RefreshTokenPayload } from '../types/auth.js';
+export type { AccessTokenPayload, RefreshTokenPayload };
+
 
 
 export const generateAccessToken = (userId: string, sid: string): string => {

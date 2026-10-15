@@ -2,7 +2,7 @@ import prisma from "../config/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
 import { OrgRole } from '@prisma/client';
 import crypto from 'crypto';
-import { CreateOrgInput, UpdateOrgInput, CreateInviteInput } from '../types/organization.js';
+import type { CreateOrgInput, UpdateOrgInput, CreateInviteInput } from '../types/organization.js';
 
 
 function slugify(text: string): string{
