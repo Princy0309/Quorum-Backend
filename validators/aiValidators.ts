@@ -14,3 +14,10 @@ export const aiSearchSchema = z.object({
   query: z.string().trim().min(1, 'Search query cannot be empty').max(1000),
   limit: z.coerce.number().int().min(1).max(50).optional().default(15),
 });
+
+export const aiProjectAssistanceSchema = z.object({
+  prompt: z.string().trim().min(1, 'Prompt cannot be empty').max(5000),
+  organizationId: z.string().uuid().optional(),
+  teamId: z.string().uuid().optional(),
+  communityId: z.string().uuid().optional(),
+});

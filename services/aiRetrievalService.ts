@@ -229,3 +229,239 @@ export const searchAuthorizedWorkspaceRecords = async (
 
   return results.slice(0, safeLimit);
 };
+
+export interface AuthorizedProjectContext {
+  projectId: string;
+  projectName: string;
+  projectType: string;
+  description: string | null;
+  members: Array<{ id: string; name: string; role: string }>;
+  teams?: Array<{ id: string; name: string; description: string | null }>;
+  discussions: Array<{ author: string; content: string; createdAt: string; commentCount?: number }>;
+}
+
+export const getAuthorizedProjectContext = async (
+  userId: string,
+  target?: { organizationId?: string; teamId?: string; communityId?: string }
+): Promise<AuthorizedProjectContext> => {
+  if (target?.organizationId) {
+    const orgMember = await prisma.organizationMember.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId: target.organizationId,
+          userId
+        }
+      }
+    });
+
+    if (!orgMember) {
+      throw new ApiError(403, 'User is not authorized to access this organization');
+    }
+
+    const org = await prisma.organization.findUnique({
+      where: { id: target.organizationId },
+      include: {
+        members: {
+          include: {
+            user: { select: { id: true, name: true } }
+          }
+        },
+        teams: {
+          select: { id: true, name: true, description: true }
+        }
+      }
+    });
+
+    if (!org) {
+      throw new ApiError(404, 'Organization not found');
+    }
+
+    return {
+      projectId: org.id,
+      projectName: org.name,
+      projectType: 'organization',
+      description: org.description,
+      members: org.members.map((m) => ({
+        id: m.userId,
+        name: m.user?.name || 'Member',
+        role: m.role
+      })),
+      teams: org.teams,
+      discussions: []
+    };
+  }
+
+  if (target?.teamId) {
+    const teamMember = await prisma.teamMember.findUnique({
+      where: {
+        teamId_userId: {
+          teamId: target.teamId,
+          userId
+        }
+      }
+    });
+
+    if (!teamMember) {
+      throw new ApiError(403, 'User is not authorized to access this team');
+    }
+
+    const team = await prisma.team.findUnique({
+      where: { id: target.teamId },
+      include: {
+        organization: { select: { id: true, name: true } },
+        members: {
+          include: {
+            user: { select: { id: true, name: true } }
+          }
+        }
+      }
+    });
+
+    if (!team) {
+      throw new ApiError(404, 'Team not found');
+    }
+
+    return {
+      projectId: team.id,
+      projectName: `${team.organization.name} - ${team.name}`,
+      projectType: 'team',
+      description: team.description,
+      members: team.members.map((m) => ({
+        id: m.userId,
+        name: m.user?.name || 'Member',
+        role: m.role
+      })),
+      discussions: []
+    };
+  }
+
+  if (target?.communityId) {
+    const communityMember = await prisma.communityMember.findUnique({
+      where: {
+        communityId_userId: {
+          communityId: target.communityId,
+          userId
+        }
+      }
+    });
+
+    if (!communityMember) {
+      throw new ApiError(403, 'User is not authorized to access this community project');
+    }
+
+    const community = await prisma.community.findUnique({
+      where: { id: target.communityId },
+      include: {
+        members: {
+          include: {
+            user: { select: { id: true, name: true } }
+          }
+        },
+        posts: {
+          take: 20,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            author: { select: { name: true } },
+            _count: { select: { comments: true } }
+          }
+        }
+      }
+    });
+
+    if (!community) {
+      throw new ApiError(404, 'Community not found');
+    }
+
+    return {
+      projectId: community.id,
+      projectName: community.name,
+      projectType: 'community',
+      description: community.description,
+      members: community.members.map((m) => ({
+        id: m.userId,
+        name: m.user?.name || 'Member',
+        role: m.role
+      })),
+      discussions: community.posts.map((p) => ({
+        author: p.author?.name || 'Unknown',
+        content: p.content,
+        createdAt: p.createdAt.toISOString(),
+        commentCount: p._count.comments
+      }))
+    };
+  }
+
+  const userOrgs = await prisma.organizationMember.findMany({
+    where: { userId },
+    take: 5,
+    include: {
+      organization: {
+        include: {
+          teams: { select: { id: true, name: true, description: true } },
+          members: { include: { user: { select: { id: true, name: true } } } }
+        }
+      }
+    }
+  });
+
+  if (userOrgs.length > 0) {
+    const primary = userOrgs[0].organization;
+    return {
+      projectId: primary.id,
+      projectName: primary.name,
+      projectType: 'organization',
+      description: primary.description,
+      members: primary.members.map((m) => ({
+        id: m.userId,
+        name: m.user?.name || 'Member',
+        role: m.role
+      })),
+      teams: primary.teams,
+      discussions: []
+    };
+  }
+
+  const userCommunities = await prisma.communityMember.findMany({
+    where: { userId },
+    take: 1,
+    include: {
+      community: {
+        include: {
+          members: { include: { user: { select: { id: true, name: true } } } },
+          posts: {
+            take: 20,
+            orderBy: { createdAt: 'desc' },
+            include: {
+              author: { select: { name: true } },
+              _count: { select: { comments: true } }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (userCommunities.length > 0) {
+    const primary = userCommunities[0].community;
+    return {
+      projectId: primary.id,
+      projectName: primary.name,
+      projectType: 'community',
+      description: primary.description,
+      members: primary.members.map((m) => ({
+        id: m.userId,
+        name: m.user?.name || 'Member',
+        role: m.role
+      })),
+      discussions: primary.posts.map((p) => ({
+        author: p.author?.name || 'Unknown',
+        content: p.content,
+        createdAt: p.createdAt.toISOString(),
+        commentCount: p._count.comments
+      }))
+    };
+  }
+
+  throw new ApiError(404, 'No active organizations, teams, or communities found for this user');
+};
+
