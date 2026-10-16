@@ -21,3 +21,13 @@ export const aiProjectAssistanceSchema = z.object({
   teamId: z.string().uuid().optional(),
   communityId: z.string().uuid().optional(),
 });
+
+export const aiQuickRepliesSchema = z.object({
+  mode: z.enum(['replies', 'follow_up', 'rewrite']).default('replies'),
+  message: z.string().trim().max(3000).optional(),
+  conversationId: z.string().uuid().optional(),
+  tone: z.enum(['professional', 'casual', 'friendly', 'concise', 'enthusiastic']).default('professional'),
+}).refine((data) => data.message || data.conversationId, {
+  message: 'Either message or conversationId must be provided',
+  path: ['message']
+});

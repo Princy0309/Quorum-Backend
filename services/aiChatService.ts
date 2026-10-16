@@ -2,7 +2,8 @@ import { generateRawCompletion } from './aiService.js';
 import {
   searchAuthorizedWorkspaceRecords,
   WorkspaceRecord,
-  getAuthorizedProjectContext
+  getAuthorizedProjectContext,
+  getAuthorizedConversationMessages
 } from './aiRetrievalService.js';
 
 export interface ChatAnswerResponse {
@@ -39,6 +40,20 @@ export interface ProjectAssistanceResponse {
     teamCount?: number;
     discussionCount?: number;
   };
+  metadata: {
+    requestId: string;
+    model: string;
+    createdAt: string;
+    tokenUsage?: any;
+  };
+}
+
+export interface QuickResponsesResult {
+  mode: 'replies' | 'follow_up' | 'rewrite';
+  tone: string;
+  targetContext?: string;
+  suggestions: string[];
+  disclaimer: string;
   metadata: {
     requestId: string;
     model: string;
@@ -158,6 +173,91 @@ export const getProjectAssistance = async (
       teamCount: project.teams?.length,
       discussionCount: project.discussions?.length
     },
+    metadata: {
+      requestId: completion.requestId,
+      model: completion.model,
+      createdAt: new Date().toISOString(),
+      tokenUsage: completion.usage
+    }
+  };
+};
+
+export const generateQuickResponses = async (
+  userId: string,
+  payload: {
+    mode?: 'replies' | 'follow_up' | 'rewrite';
+    message?: string;
+    conversationId?: string;
+    tone?: string;
+  }
+): Promise<QuickResponsesResult> => {
+  const mode = payload.mode || 'replies';
+  const tone = payload.tone || 'professional';
+  let contextText = payload.message || '';
+
+  if (payload.conversationId) {
+    const convoData = await getAuthorizedConversationMessages(userId, payload.conversationId, 10);
+    if (convoData.messages.length > 0) {
+      const chatTranscript = convoData.messages
+        .map((m) => `${m.senderName}: ${m.content}`)
+        .join('\n');
+      if (contextText) {
+        contextText = `Recent Conversation Context:\n${chatTranscript}\n\nCurrent Draft/Message to Respond To:\n${contextText}`;
+      } else {
+        contextText = `Recent Conversation Context:\n${chatTranscript}`;
+      }
+    }
+  }
+
+  let prompt = `Tone: ${tone}\n`;
+  prompt += `Context / Input Message:\n"${contextText}"\n\n`;
+
+  if (mode === 'replies') {
+    prompt += `Please generate 3 distinct suggested quick replies suitable for this conversation context in a ${tone} tone.
+Provide the 3 suggested replies, one per line, formatted strictly like:
+1. [First reply]
+2. [Second reply]
+3. [Third reply]
+Do not include any conversational filler.`;
+  } else if (mode === 'follow_up') {
+    prompt += `Please generate 2-3 proactive follow-up questions or next steps based on the discussion above in a ${tone} tone.
+Provide the suggestions, one per line, formatted strictly like:
+1. [First follow-up]
+2. [Second follow-up]
+3. [Third follow-up]
+Do not include any conversational filler.`;
+  } else {
+    prompt += `Please rewrite the user's message to make it polished, clear, and well-phrased in a ${tone} tone.
+Provide 2-3 different rewrite variations, one per line, formatted strictly like:
+1. [First variation]
+2. [Second variation]
+3. [Third variation]
+Do not include any conversational filler.`;
+  }
+
+  const systemInstruction = 'You are the Quorum Collaboration Assistant. You provide high-quality suggested replies, follow-ups, and professional rewrites for users to review before sending. You never send messages on behalf of the user.';
+
+  const completion = await generateRawCompletion(prompt, systemInstruction);
+
+  const rawLines = completion.text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const suggestions: string[] = [];
+  for (const line of rawLines) {
+    const cleanLine = line.replace(/^\d+[\.\)]\s*/, '').replace(/^[-*•]\s*/, '').trim();
+    if (cleanLine.length > 0) {
+      suggestions.push(cleanLine);
+    }
+  }
+
+  return {
+    mode,
+    tone,
+    targetContext: payload.message || undefined,
+    suggestions: suggestions.length > 0 ? suggestions : [completion.text.trim()],
+    disclaimer: 'These are suggested drafts for review. Quorum will never send messages automatically without user confirmation.',
     metadata: {
       requestId: completion.requestId,
       model: completion.model,
