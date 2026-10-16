@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { sendSuccess } from '../utils/ApiResponse.js';
 import { ApiError } from '../utils/ApiError.js';
-import { askAiAssistant, searchWorkspaceWithAi } from '../services/aiChatService.js';
+import { askAiAssistant, searchWorkspaceWithAi, getProjectAssistance } from '../services/aiChatService.js';
 import { summarizeConversationChat } from '../services/aiSummaryService.js';
 
 export const chatController = asyncHandler(async (req: Request, res: Response) => {
@@ -40,4 +40,20 @@ export const searchWorkspaceController = asyncHandler(async (req: Request, res: 
   });
 
   return sendSuccess(res, 200, 'Workspace search completed successfully', result);
+});
+
+export const projectAssistanceController = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
+  const { prompt, organizationId, teamId, communityId } = req.body;
+  const result = await getProjectAssistance(userId, prompt, {
+    organizationId,
+    teamId,
+    communityId
+  });
+
+  return sendSuccess(res, 200, 'Project assistance generated successfully', result);
 });

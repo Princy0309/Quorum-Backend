@@ -1,5 +1,9 @@
 import { generateRawCompletion } from './aiService.js';
-import { searchAuthorizedWorkspaceRecords, WorkspaceRecord } from './aiRetrievalService.js';
+import {
+  searchAuthorizedWorkspaceRecords,
+  WorkspaceRecord,
+  getAuthorizedProjectContext
+} from './aiRetrievalService.js';
 
 export interface ChatAnswerResponse {
   answer: string;
@@ -15,6 +19,26 @@ export interface WorkspaceSearchAiResponse {
   query: string;
   answer: string;
   sources: WorkspaceRecord[];
+  metadata: {
+    requestId: string;
+    model: string;
+    createdAt: string;
+    tokenUsage?: any;
+  };
+}
+
+export interface ProjectAssistanceResponse {
+  prompt: string;
+  answer: string;
+  project: {
+    id: string;
+    name: string;
+    type: string;
+    description: string | null;
+    memberCount: number;
+    teamCount?: number;
+    discussionCount?: number;
+  };
   metadata: {
     requestId: string;
     model: string;
@@ -82,6 +106,58 @@ export const searchWorkspaceWithAi = async (
     query,
     answer: completion.text || 'Unable to synthesize response from workspace records.',
     sources: records,
+    metadata: {
+      requestId: completion.requestId,
+      model: completion.model,
+      createdAt: new Date().toISOString(),
+      tokenUsage: completion.usage
+    }
+  };
+};
+
+export const getProjectAssistance = async (
+  userId: string,
+  prompt: string,
+  options?: { organizationId?: string; teamId?: string; communityId?: string }
+): Promise<ProjectAssistanceResponse> => {
+  const project = await getAuthorizedProjectContext(userId, options);
+
+  let context = `Project Name: ${project.projectName}\n`;
+  context += `Project Type: ${project.projectType}\n`;
+  if (project.description) {
+    context += `Description: ${project.description}\n`;
+  }
+  context += `Members (${project.members.length}): ${project.members.map((m) => `${m.name} (${m.role})`).join(', ')}\n`;
+
+  if (project.teams && project.teams.length > 0) {
+    context += `Teams: ${project.teams.map((t) => t.name).join(', ')}\n`;
+  }
+
+  if (project.discussions && project.discussions.length > 0) {
+    context += `Recent Updates & Discussions:\n`;
+    project.discussions.forEach((d) => {
+      context += `- [${d.createdAt}] ${d.author}: ${d.content}\n`;
+    });
+  }
+
+  const finalPrompt = `Project Context:\n${context}\n\nUser Question/Request:\n${prompt}\n\nPlease provide actionable project-related assistance regarding tasks, updates, decisions, or deadlines based on the provided project information. If specific deadlines or deliverables are not mentioned in the records, state so clearly.`;
+
+  const systemInstruction = 'You are the Quorum Project Assistant. Help team members manage tasks, track project status, review decisions, and plan next steps based on authorized workspace data.';
+
+  const completion = await generateRawCompletion(finalPrompt, systemInstruction);
+
+  return {
+    prompt,
+    answer: completion.text || 'Unable to generate project assistance.',
+    project: {
+      id: project.projectId,
+      name: project.projectName,
+      type: project.projectType,
+      description: project.description,
+      memberCount: project.members.length,
+      teamCount: project.teams?.length,
+      discussionCount: project.discussions?.length
+    },
     metadata: {
       requestId: completion.requestId,
       model: completion.model,
