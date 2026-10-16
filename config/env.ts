@@ -7,7 +7,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(5000),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   DATABASE_URL: z.string(),
-  
+
   JWT_SECRET: z.string(),
   JWT_REFRESH_SECRET: z.string(),
   JWT_EXPIRES_IN: z.string().default('15m'),
@@ -64,6 +64,8 @@ export const env = {
   ALLOWED_ORIGINS: data?.ALLOWED_ORIGINS || '',
   allowedOrigins,
   REDIS_URL: data?.REDIS_URL,
+  GEMINI_API_KEY: data?.GEMINI_API_KEY || process.env.GEMINI_API_KEY || '',
+  GEMINI_MODEL: data?.GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-1.5-flash',
 };
 
 export default env;
