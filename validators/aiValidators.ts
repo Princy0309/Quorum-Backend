@@ -9,3 +9,8 @@ export const aiSummarySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   focus: z.string().trim().max(500).optional(),
 });
+
+export const aiSearchSchema = z.object({
+  query: z.string().trim().min(1, 'Search query cannot be empty').max(1000),
+  limit: z.coerce.number().int().min(1).max(50).optional().default(15),
+});
