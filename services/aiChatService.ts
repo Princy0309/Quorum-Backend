@@ -266,3 +266,108 @@ Do not include any conversational filler.`;
     }
   };
 };
+
+export interface ProjectStatusUpdateResult {
+  project: {
+    id: string;
+    name: string;
+    type: string;
+    description: string | null;
+    memberCount: number;
+    teamCount?: number;
+    discussionCount?: number;
+  };
+  timeframe: string;
+  statusUpdate: string;
+  retrievedFacts: {
+    membersCount: number;
+    discussionsAnalyzed: number;
+    teamsRecorded: number;
+  };
+  disclaimer: string;
+  metadata: {
+    requestId: string;
+    model: string;
+    createdAt: string;
+    tokenUsage?: any;
+  };
+}
+
+export const generateProjectStatusUpdate = async (
+  userId: string,
+  payload: {
+    organizationId?: string;
+    teamId?: string;
+    communityId?: string;
+    timeframe?: string;
+  }
+): Promise<ProjectStatusUpdateResult> => {
+  const timeframe = payload.timeframe || 'last_7_days';
+  const project = await getAuthorizedProjectContext(userId, {
+    organizationId: payload.organizationId,
+    teamId: payload.teamId,
+    communityId: payload.communityId
+  });
+
+  let factsContext = `Project: ${project.projectName} (${project.projectType})\n`;
+  if (project.description) {
+    factsContext += `Description: ${project.description}\n`;
+  }
+  factsContext += `Members (${project.members.length}): ${project.members.map((m) => `${m.name} [${m.role}]`).join(', ')}\n`;
+
+  if (project.teams && project.teams.length > 0) {
+    factsContext += `Teams: ${project.teams.map((t) => `${t.name}${t.description ? ` (${t.description})` : ''}`).join(', ')}\n`;
+  }
+
+  if (project.discussions && project.discussions.length > 0) {
+    factsContext += `Recorded Activity & Updates (${project.discussions.length}):\n`;
+    project.discussions.forEach((d) => {
+      factsContext += `- [${d.createdAt}] ${d.author}: ${d.content}${d.commentCount ? ` (${d.commentCount} comments)` : ''}\n`;
+    });
+  } else {
+    factsContext += `Recorded Activity: No discussion posts recorded yet.\n`;
+  }
+
+  const prompt = `Project Data (Timeframe: ${timeframe}):\n${factsContext}\n
+Please produce an executive project status update. You MUST strictly adhere to the following structure and clearly distinguish verified facts from AI-generated suggestions:
+
+### 1. RETRIEVED FACTS (VERIFIED WORKSPACE DATA)
+- **Completed Work & Key Milestones**: (List items explicitly completed or achieved based strictly on the recorded activity above. If none recorded, explicitly state "None explicitly recorded".)
+- **Pending & In-Progress Tasks**: (List deliverables or tasks currently ongoing based on the project records.)
+- **Blockers & Known Issues**: (List any impediments, bugs, or blockers mentioned in the records. If none recorded, explicitly state "No blockers recorded".)
+
+### 2. AI-GENERATED RECOMMENDATIONS & SUGGESTIONS
+- **Suggested Next Steps**: (Actionable, proactive recommendations suggested by AI for the team.)
+- **Priority Areas**: (Key focus areas recommended for the next sprint/period.)`;
+
+  const systemInstruction = 'You are the Quorum Project Intelligence Assistant. Generate structured, accurate status updates. You must strictly distinguish retrieved factual data from AI-generated suggestions.';
+
+  const completion = await generateRawCompletion(prompt, systemInstruction);
+
+  return {
+    project: {
+      id: project.projectId,
+      name: project.projectName,
+      type: project.projectType,
+      description: project.description,
+      memberCount: project.members.length,
+      teamCount: project.teams?.length,
+      discussionCount: project.discussions?.length
+    },
+    timeframe,
+    statusUpdate: completion.text || 'Unable to generate project status update.',
+    retrievedFacts: {
+      membersCount: project.members.length,
+      discussionsAnalyzed: project.discussions?.length || 0,
+      teamsRecorded: project.teams?.length || 0
+    },
+    disclaimer: 'Verified facts are retrieved directly from Quorum records. Recommendations and priorities are AI-generated suggestions for team review.',
+    metadata: {
+      requestId: completion.requestId,
+      model: completion.model,
+      createdAt: new Date().toISOString(),
+      tokenUsage: completion.usage
+    }
+  };
+};
+

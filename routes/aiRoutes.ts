@@ -6,14 +6,16 @@ import {
   aiSummarySchema,
   aiSearchSchema,
   aiProjectAssistanceSchema,
-  aiQuickRepliesSchema
+  aiQuickRepliesSchema,
+  aiProjectUpdateSchema
 } from '../validators/aiValidators.js';
 import {
   chatController,
   summarizeChatController,
   searchWorkspaceController,
   projectAssistanceController,
-  quickRepliesController
+  quickRepliesController,
+  projectUpdateController
 } from '../controllers/aiController.js';
 
 const router = Router();
@@ -23,5 +25,6 @@ router.post('/chat/:conversationId/summary', authMiddleware, validate(aiSummaryS
 router.post('/search', authMiddleware, validate(aiSearchSchema), searchWorkspaceController);
 router.post('/project-assistance', authMiddleware, validate(aiProjectAssistanceSchema), projectAssistanceController);
 router.post('/quick-replies', authMiddleware, validate(aiQuickRepliesSchema), quickRepliesController);
+router.post('/project-update', authMiddleware, validate(aiProjectUpdateSchema), projectUpdateController);
 
 export default router;

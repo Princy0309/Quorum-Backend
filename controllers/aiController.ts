@@ -6,7 +6,8 @@ import {
   askAiAssistant,
   searchWorkspaceWithAi,
   getProjectAssistance,
-  generateQuickResponses
+  generateQuickResponses,
+  generateProjectStatusUpdate
 } from '../services/aiChatService.js';
 import { summarizeConversationChat } from '../services/aiSummaryService.js';
 
@@ -78,4 +79,21 @@ export const quickRepliesController = asyncHandler(async (req: Request, res: Res
   });
 
   return sendSuccess(res, 200, 'Quick response suggestions generated successfully', result);
+});
+
+export const projectUpdateController = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
+  const { organizationId, teamId, communityId, timeframe } = req.body;
+  const result = await generateProjectStatusUpdate(userId, {
+    organizationId,
+    teamId,
+    communityId,
+    timeframe
+  });
+
+  return sendSuccess(res, 200, 'Project update generated successfully', result);
 });

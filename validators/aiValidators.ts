@@ -31,3 +31,10 @@ export const aiQuickRepliesSchema = z.object({
   message: 'Either message or conversationId must be provided',
   path: ['message']
 });
+
+export const aiProjectUpdateSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  teamId: z.string().uuid().optional(),
+  communityId: z.string().uuid().optional(),
+  timeframe: z.enum(['last_7_days', 'last_30_days', 'all']).default('last_7_days'),
+});
