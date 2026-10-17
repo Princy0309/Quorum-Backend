@@ -37,7 +37,6 @@ model User {
   memberships              OrganizationMember[]
   sentOrgInvites           OrganizationInvite[]      @relation("OrgInviter")
   teamMemberships          TeamMember[]
-  aiInteractions           AiInteraction[]
 }
 
 model RefreshToken {
