@@ -394,7 +394,7 @@ export const getAuthorizedProjectContext = async (
           }
         },
         teams: {
-          select: { id: true, name: true, description: true }
+          select: { id: true, name: true, description: true, createdAt: true }
         }
       }
     });
@@ -403,24 +403,29 @@ export const getAuthorizedProjectContext = async (
       throw new ApiError(404, 'Organization not found');
     }
 
-    const memberUserIds = org.members.map((m) => m.userId);
-    const meetings = await prisma.meeting.findMany({
-      where: {
-        hostId: { in: memberUserIds },
-        ...(startDate ? { createdAt: { gte: startDate } } : {})
-      },
-      take: 20,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        host: { select: { id: true, name: true } }
-      }
-    });
+    const activityRecords: Array<{ author: string; content: string; createdAt: string }> = [];
 
-    const activityRecords = meetings.map((m) => ({
-      author: m.host?.name || 'Meeting Host',
-      content: `Meeting Session: ${m.code} (Status: ${m.status})`,
-      createdAt: m.createdAt.toISOString()
-    }));
+    for (const t of org.teams) {
+      if (!startDate || t.createdAt >= startDate) {
+        activityRecords.push({
+          author: 'Organization Admin',
+          content: `Team created: ${t.name}${t.description ? ` (${t.description})` : ''}`,
+          createdAt: t.createdAt.toISOString()
+        });
+      }
+    }
+
+    for (const m of org.members) {
+      if (!startDate || m.joinedAt >= startDate) {
+        activityRecords.push({
+          author: m.user?.name || 'Member',
+          content: `Joined organization with role: ${m.role}`,
+          createdAt: m.joinedAt.toISOString()
+        });
+      }
+    }
+
+    activityRecords.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     return {
       projectId: org.id,
@@ -468,24 +473,27 @@ export const getAuthorizedProjectContext = async (
       throw new ApiError(404, 'Team not found');
     }
 
-    const memberUserIds = team.members.map((m) => m.userId);
-    const meetings = await prisma.meeting.findMany({
-      where: {
-        hostId: { in: memberUserIds },
-        ...(startDate ? { createdAt: { gte: startDate } } : {})
-      },
-      take: 20,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        host: { select: { id: true, name: true } }
-      }
-    });
+    const activityRecords: Array<{ author: string; content: string; createdAt: string }> = [];
 
-    const activityRecords = meetings.map((m) => ({
-      author: m.host?.name || 'Meeting Host',
-      content: `Team Meeting Session: ${m.code} (Status: ${m.status})`,
-      createdAt: m.createdAt.toISOString()
-    }));
+    if (!startDate || team.createdAt >= startDate) {
+      activityRecords.push({
+        author: 'Organization',
+        content: `Team established under ${team.organization.name}`,
+        createdAt: team.createdAt.toISOString()
+      });
+    }
+
+    for (const m of team.members) {
+      if (!startDate || m.joinedAt >= startDate) {
+        activityRecords.push({
+          author: m.user?.name || 'Member',
+          content: `Joined team with role: ${m.role}`,
+          createdAt: m.joinedAt.toISOString()
+        });
+      }
+    }
+
+    activityRecords.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     return {
       projectId: team.id,

@@ -26,3 +26,26 @@ export const validate = (schema: ZodTypeAny | any) => {
 
 export const validateJoi = validate;
 
+export const validateQuery = (schema: ZodTypeAny | any) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (schema && typeof schema.safeParse === 'function') {
+      const result = schema.safeParse(req.query);
+      if (!result.success) {
+        return next(new ApiError(400, result.error.issues[0]?.message || 'Query validation error'));
+      }
+      try {
+        req.query = result.data;
+      } catch {
+        Object.defineProperty(req, 'query', {
+          value: result.data,
+          writable: true,
+          configurable: true,
+          enumerable: true
+        });
+      }
+      return next();
+    }
+    next();
+  };
+};
+

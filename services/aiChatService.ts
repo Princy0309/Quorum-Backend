@@ -216,8 +216,14 @@ const validateQuickResponseJson = (rawText: string, mode: string): string[] | nu
       }
     }
 
-    if (validList.length < 2 || validList.length > 3) {
-      return null;
+    if (mode === 'replies') {
+      if (validList.length !== 3) {
+        return null;
+      }
+    } else {
+      if (validList.length < 2 || validList.length > 3) {
+        return null;
+      }
     }
 
     return validList;
@@ -288,7 +294,11 @@ Do not include markdown code block syntax, greetings, or conversational remarks.
   let validatedSuggestions = validateQuickResponseJson(completion.text, mode);
 
   if (!validatedSuggestions) {
-    const retryPrompt = `${prompt}\n\nCORRECTION: Your previous output did not match the required schema. Return strictly valid JSON with 2 to 3 suggestions: {"suggestions": ["suggestion 1", "suggestion 2", "suggestion 3"]}. Do not return code fence blocks or arbitrary text.`;
+    const countRequirement = mode === 'replies' ? 'exactly 3' : '2 to 3';
+    const sampleSchema = mode === 'replies'
+      ? '{"suggestions": ["first reply", "second reply", "third reply"]}'
+      : '{"suggestions": ["first suggestion", "second suggestion"]}';
+    const retryPrompt = `${prompt}\n\nCORRECTION: Your previous output did not match the required schema. Return strictly valid JSON containing ${countRequirement} suggestions matching: ${sampleSchema}. Do not return code fence blocks or arbitrary text.`;
     completion = await generateRawCompletion(retryPrompt, systemInstruction);
     validatedSuggestions = validateQuickResponseJson(completion.text, mode);
   }

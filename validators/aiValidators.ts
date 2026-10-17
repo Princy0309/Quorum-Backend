@@ -58,8 +58,8 @@ export const aiProjectUpdateSchema = z.object({
 );
 
 export const aiHistoryQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(50).optional().default(20),
-  cursor: z.string().optional(),
-  actionType: z.string().optional(),
-  conversationId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1, 'Limit must be at least 1').max(50, 'Limit cannot exceed 50').optional().default(20),
+  cursor: z.string().uuid('Cursor must be a valid UUID').optional(),
+  actionType: z.string().trim().max(50).optional(),
+  conversationId: z.string().uuid('Conversation ID must be a valid UUID').optional(),
 });

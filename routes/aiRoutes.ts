@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
-import { validate } from '../middlewares/validate.js';
+import { validate, validateQuery } from '../middlewares/validate.js';
 import { aiRateLimiterMiddleware } from '../middlewares/rateLimiter.js';
 import {
   aiChatSchema,
@@ -8,7 +8,8 @@ import {
   aiSearchSchema,
   aiProjectAssistanceSchema,
   aiQuickRepliesSchema,
-  aiProjectUpdateSchema
+  aiProjectUpdateSchema,
+  aiHistoryQuerySchema
 } from '../validators/aiValidators.js';
 import {
   chatController,
@@ -32,7 +33,7 @@ router.post('/search', validate(aiSearchSchema), searchWorkspaceController);
 router.post('/project-assistance', validate(aiProjectAssistanceSchema), projectAssistanceController);
 router.post('/quick-replies', validate(aiQuickRepliesSchema), quickRepliesController);
 router.post('/project-update', validate(aiProjectUpdateSchema), projectUpdateController);
-router.get('/history', getHistoryController);
+router.get('/history', validateQuery(aiHistoryQuerySchema), getHistoryController);
 router.delete('/history', deleteHistoryController);
 router.delete('/history/:id', deleteHistoryController);
 
