@@ -6,7 +6,7 @@ import app from './app.js';
 import { emailWorker, queueRedisConnection } from './queues/emailQueue.js';
 import redis from './config/redis.js';
 import { initSocketServer } from './sockets/socketServer.js';
-
+import { startAiHistoryCleanupTask } from './services/aiHistoryService.js';
 
 let server: any;
 
@@ -16,6 +16,7 @@ const startServer = async (): Promise<void> => {
 
   server = app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Quorum server running on port ${PORT}`);
+    startAiHistoryCleanupTask();
   });
 
   
