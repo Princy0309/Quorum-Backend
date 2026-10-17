@@ -250,5 +250,33 @@ export const checkSfuIceRateLimit = async (userId: string): Promise<boolean> => 
   }
 };
 
+export const aiRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'ai_api_v1',
+  points: 20,
+  duration: 60,
+  blockDuration: 60
+});
+
+export const aiRateLimiterMiddleware = (req: Request, res: Response, next: NextFunction): void => {
+  const key = req.user?.id || req.ip || '127.0.0.1';
+  aiRateLimiter.consume(key)
+    .then((rateLimiterRes) => {
+      res.setHeader('X-RateLimit-Limit', '20');
+      res.setHeader('X-RateLimit-Remaining', String(rateLimiterRes.remainingPoints));
+      res.setHeader('X-RateLimit-Reset', String(Math.ceil(Date.now() / 1000) + Math.ceil(rateLimiterRes.msBeforeNext / 1000)));
+      next();
+    })
+    .catch((err) => {
+      if (err instanceof Error) {
+        return next();
+      }
+      res.setHeader('X-RateLimit-Limit', '20');
+      res.setHeader('X-RateLimit-Remaining', '0');
+      res.setHeader('X-RateLimit-Reset', String(Math.ceil(Date.now() / 1000) + Math.ceil(err.msBeforeNext / 1000)));
+      res.status(429).json({ success: false, statusCode: 429, message: 'Too many AI requests. Please slow down and try again shortly.' });
+    });
+};
+
 
 
