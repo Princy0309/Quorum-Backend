@@ -141,8 +141,6 @@ export const updateOrganization = async (orgId: string, data: UpdateOrgInput) =>
   return updatedOrg;
 };
 
-//organization-creation
-
 export const getOrganizationMembers = async (orgId: string) => {
   
   const org = await prisma.organization.findUnique({
