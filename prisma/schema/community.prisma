@@ -1,0 +1,80 @@
+enum CommunityRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Community {
+  id          String            @id @default(uuid())
+  name        String
+  description String?
+  ownerId     String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  owner       User              @relation("CommunityOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members     CommunityMember[]
+  invites     CommunityInvite[]
+  posts       CommunityPost[]
+
+  @@index([ownerId])
+}
+
+model CommunityMember {
+  id          String        @id @default(uuid())
+  communityId String
+  userId      String
+  role        CommunityRole @default(MEMBER)
+  joinedAt    DateTime      @default(now())
+  community   Community     @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+  @@index([userId])
+  @@index([communityId])
+}
+
+model CommunityInvite {
+  id          String    @id @default(uuid())
+  communityId String
+  inviterId   String
+  token       String    @unique
+  expiresAt   DateTime?
+  isRevoked   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  inviter     User      @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([communityId])
+}
+
+model CommunityPost {
+  id          String             @id @default(uuid())
+  communityId String
+  authorId    String
+  content     String
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  community   Community          @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  author      User               @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments    CommunityComment[]
+
+  @@index([communityId])
+  @@index([authorId])
+  @@index([createdAt])
+}
+
+model CommunityComment {
+  id        String        @id @default(uuid())
+  postId    String
+  authorId  String
+  content   String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([authorId])
+  @@index([createdAt])
+}
