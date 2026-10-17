@@ -20,7 +20,16 @@ export const aiProjectAssistanceSchema = z.object({
   organizationId: z.string().uuid().optional(),
   teamId: z.string().uuid().optional(),
   communityId: z.string().uuid().optional(),
-});
+}).refine(
+  (data) => {
+    const count = [data.organizationId, data.teamId, data.communityId].filter(Boolean).length;
+    return count === 1;
+  },
+  {
+    message: 'Exactly one project target identifier (organizationId, teamId, or communityId) must be provided',
+    path: ['organizationId']
+  }
+);
 
 export const aiQuickRepliesSchema = z.object({
   mode: z.enum(['replies', 'follow_up', 'rewrite']).default('replies'),
@@ -37,7 +46,16 @@ export const aiProjectUpdateSchema = z.object({
   teamId: z.string().uuid().optional(),
   communityId: z.string().uuid().optional(),
   timeframe: z.enum(['last_7_days', 'last_30_days', 'all']).default('last_7_days'),
-});
+}).refine(
+  (data) => {
+    const count = [data.organizationId, data.teamId, data.communityId].filter(Boolean).length;
+    return count === 1;
+  },
+  {
+    message: 'Exactly one project target identifier (organizationId, teamId, or communityId) must be provided',
+    path: ['organizationId']
+  }
+);
 
 export const aiHistoryQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional().default(20),

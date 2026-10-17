@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import crypto from 'crypto';
 import env from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
+import logger from '../utils/logger.js';
 
 let genAIClient: GoogleGenAI | null = null;
 
@@ -78,10 +79,16 @@ export const generateRawCompletion = async (
     if (err instanceof ApiError) throw err;
 
     const msg = String(err?.message || '');
+    logger.error('AI provider execution error', {
+      requestId,
+      model,
+      error: msg
+    });
+
     if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('Quota')) {
       throw new ApiError(429, 'AI provider quota limit reached. Please wait a moment before retrying.');
     }
 
-    throw new ApiError(502, `AI service provider failure: ${msg || 'Unknown error'}`);
+    throw new ApiError(502, 'AI service provider failed to process the request. Please try again later.');
   }
 };

@@ -252,7 +252,26 @@ export const searchAuthorizedWorkspaceRecords = async (
     });
   }
 
-  return results.slice(0, safeLimit);
+  const categoryBuckets = [
+    results.filter((r) => r.type === 'document'),
+    results.filter((r) => r.type === 'community_post'),
+    results.filter((r) => r.type === 'message'),
+    results.filter((r) => r.type === 'organization'),
+    results.filter((r) => r.type === 'meeting')
+  ].filter((bucket) => bucket.length > 0);
+
+  const mergedResults: WorkspaceRecord[] = [];
+  let round = 0;
+  while (mergedResults.length < safeLimit && categoryBuckets.some((b) => b.length > round)) {
+    for (const bucket of categoryBuckets) {
+      if (bucket[round] && mergedResults.length < safeLimit) {
+        mergedResults.push(bucket[round]);
+      }
+    }
+    round++;
+  }
+
+  return mergedResults;
 };
 
 export interface AuthorizedProjectContext {
@@ -269,6 +288,14 @@ export const getAuthorizedProjectContext = async (
   userId: string,
   target?: { organizationId?: string; teamId?: string; communityId?: string }
 ): Promise<AuthorizedProjectContext> => {
+  const ids = [target?.organizationId, target?.teamId, target?.communityId].filter(Boolean);
+  if (ids.length === 0) {
+    throw new ApiError(400, 'A target identifier (organizationId, teamId, or communityId) is required');
+  }
+  if (ids.length > 1) {
+    throw new ApiError(400, 'Please provide exactly one target identifier (organizationId, teamId, or communityId)');
+  }
+
   if (target?.organizationId) {
     const orgMember = await prisma.organizationMember.findUnique({
       where: {
@@ -416,77 +443,6 @@ export const getAuthorizedProjectContext = async (
     };
   }
 
-  const userOrgs = await prisma.organizationMember.findMany({
-    where: { userId },
-    take: 5,
-    include: {
-      organization: {
-        include: {
-          teams: { select: { id: true, name: true, description: true } },
-          members: { include: { user: { select: { id: true, name: true } } } }
-        }
-      }
-    }
-  });
-
-  if (userOrgs.length > 0) {
-    const primary = userOrgs[0].organization;
-    return {
-      projectId: primary.id,
-      projectName: primary.name,
-      projectType: 'organization',
-      description: primary.description,
-      members: primary.members.map((m) => ({
-        id: m.userId,
-        name: m.user?.name || 'Member',
-        role: m.role
-      })),
-      teams: primary.teams,
-      discussions: []
-    };
-  }
-
-  const userCommunities = await prisma.communityMember.findMany({
-    where: { userId },
-    take: 1,
-    include: {
-      community: {
-        include: {
-          members: { include: { user: { select: { id: true, name: true } } } },
-          posts: {
-            take: 20,
-            orderBy: { createdAt: 'desc' },
-            include: {
-              author: { select: { name: true } },
-              _count: { select: { comments: true } }
-            }
-          }
-        }
-      }
-    }
-  });
-
-  if (userCommunities.length > 0) {
-    const primary = userCommunities[0].community;
-    return {
-      projectId: primary.id,
-      projectName: primary.name,
-      projectType: 'community',
-      description: primary.description,
-      members: primary.members.map((m) => ({
-        id: m.userId,
-        name: m.user?.name || 'Member',
-        role: m.role
-      })),
-      discussions: primary.posts.map((p) => ({
-        author: p.author?.name || 'Unknown',
-        content: p.content,
-        createdAt: p.createdAt.toISOString(),
-        commentCount: p._count.comments
-      }))
-    };
-  }
-
-  throw new ApiError(404, 'No active organizations, teams, or communities found for this user');
+  throw new ApiError(400, 'A valid target identifier (organizationId, teamId, or communityId) is required');
 };
 
