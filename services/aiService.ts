@@ -23,6 +23,15 @@ export interface RawAiCompletionResult {
   usage?: any;
 }
 
+export const sanitizeAiInput = (input: string): string => {
+  if (!input || typeof input !== 'string') return '';
+  return input
+    .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '[REDACTED_TOKEN]')
+    .replace(/(AIza[0-9A-Za-z-_]{35}|AKIA[0-9A-Z]{16})/g, '[REDACTED_KEY]')
+    .replace(/\$2[abxy]?\$\d{1,2}\$[A-Za-z0-9./]{53}/g, '[REDACTED_HASH]');
+};
+
 export const generateRawCompletion = async (
   prompt: string,
   systemInstruction?: string
@@ -31,16 +40,30 @@ export const generateRawCompletion = async (
   const requestId = crypto.randomUUID();
   const model = String(env.GEMINI_MODEL || 'gemini-1.5-flash');
 
+  const sanitizedPrompt = sanitizeAiInput(prompt).slice(0, 20000);
+  const sanitizedInstruction = systemInstruction ? sanitizeAiInput(systemInstruction) : undefined;
+
+  let timer: any = null;
+
   try {
-    const response = await ai.models.generateContent({
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new ApiError(504, 'AI model provider request timed out. Please try again.'));
+      }, 25000);
+    });
+
+    const executionPromise = ai.models.generateContent({
       model,
-      contents: prompt,
-      config: systemInstruction ? {
+      contents: sanitizedPrompt,
+      config: sanitizedInstruction ? {
         systemInstruction: {
-          parts: [{ text: systemInstruction }]
+          parts: [{ text: sanitizedInstruction }]
         }
       } : undefined
     });
+
+    const response = await Promise.race([executionPromise, timeoutPromise]);
+    if (timer) clearTimeout(timer);
 
     const text = response.text || '';
 
@@ -51,7 +74,14 @@ export const generateRawCompletion = async (
       usage: response.usageMetadata || undefined
     };
   } catch (err: any) {
+    if (timer) clearTimeout(timer);
     if (err instanceof ApiError) throw err;
-    throw new ApiError(502, `AI service provider failure: ${err.message || 'Unknown error'}`);
+
+    const msg = String(err?.message || '');
+    if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('Quota')) {
+      throw new ApiError(429, 'AI provider quota limit reached. Please wait a moment before retrying.');
+    }
+
+    throw new ApiError(502, `AI service provider failure: ${msg || 'Unknown error'}`);
   }
 };

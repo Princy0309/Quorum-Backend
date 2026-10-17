@@ -43,8 +43,8 @@ const trustedMediaUrlSchema = z.string()
 export const sendMessageSchema = z.object({
   conversationId: z.string().trim().min(1, 'conversationId is required').max(100),
   clientMessageId: z.string().trim().max(100).optional(),
-  content: z.string().trim().max(5000).optional().nullable(),
-  caption: z.string().trim().max(5000).optional().nullable(),
+  content: z.string().trim().max(10000).optional().nullable(),
+  caption: z.string().trim().max(10000).optional().nullable(),
   fileUrl: trustedMediaUrlSchema.optional().nullable().or(z.literal('')),
   url: trustedMediaUrlSchema.optional().nullable().or(z.literal('')),
   fileType: z.string().optional().nullable(),

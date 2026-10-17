@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const aiChatSchema = z.object({
-  prompt: z.string().trim().min(1, 'Prompt cannot be empty').max(5000),
+  prompt: z.string().trim().min(1, 'Prompt cannot be empty').max(10000),
   context: z.string().trim().max(10000).optional(),
 });
 
@@ -16,7 +16,7 @@ export const aiSearchSchema = z.object({
 });
 
 export const aiProjectAssistanceSchema = z.object({
-  prompt: z.string().trim().min(1, 'Prompt cannot be empty').max(5000),
+  prompt: z.string().trim().min(1, 'Prompt cannot be empty').max(10000),
   organizationId: z.string().uuid().optional(),
   teamId: z.string().uuid().optional(),
   communityId: z.string().uuid().optional(),
@@ -24,7 +24,7 @@ export const aiProjectAssistanceSchema = z.object({
 
 export const aiQuickRepliesSchema = z.object({
   mode: z.enum(['replies', 'follow_up', 'rewrite']).default('replies'),
-  message: z.string().trim().max(3000).optional(),
+  message: z.string().trim().max(10000).optional(),
   conversationId: z.string().uuid().optional(),
   tone: z.enum(['professional', 'casual', 'friendly', 'concise', 'enthusiastic']).default('professional'),
 }).refine((data) => data.message || data.conversationId, {

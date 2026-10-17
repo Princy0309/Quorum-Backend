@@ -250,3 +250,31 @@ export const checkSfuIceRateLimit = async (userId: string): Promise<boolean> => 
   }
 };
 
+export const aiUserRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'ai_user_req_v1',
+  points: 20,
+  duration: 60,
+  blockDuration: 60
+});
+
+export const aiRateLimiterMiddleware = async (req: Request, res: Response, next: NextFunction): Promise<any> => {
+  try {
+    const key = req.user?.id || req.ip || '127.0.0.1';
+    await aiUserRateLimiter.consume(key);
+    next();
+  } catch (err: any) {
+    if (err && typeof err.msBeforeNext === 'number') {
+      const retryAfterSec = Math.ceil(err.msBeforeNext / 1000);
+      res.set('Retry-After', String(retryAfterSec));
+      return res.status(429).json({
+        success: false,
+        message: 'Too many AI requests. Please wait a moment before trying again.',
+        retryAfter: retryAfterSec
+      });
+    }
+    next();
+  }
+};
+
+

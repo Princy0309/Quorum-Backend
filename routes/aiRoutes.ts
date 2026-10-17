@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
 import { validate } from '../middlewares/validate.js';
+import { aiRateLimiterMiddleware } from '../middlewares/rateLimiter.js';
 import {
   aiChatSchema,
   aiSummarySchema,
@@ -21,6 +22,8 @@ import {
 } from '../controllers/aiController.js';
 
 const router = Router();
+
+router.use(aiRateLimiterMiddleware);
 
 router.post('/chat', authMiddleware, validate(aiChatSchema), chatController);
 router.post('/chat/:conversationId/summary', authMiddleware, validate(aiSummarySchema), summarizeChatController);
