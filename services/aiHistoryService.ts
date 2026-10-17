@@ -44,6 +44,19 @@ export const cleanExpiredAiHistory = async (retentionDays: number = env.AI_HISTO
 export const startAiHistoryCleanupTask = () => {
   const runCleanup = async () => {
     try {
+      const lockKey = 'lock:ai_history_cleanup';
+      let lockAcquired = true;
+      try {
+        const res = await redis.set(lockKey, 'locked', 'EX', 82800, 'NX');
+        lockAcquired = res === 'OK';
+      } catch {
+        lockAcquired = true;
+      }
+
+      if (!lockAcquired) {
+        return;
+      }
+
       const result = await cleanExpiredAiHistory();
       if (result.deletedCount > 0) {
         logger.info('Cleaned expired AI interaction history', {
