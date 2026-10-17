@@ -41,30 +41,28 @@ export const generateRawCompletion = async (
   const requestId = crypto.randomUUID();
   const model = String(env.GEMINI_MODEL || 'gemini-1.5-flash');
 
-  const sanitizedPrompt = sanitizeAiInput(prompt).slice(0, 20000);
+  const sanitizedPrompt = sanitizeAiInput(prompt);
   const sanitizedInstruction = systemInstruction ? sanitizeAiInput(systemInstruction) : undefined;
 
-  let timer: any = null;
+  const abortController = new AbortController();
+  const timer = setTimeout(() => {
+    abortController.abort();
+  }, 25000);
 
   try {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        reject(new ApiError(504, 'AI model provider request timed out. Please try again.'));
-      }, 25000);
-    });
-
-    const executionPromise = ai.models.generateContent({
+    const response = await ai.models.generateContent({
       model,
       contents: sanitizedPrompt,
-      config: sanitizedInstruction ? {
-        systemInstruction: {
+      config: {
+        httpOptions: { timeout: 25000 },
+        abortSignal: abortController.signal,
+        systemInstruction: sanitizedInstruction ? {
           parts: [{ text: sanitizedInstruction }]
-        }
-      } : undefined
+        } : undefined
+      }
     });
 
-    const response = await Promise.race([executionPromise, timeoutPromise]);
-    if (timer) clearTimeout(timer);
+    clearTimeout(timer);
 
     const text = response.text || '';
 
@@ -75,7 +73,10 @@ export const generateRawCompletion = async (
       usage: response.usageMetadata || undefined
     };
   } catch (err: any) {
-    if (timer) clearTimeout(timer);
+    clearTimeout(timer);
+    if (abortController.signal.aborted || err?.name === 'AbortError') {
+      throw new ApiError(504, 'AI model provider request timed out. Please try again.');
+    }
     if (err instanceof ApiError) throw err;
 
     const msg = String(err?.message || '');

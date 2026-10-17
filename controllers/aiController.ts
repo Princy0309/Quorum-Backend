@@ -22,7 +22,7 @@ export const chatController = asyncHandler(async (req: Request, res: Response) =
   const result = await askAiAssistant(prompt, context);
 
   if (userId) {
-    recordAiInteraction(userId, {
+    await recordAiInteraction(userId, {
       prompt,
       response: result.answer,
       actionType: 'chat',
@@ -48,7 +48,7 @@ export const summarizeChatController = asyncHandler(async (req: Request, res: Re
     focus: typeof focus === 'string' ? focus : undefined
   });
 
-  recordAiInteraction(userId, {
+  await recordAiInteraction(userId, {
     prompt: `Summarize conversation: ${conversationId}${focus ? ` (focus: ${focus})` : ''}`,
     response: result.summary,
     actionType: 'summary',
@@ -71,7 +71,7 @@ export const searchWorkspaceController = asyncHandler(async (req: Request, res: 
     limit: limit ? Number(limit) : undefined
   });
 
-  recordAiInteraction(userId, {
+  await recordAiInteraction(userId, {
     prompt: `Workspace search: ${query}`,
     response: result.answer,
     actionType: 'search',
@@ -95,7 +95,7 @@ export const projectAssistanceController = asyncHandler(async (req: Request, res
     communityId
   });
 
-  recordAiInteraction(userId, {
+  await recordAiInteraction(userId, {
     prompt,
     response: result.answer,
     actionType: 'project_assistance',
@@ -120,7 +120,7 @@ export const quickRepliesController = asyncHandler(async (req: Request, res: Res
     tone
   });
 
-  recordAiInteraction(userId, {
+  await recordAiInteraction(userId, {
     prompt: `Quick ${mode}: ${message || conversationId}`,
     response: result.suggestions.join('\n'),
     actionType: 'quick_replies',
@@ -146,7 +146,7 @@ export const projectUpdateController = asyncHandler(async (req: Request, res: Re
     timeframe
   });
 
-  recordAiInteraction(userId, {
+  await recordAiInteraction(userId, {
     prompt: `Project update (${timeframe}): ${organizationId || teamId || communityId || 'user projects'}`,
     response: result.statusUpdate,
     actionType: 'project_update',

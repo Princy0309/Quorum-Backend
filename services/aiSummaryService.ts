@@ -38,9 +38,14 @@ export const summarizeConversationChat = async (
     };
   }
 
-  const transcript = data.messages
-    .map((msg) => `[${msg.createdAt.toISOString()}] ${msg.senderName}: ${msg.content}`)
-    .join('\n');
+  let transcript = '';
+  let transcriptLen = 0;
+  for (const msg of data.messages) {
+    const line = `[${msg.createdAt.toISOString()}] ${msg.senderName}: ${(msg.content || '').slice(0, 500)}\n`;
+    if (transcriptLen + line.length > 10000) break;
+    transcript += line;
+    transcriptLen += line.length;
+  }
 
   let prompt = `Conversation Name: ${data.conversation.name || 'Direct / Group Discussion'}\n`;
   prompt += `Conversation Type: ${data.conversation.type}\n`;
