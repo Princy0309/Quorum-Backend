@@ -45,12 +45,15 @@ export const startAiHistoryCleanupTask = () => {
   const runCleanup = async () => {
     try {
       const lockKey = 'lock:ai_history_cleanup';
-      let lockAcquired = true;
+      let lockAcquired = false;
       try {
         const res = await redis.set(lockKey, 'locked', 'EX', 82800, 'NX');
         lockAcquired = res === 'OK';
-      } catch {
-        lockAcquired = true;
+      } catch (lockErr: any) {
+        logger.warn('Failed to acquire AI history cleanup lock due to Redis error, skipping cleanup until Redis recovers', {
+          error: lockErr?.message
+        });
+        return;
       }
 
       if (!lockAcquired) {
