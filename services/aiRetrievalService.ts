@@ -252,25 +252,86 @@ export const searchAuthorizedWorkspaceRecords = async (
     });
   }
 
-  const categoryBuckets = [
-    results.filter((r) => r.type === 'document'),
-    results.filter((r) => r.type === 'community_post'),
-    results.filter((r) => r.type === 'message'),
-    results.filter((r) => r.type === 'organization'),
-    results.filter((r) => r.type === 'meeting')
-  ].filter((bucket) => bucket.length > 0);
+  const queryLower = trimmed.toLowerCase();
+  const queryTokens = queryLower.split(/\s+/).filter((t) => t.length > 1);
 
-  const mergedResults: WorkspaceRecord[] = [];
-  let round = 0;
-  while (mergedResults.length < safeLimit && categoryBuckets.some((b) => b.length > round)) {
-    for (const bucket of categoryBuckets) {
-      if (bucket[round] && mergedResults.length < safeLimit) {
-        mergedResults.push(bucket[round]);
+  const calculateRelevanceScore = (r: WorkspaceRecord): number => {
+    let score = 0;
+    const contentLower = (r.content || '').toLowerCase();
+    const sourceLower = (r.source || '').toLowerCase();
+    const authorLower = (r.author || '').toLowerCase();
+    const fileLower = (r.fileName || '').toLowerCase();
+
+    if (contentLower.includes(queryLower)) {
+      score += 15;
+    }
+    if (fileLower && fileLower.includes(queryLower)) {
+      score += 20;
+    }
+    if (sourceLower.includes(queryLower)) {
+      score += 10;
+    }
+    if (authorLower.includes(queryLower)) {
+      score += 5;
+    }
+
+    for (const token of queryTokens) {
+      if (fileLower && fileLower.includes(token)) {
+        score += 8;
+      }
+      if (contentLower.includes(token)) {
+        score += 4;
+        const occurrences = contentLower.split(token).length - 1;
+        score += Math.min(occurrences, 5);
+      }
+      if (sourceLower.includes(token)) {
+        score += 3;
+      }
+      if (authorLower.includes(token)) {
+        score += 2;
       }
     }
-    round++;
+
+    const recDate = new Date(r.createdAt).getTime();
+    const ageDays = (Date.now() - recDate) / (1000 * 60 * 60 * 24);
+    if (ageDays <= 2) {
+      score += 5;
+    } else if (ageDays <= 7) {
+      score += 3;
+    } else if (ageDays <= 30) {
+      score += 1;
+    }
+
+    return score;
+  };
+
+  const scoredResults = results.map((r) => ({
+    record: r,
+    score: calculateRelevanceScore(r)
+  }));
+
+  scoredResults.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return new Date(b.record.createdAt).getTime() - new Date(a.record.createdAt).getTime();
+  });
+
+  const categoryCounts: Record<string, number> = {};
+  const maxPerCategory = Math.max(Math.ceil(safeLimit * 0.5), 3);
+  const prioritized: WorkspaceRecord[] = [];
+  const deferred: WorkspaceRecord[] = [];
+
+  for (const item of scoredResults) {
+    const cat = item.record.type;
+    const currentCount = categoryCounts[cat] || 0;
+    if (currentCount < maxPerCategory) {
+      prioritized.push(item.record);
+      categoryCounts[cat] = currentCount + 1;
+    } else {
+      deferred.push(item.record);
+    }
   }
 
+  const mergedResults = [...prioritized, ...deferred].slice(0, safeLimit);
   return mergedResults;
 };
 

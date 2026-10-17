@@ -1,6 +1,7 @@
 import prisma from '../config/prisma.js';
 import redis from '../config/redis.js';
 import logger from '../utils/logger.js';
+import { ApiError } from '../utils/ApiError.js';
 
 export interface RecordAiInteractionInput {
   prompt: string;
@@ -19,6 +20,24 @@ export interface GetAiHistoryOptions {
 }
 
 const REDIS_KEY_PREFIX = 'ai_history:user:';
+
+export const cleanExpiredAiHistory = async (retentionDays: number = 30) => {
+  const safeDays = Math.max(retentionDays, 1);
+  const cutoffDate = new Date(Date.now() - safeDays * 24 * 60 * 60 * 1000);
+
+  const result = await prisma.aiInteraction.deleteMany({
+    where: {
+      createdAt: {
+        lt: cutoffDate
+      }
+    }
+  });
+
+  return {
+    deletedCount: result.count,
+    cutoffDate: cutoffDate.toISOString()
+  };
+};
 
 export const recordAiInteraction = async (
   userId: string,
@@ -43,6 +62,10 @@ export const recordAiInteraction = async (
       await redis.ltrim(cacheKey, 0, 49);
       await redis.expire(cacheKey, 86400);
     } catch {
+    }
+
+    if (Math.random() < 0.05) {
+      cleanExpiredAiHistory(30).catch(() => {});
     }
   } catch (err: any) {
     logger.warn('Failed to persist AI interaction to database', {
@@ -72,7 +95,10 @@ export const getUserAiHistory = async (
     take: limit + 1,
     skip: cursor ? 1 : 0,
     cursor: cursor ? { id: cursor } : undefined,
-    orderBy: { createdAt: 'desc' }
+    orderBy: [
+      { createdAt: 'desc' },
+      { id: 'desc' }
+    ]
   });
 
   let hasNextPage = false;
@@ -80,8 +106,11 @@ export const getUserAiHistory = async (
 
   if (records.length > limit) {
     hasNextPage = true;
-    const nextItem = records.pop();
-    nextCursor = nextItem?.id || null;
+    records.pop();
+  }
+
+  if (records.length > 0 && hasNextPage) {
+    nextCursor = records[records.length - 1].id;
   }
 
   return {
@@ -98,19 +127,27 @@ export const deleteUserAiHistory = async (
   userId: string,
   interactionId?: string
 ) => {
+  let deletedCount = 0;
+
   if (interactionId) {
-    await prisma.aiInteraction.deleteMany({
+    const result = await prisma.aiInteraction.deleteMany({
       where: {
         id: interactionId,
         userId
       }
     });
+
+    if (result.count === 0) {
+      throw new ApiError(404, 'AI interaction not found');
+    }
+    deletedCount = result.count;
   } else {
-    await prisma.aiInteraction.deleteMany({
+    const result = await prisma.aiInteraction.deleteMany({
       where: {
         userId
       }
     });
+    deletedCount = result.count;
   }
 
   try {
@@ -121,6 +158,7 @@ export const deleteUserAiHistory = async (
 
   return {
     success: true,
+    deletedCount,
     deletedId: interactionId || 'all'
   };
 };
