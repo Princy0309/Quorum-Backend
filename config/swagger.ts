@@ -1,598 +1,1398 @@
-import { Express } from 'express';
+import { Express, Request, Response } from 'express';
 import swaggerUi from 'swagger-ui-express';
 
 const swaggerDocument = {
-  openapi: '3.0.0',
-  info: {
-    title: 'Quorum Backend API Documentation',
-    version: '1.0.0',
-    description: 'Interactive API documentation for Quorum Authentication, OTP verification, User Search, Conversations, Direct Messaging, and Session Management.',
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Quorum Backend API Documentation",
+    "version": "1.0.0",
+    "description": "Interactive API documentation for Quorum Authentication, OTP verification, User Search, Conversations, Direct Messaging, and Session Management."
   },
-  servers: [
+  "servers": [
     {
-      url: 'https://api.newquorum.me',
-      description: 'AWS EC2 (Live Production)',
+      "url": "https://api.newquorum.me",
+      "description": "AWS EC2 (Live Production)"
     },
     {
-      url: 'http://localhost:5000',
-      description: 'Local Development Server',
-    },
+      "url": "http://localhost:5000",
+      "description": "Local Development Server"
+    }
   ],
-  components: {
-    securitySchemes: {
-      BearerAuth: {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'Enter your Bearer Access Token in the format: Bearer <token>',
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Enter your Bearer Access Token in the format: Bearer <token>"
       },
-      CSRFAuth: {
-        type: 'apiKey',
-        in: 'header',
-        name: 'x-xsrf-token',
-        description: 'Enter the CSRF token retrieved from /api/csrf-token for all POST, PUT, DELETE requests.',
-      },
-    },
+      "CSRFAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-xsrf-token",
+        "description": "Enter the CSRF token retrieved from /api/csrf-token for all POST, PUT, DELETE requests."
+      }
+    }
   },
-  paths: {
-    '/api/csrf-token': {
-      get: {
-        tags: ['Authentication'],
-        summary: 'Get CSRF Token',
-        description: 'Retrieves a CSRF token to be included in the x-xsrf-token header of subsequent state-changing requests.',
-        responses: {
-          200: { description: 'Returns the CSRF token' },
-        },
-      },
-    },
-    '/api/auth/register': {
-      post: {
-        tags: ['Authentication'],
-        summary: 'Register a new user',
-        description: 'Creates a new user account and sends verification OTP to email. Tokens are issued after OTP verification via /api/otp/verify-email.',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['name', 'email', 'password'],
-                properties: {
-                  name: { type: 'string', example: 'John Doe' },
-                  email: { type: 'string', example: 'user@example.com' },
-                  password: { type: 'string', minLength: 8, maxLength: 72, example: 'Password123!' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          201: {
-            description: 'User registered successfully. OTP sent to email.',
-          },
-          400: { description: 'Validation error' },
-          409: { description: 'Email already registered' },
-        },
-      },
-    },
-    '/api/auth/login': {
-      post: {
-        tags: ['Authentication'],
-        summary: 'Login user',
-        description: 'Authenticates credentials and sets an HttpOnly, Secure refreshToken cookie for web clients. Mobile clients can pass x-client-platform: mobile header to receive refreshToken in response JSON body.',
-        parameters: [
-          {
-            name: 'x-client-platform',
-            in: 'header',
-            required: false,
-            schema: { type: 'string' },
-            description: 'Specify "mobile" for non-browser mobile app requests',
-          },
+  "paths": {
+    "/api/csrf-token": {
+      "get": {
+        "tags": [
+          "Authentication"
         ],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['email', 'password'],
-                properties: {
-                  email: { type: 'string', example: 'user@example.com' },
-                  password: { type: 'string', minLength: 8, maxLength: 72, example: 'Password123!' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: {
-            description: 'Login successful. Sets HttpOnly refreshToken cookie.',
-          },
-          401: { description: 'Invalid credentials' },
-          403: { description: 'Email not verified or Account is temporarily locked' },
-          429: { description: 'Too many failed login attempts from IP or Account' },
-        },
-      },
+        "summary": "Get CSRF Token",
+        "description": "Retrieves a CSRF token to be included in the x-xsrf-token header of subsequent state-changing requests.",
+        "responses": {
+          "200": {
+            "description": "Returns the CSRF token"
+          }
+        }
+      }
     },
-    '/api/auth/refresh-token': {
-      post: {
-        tags: ['Authentication'],
-        summary: 'Rotate refresh token',
-        description: 'Rotates active refresh token from HttpOnly cookie (for web browsers) or JSON body (for mobile clients with x-client-platform: mobile) and returns a new access token.',
-        parameters: [
-          {
-            name: 'x-client-platform',
-            in: 'header',
-            required: false,
-            schema: { type: 'string' },
-            description: 'Specify "mobile" for non-browser mobile app requests',
-          },
+    "/api/auth/register": {
+      "post": {
+        "tags": [
+          "Authentication"
         ],
-        requestBody: {
-          required: false,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  refreshToken: { type: 'string', description: 'Refresh token (required for mobile clients)' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: {
-            description: 'Token refreshed successfully. Sets updated HttpOnly refreshToken cookie.',
-          },
-          401: { description: 'Invalid or expired refresh token' },
-          403: { description: 'Account is temporarily locked' },
-          429: { description: 'Too many refresh token requests' },
-        },
-      },
-    },
-    '/api/auth/logout': {
-      post: {
-        tags: ['Authentication'],
-        summary: 'Logout user',
-        description: 'Revokes the active refresh token provided in HttpOnly cookie or JSON body.',
-        parameters: [
-          {
-            name: 'x-client-platform',
-            in: 'header',
-            required: false,
-            schema: { type: 'string' },
-            description: 'Specify "mobile" for non-browser mobile app requests',
-          },
-        ],
-        requestBody: {
-          required: false,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  refreshToken: { type: 'string' },
-                },
-              },
-            },
-          },
-        },
-        security: [{ BearerAuth: [] }],
-        responses: {
-          200: { description: 'Logged out successfully. Both access token and refresh tokens are revoked.' },
-        },
-      },
-    },
-    '/api/auth/logout-all': {
-      post: {
-        tags: ['Authentication'],
-        summary: 'Logout from all devices',
-        description: 'Revokes all active sessions across all devices for the authenticated user.',
-        security: [{ BearerAuth: [] }],
-        responses: {
-          200: { description: 'Logged out from all devices successfully' },
-          401: { description: 'Unauthorized' },
-        },
-      },
-    },
-    '/api/auth/me': {
-      get: {
-        tags: ['Authentication'],
-        summary: 'Get current user profile',
-        security: [{ BearerAuth: [] }],
-        responses: {
-          200: { description: 'User profile retrieved successfully' },
-          401: { description: 'Unauthorized' },
-          403: { description: 'Email not verified' },
-        },
-      },
-    },
-    '/api/users/search': {
-      get: {
-        tags: ['User Profile & Search'],
-        summary: 'Search users by name or email',
-        description: 'Performs a case-insensitive search across user names and email addresses. Automatically excludes the requesting user and supports limit/page pagination.',
-        security: [{ BearerAuth: [] }],
-        parameters: [
-          {
-            name: 'q',
-            in: 'query',
-            required: false,
-            schema: { type: 'string' },
-            description: 'Search term for name or email (e.g., "john" or "john@example.com")',
-          },
-          {
-            name: 'page',
-            in: 'query',
-            required: false,
-            schema: { type: 'integer', default: 1 },
-            description: 'Page number for pagination',
-          },
-          {
-            name: 'limit',
-            in: 'query',
-            required: false,
-            schema: { type: 'integer', default: 20, maximum: 100 },
-            description: 'Number of user results per page',
-          },
-        ],
-        responses: {
-          200: {
-            description: 'Matching users retrieved successfully with pagination details',
-          },
-          401: { description: 'Unauthorized' },
-        },
-      },
-    },
-    '/api/users/onboarding': {
-      patch: {
-        tags: ['User Profile & Search'],
-        summary: 'Save user onboarding use cases',
-        description: 'Saves user choices for how they want to use Quorum (Organization, Freelance, Hire & Collaborate, Community). Requires JWT Bearer authentication.',
-        security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: false,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  useCases: {
-                    type: 'array',
-                    items: {
-                      type: 'string',
-                      enum: ['ORGANIZATION', 'FREELANCE', 'HIRE_COLLABORATE', 'COMMUNITY'],
-                    },
-                    example: ['ORGANIZATION', 'COMMUNITY'],
+        "summary": "Register a new user",
+        "description": "Creates a new user account and sends verification OTP to email. Tokens are issued after OTP verification via /api/otp/verify-email.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "John Doe"
                   },
-                },
-              },
-            },
-          },
+                  "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 72,
+                    "example": "Password123!"
+                  }
+                }
+              }
+            }
+          }
         },
-        responses: {
-          200: {
-            description: 'Onboarding preferences saved successfully',
+        "responses": {
+          "201": {
+            "description": "User registered successfully. OTP sent to email."
           },
-          400: {
-            description: 'Validation error: invalid use cases',
+          "400": {
+            "description": "Validation error"
           },
-          401: {
-            description: 'Unauthorized: missing or invalid JWT token',
-          },
-          403: {
-            description: 'Email not verified',
-          },
-        },
-      },
-    },
-
-    '/api/otp/send-verification': {
-      post: {
-        tags: ['OTP & Verification'],
-        summary: 'Send email verification OTP',
-        requestBody: {
-          required: false,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  email: { type: 'string', example: 'user@example.com' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: { description: 'Verification OTP sent to email' },
-          400: { description: 'Email address required' },
-          404: { description: 'User not found' },
-        },
-      },
-    },
-    '/api/otp/verify-email': {
-      post: {
-        tags: ['OTP & Verification'],
-        summary: 'Verify email with 6-digit OTP',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['otp'],
-                properties: {
-                  email: { type: 'string', example: 'user@example.com' },
-                  otp: { type: 'string', example: '123456' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: {
-            description: 'Email verified successfully',
-          },
-          400: { description: 'Incorrect or expired OTP' },
-        },
-      },
-    },
-    '/api/otp/forgot-password': {
-      post: {
-        tags: ['OTP & Verification'],
-        summary: 'Request password reset OTP',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['email'],
-                properties: {
-                  email: { type: 'string', example: 'user@example.com' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: { description: 'Password reset OTP sent to email' },
-        },
-      },
-    },
-    '/api/otp/reset-password': {
-      post: {
-        tags: ['OTP & Verification'],
-        summary: 'Reset password with OTP',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['email', 'otp', 'newPassword'],
-                properties: {
-                  email: { type: 'string', example: 'user@example.com' },
-                  otp: { type: 'string', example: '123456' },
-                  newPassword: { type: 'string', minLength: 8, maxLength: 72, example: 'NewSecurePassword123!' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: { description: 'Password reset successfully. All active sessions have been atomically revoked.' },
-          400: { description: 'Incorrect OTP or validation error' },
-          404: { description: 'User not found' },
-        },
-      },
-    },
-    '/api/conversations': {
-      get: {
-        tags: ['Conversations'],
-        summary: 'Get user conversations',
-        description: 'Retrieves all conversations for the authenticated user, ordered by last activity, including unread message counts and last message preview.',
-        security: [{ BearerAuth: [] }],
-        responses: {
-          200: { description: 'Conversations retrieved successfully' },
-          401: { description: 'Unauthorized' }
+          "409": {
+            "description": "Email already registered"
+          }
         }
       }
     },
-    '/api/conversations/{id}/messages': {
-      get: {
-        tags: ['Conversations'],
-        summary: 'Get conversation messages',
-        description: 'Fetches paginated message history for a specific conversation using cursor-based pagination.',
-        security: [{ BearerAuth: [] }],
-        parameters: [
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Login user",
+        "description": "Authenticates credentials and sets an HttpOnly, Secure refreshToken cookie for web clients. Mobile clients can pass x-client-platform: mobile header to receive refreshToken in response JSON body.",
+        "parameters": [
           {
-            name: 'id',
-            in: 'path',
-            required: true,
-            schema: { type: 'string' },
-            description: 'Conversation UUID'
-          },
-          {
-            name: 'cursor',
-            in: 'query',
-            required: false,
-            schema: { type: 'string' },
-            description: 'Message ID cursor for fetching older messages'
-          },
-          {
-            name: 'limit',
-            in: 'query',
-            required: false,
-            schema: { type: 'integer', default: 20, maximum: 50 },
-            description: 'Number of messages to retrieve per page'
+            "name": "x-client-platform",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Specify \"mobile\" for non-browser mobile app requests"
           }
         ],
-        responses: {
-          200: { description: 'Messages retrieved successfully' },
-          401: { description: 'Unauthorized' },
-          403: { description: 'Forbidden, not a conversation participant' },
-          404: { description: 'Conversation not found' }
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 72,
+                    "example": "Password123!"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login successful. Sets HttpOnly refreshToken cookie."
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Email not verified or Account is temporarily locked"
+          },
+          "429": {
+            "description": "Too many failed login attempts from IP or Account"
+          }
         }
       }
     },
-    '/api/conversations/{id}/search': {
-      get: {
-        tags: ['Conversations'],
-        summary: 'Search conversation messages',
-        description: 'Performs full-text keyword search across messages in a conversation using cursor-based pagination.',
-        security: [{ BearerAuth: [] }],
-        parameters: [
+    "/api/auth/refresh-token": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Rotate refresh token",
+        "description": "Rotates active refresh token from HttpOnly cookie (for web browsers) or JSON body (for mobile clients with x-client-platform: mobile) and returns a new access token.",
+        "parameters": [
           {
-            name: 'id',
-            in: 'path',
-            required: true,
-            schema: { type: 'string' },
-            description: 'Conversation UUID'
-          },
-          {
-            name: 'q',
-            in: 'query',
-            required: true,
-            schema: { type: 'string' },
-            description: 'Search query keyword'
-          },
-          {
-            name: 'cursor',
-            in: 'query',
-            required: false,
-            schema: { type: 'string' },
-            description: 'Message ID cursor for pagination'
-          },
-          {
-            name: 'limit',
-            in: 'query',
-            required: false,
-            schema: { type: 'integer', default: 20, maximum: 50 },
-            description: 'Number of matching messages to retrieve'
+            "name": "x-client-platform",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Specify \"mobile\" for non-browser mobile app requests"
           }
         ],
-        responses: {
-          200: { description: 'Search results retrieved successfully' },
-          401: { description: 'Unauthorized' },
-          403: { description: 'Forbidden, not a conversation participant' }
-        }
-      }
-    },
-    '/api/dm': {
-      post: {
-        tags: ['Direct Messaging'],
-        summary: 'Create or get direct message conversation',
-        description: 'Initiates or retrieves a 1-on-1 direct message conversation with another registered user.',
-        security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['targetUserId'],
-                properties: {
-                  targetUserId: { type: 'string', example: 'uuid-user-id' }
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refreshToken": {
+                    "type": "string",
+                    "description": "Refresh token (required for mobile clients)"
+                  }
                 }
               }
             }
           }
         },
-        responses: {
-          200: { description: 'Direct message conversation retrieved or created successfully' },
-          400: { description: 'Cannot message yourself or invalid target user ID' },
-          401: { description: 'Unauthorized' },
-          404: { description: 'Target user not found' }
+        "responses": {
+          "200": {
+            "description": "Token refreshed successfully. Sets updated HttpOnly refreshToken cookie."
+          },
+          "401": {
+            "description": "Invalid or expired refresh token"
+          },
+          "403": {
+            "description": "Account is temporarily locked"
+          },
+          "429": {
+            "description": "Too many refresh token requests"
+          }
         }
       }
     },
-    '/api/devices': {
-      post: {
-        tags: ['Push Notifications & Devices'],
-        summary: 'Register FCM device token',
-        description: 'Registers an FCM device registration token for offline push notifications.',
-        security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['token'],
-                properties: {
-                  token: { type: 'string', example: 'fcm-registration-token-123' },
-                  platform: { type: 'string', enum: ['web', 'android', 'ios'], default: 'web' }
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Logout user",
+        "description": "Revokes the active refresh token provided in HttpOnly cookie or JSON body.",
+        "parameters": [
+          {
+            "name": "x-client-platform",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Specify \"mobile\" for non-browser mobile app requests"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refreshToken": {
+                    "type": "string"
+                  }
                 }
               }
             }
           }
         },
-        responses: {
-          200: { description: 'Device token registered successfully' },
-          401: { description: 'Unauthorized' }
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logged out successfully. Both access token and refresh tokens are revoked."
+          }
+        }
+      }
+    },
+    "/api/auth/logout-all": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Logout from all devices",
+        "description": "Revokes all active sessions across all devices for the authenticated user.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logged out from all devices successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Get current user profile",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User profile retrieved successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Email not verified"
+          }
+        }
+      }
+    },
+    "/api/users/search": {
+      "get": {
+        "tags": [
+          "User Profile & Search"
+        ],
+        "summary": "Search users by name or email",
+        "description": "Performs a case-insensitive search across user names and email addresses. Automatically excludes the requesting user and supports limit/page pagination.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search term for name or email (e.g., \"john\" or \"john@example.com\")"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1
+            },
+            "description": "Page number for pagination"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
+            },
+            "description": "Number of user results per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching users retrieved successfully with pagination details"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/users/onboarding": {
+      "patch": {
+        "tags": [
+          "User Profile & Search"
+        ],
+        "summary": "Save user onboarding use cases",
+        "description": "Saves user choices for how they want to use Quorum (Organization, Freelance, Hire & Collaborate, Community). Requires JWT Bearer authentication.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "useCases": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "ORGANIZATION",
+                        "FREELANCE",
+                        "HIRE_COLLABORATE",
+                        "COMMUNITY"
+                      ]
+                    },
+                    "example": [
+                      "ORGANIZATION",
+                      "COMMUNITY"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Onboarding preferences saved successfully"
+          },
+          "400": {
+            "description": "Validation error: invalid use cases"
+          },
+          "401": {
+            "description": "Unauthorized: missing or invalid JWT token"
+          },
+          "403": {
+            "description": "Email not verified"
+          }
+        }
+      }
+    },
+    "/api/otp/send-verification": {
+      "post": {
+        "tags": [
+          "OTP & Verification"
+        ],
+        "summary": "Send email verification OTP",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verification OTP sent to email"
+          },
+          "400": {
+            "description": "Email address required"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      }
+    },
+    "/api/otp/verify-email": {
+      "post": {
+        "tags": [
+          "OTP & Verification"
+        ],
+        "summary": "Verify email with 6-digit OTP",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "otp"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "example": "123456"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Email verified successfully"
+          },
+          "400": {
+            "description": "Incorrect or expired OTP"
+          }
+        }
+      }
+    },
+    "/api/otp/forgot-password": {
+      "post": {
+        "tags": [
+          "OTP & Verification"
+        ],
+        "summary": "Request password reset OTP",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset OTP sent to email"
+          }
+        }
+      }
+    },
+    "/api/otp/reset-password": {
+      "post": {
+        "tags": [
+          "OTP & Verification"
+        ],
+        "summary": "Reset password with OTP",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "otp",
+                  "newPassword"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "example": "123456"
+                  },
+                  "newPassword": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 72,
+                    "example": "NewSecurePassword123!"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset successfully. All active sessions have been atomically revoked."
+          },
+          "400": {
+            "description": "Incorrect OTP or validation error"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      }
+    },
+    "/api/conversations": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Get user conversations",
+        "description": "Retrieves all conversations for the authenticated user, ordered by last activity, including unread message counts and last message preview.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversations retrieved successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/messages": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Get conversation messages",
+        "description": "Fetches paginated message history for a specific conversation using cursor-based pagination.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Conversation UUID"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Message ID cursor for fetching older messages"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 50
+            },
+            "description": "Number of messages to retrieve per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Messages retrieved successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, not a conversation participant"
+          },
+          "404": {
+            "description": "Conversation not found"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/search": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Search conversation messages",
+        "description": "Performs full-text keyword search across messages in a conversation using cursor-based pagination.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Conversation UUID"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search query keyword"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Message ID cursor for pagination"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 50
+            },
+            "description": "Number of matching messages to retrieve"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results retrieved successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, not a conversation participant"
+          }
+        }
+      }
+    },
+    "/api/dm": {
+      "post": {
+        "tags": [
+          "Direct Messaging"
+        ],
+        "summary": "Create or get direct message conversation",
+        "description": "Initiates or retrieves a 1-on-1 direct message conversation with another registered user.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "targetUserId"
+                ],
+                "properties": {
+                  "targetUserId": {
+                    "type": "string",
+                    "example": "uuid-user-id"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Direct message conversation retrieved or created successfully"
+          },
+          "400": {
+            "description": "Cannot message yourself or invalid target user ID"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Target user not found"
+          }
+        }
+      }
+    },
+    "/api/devices": {
+      "post": {
+        "tags": [
+          "Push Notifications & Devices"
+        ],
+        "summary": "Register FCM device token",
+        "description": "Registers an FCM device registration token for offline push notifications.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "example": "fcm-registration-token-123"
+                  },
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "android",
+                      "ios"
+                    ],
+                    "default": "web"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Device token registered successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
         }
       },
-      delete: {
-        tags: ['Push Notifications & Devices'],
-        summary: 'Unregister FCM device token',
-        description: 'Removes an FCM device registration token upon logout or device unregistration.',
-        security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['token'],
-                properties: {
-                  token: { type: 'string', example: 'fcm-registration-token-123' }
+      "delete": {
+        "tags": [
+          "Push Notifications & Devices"
+        ],
+        "summary": "Unregister FCM device token",
+        "description": "Removes an FCM device registration token upon logout or device unregistration.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "example": "fcm-registration-token-123"
+                  }
                 }
               }
             }
           }
         },
-        responses: {
-          200: { description: 'Device token unregistered successfully' },
-          401: { description: 'Unauthorized' }
+        "responses": {
+          "200": {
+            "description": "Device token unregistered successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
         }
       }
     },
-    '/api/uploads/sign': {
-      post: {
-        tags: ['Media & Uploads'],
-        summary: 'Generate signed media upload signature',
-        description: 'Generates a secure timestamped signature for uploading media files directly to Cloudinary.',
-        security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: false,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  folder: { type: 'string', example: 'avatars' }
+    "/api/uploads/sign": {
+      "post": {
+        "tags": [
+          "Media & Uploads"
+        ],
+        "summary": "Generate signed media upload signature",
+        "description": "Generates a secure timestamped signature for uploading media files directly to Cloudinary.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "folder": {
+                    "type": "string",
+                    "example": "avatars"
+                  }
                 }
               }
             }
           }
         },
-        responses: {
-          200: { description: 'Upload signature generated successfully' },
-          401: { description: 'Unauthorized' }
+        "responses": {
+          "200": {
+            "description": "Upload signature generated successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/ai/chat": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Conversational AI question-answering assistant",
+        "description": "Provides intelligent answers with optional context budgeting and privacy sanitization.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "prompt"
+                ],
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "example": "How do I invite external collaborators to a team in Quorum?"
+                  },
+                  "context": {
+                    "type": "string",
+                    "example": "Optional context string (up to 10,000 characters)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "AI generated answer with token metadata"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "429": {
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "description": "AI service unavailable"
+          }
+        }
+      }
+    },
+    "/api/ai/search": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Workspace unified multi-entity AI search",
+        "description": "Searches direct messages, community posts, file attachments, and meetings with grounded citations and TF-IDF ranking.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "query"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "example": "Q4 design sprint deadlines"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 15,
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Synthesized answer with ranked source evidence citations"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/api/ai/summarize": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Summarize conversation chat history",
+        "description": "Generates structured summary with key decisions, action items, and participants for an authorized conversation.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "conversationId"
+                ],
+                "properties": {
+                  "conversationId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "example": "c4b9d031-18e4-4d45-933e-b490f2302821"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 1,
+                    "maximum": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Executive summary with action items"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Not a participant of this conversation"
+          },
+          "404": {
+            "description": "Conversation not found"
+          }
+        }
+      }
+    },
+    "/api/ai/assist": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Project & workspace contextual assistance",
+        "description": "Answers inquiries scoped to an authorized organization, team, or community.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "prompt"
+                ],
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "example": "Give me a high-level breakdown of our current team structure."
+                  },
+                  "organizationId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "teamId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "communityId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Contextual project assistance answer"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "User does not belong to specified project or workspace"
+          }
+        }
+      }
+    },
+    "/api/ai/quick-replies": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Context-aware quick replies & message tone rewrites",
+        "description": "Generates smart response suggestions, proactive follow-ups, or professional rewrites with review-first disclaimers.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "replies",
+                      "follow_up",
+                      "rewrite"
+                    ],
+                    "default": "replies"
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "professional",
+                      "casual",
+                      "friendly",
+                      "concise",
+                      "enthusiastic"
+                    ],
+                    "default": "professional"
+                  },
+                  "message": {
+                    "type": "string",
+                    "example": "Hey team, could everyone submit their sprint status reports by 3 PM?"
+                  },
+                  "conversationId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Suggestions list with review disclaimer"
+          },
+          "400": {
+            "description": "Either message or conversationId must be provided"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/ai/project-update": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Project status update (verified facts vs recommendations)",
+        "description": "Generates structured status reports distinguishing verified historical facts from AI recommendations.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "timeframe": {
+                    "type": "string",
+                    "enum": [
+                      "today",
+                      "yesterday",
+                      "last_7_days",
+                      "last_30_days",
+                      "last_90_days"
+                    ],
+                    "default": "last_7_days"
+                  },
+                  "organizationId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "teamId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "communityId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Structured project status update"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/api/ai/history": {
+      "get": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Get paginated AI interaction history",
+        "description": "Retrieves past prompts and answers for the authenticated user with cursor-based pagination.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "minimum": 1,
+              "maximum": 50
+            },
+            "description": "Number of interactions to return"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "ID of the last item from previous page"
+          },
+          {
+            "name": "actionType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "chat",
+                "search",
+                "project_assistance",
+                "quick_replies",
+                "project_update"
+              ]
+            },
+            "description": "Filter by action type"
+          },
+          {
+            "name": "conversationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Filter by conversation UUID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated interactions list with nextCursor"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Clear all AI interaction history",
+        "description": "Purges all interaction history records belonging to the authenticated user.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All AI history deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/ai/history/{id}": {
+      "delete": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Delete single AI interaction record",
+        "description": "Deletes a specific interaction record by its UUID.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Interaction record UUID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Interaction deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Interaction not found or does not belong to user"
+          }
         }
       }
     }
   },
+  "tags": [
+    {
+      "name": "AI Assistant",
+      "description": "Workplace intelligence, generative assistant, contextual quick replies, grounded workspace search, and interaction history."
+    }
+  ]
 };
 
 export const setupSwagger = (app: Express): void => {
   const options = {
     swaggerOptions: {
       requestInterceptor: (req: any) => {
-        const match = document.cookie.match(/(?:^|;\\s*)XSRF-TOKEN=([^;]*)/);
+        const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
         if (match) {
           req.headers['x-xsrf-token'] = decodeURIComponent(match[1]);
         }
@@ -600,6 +1400,17 @@ export const setupSwagger = (app: Express): void => {
       }
     }
   };
+
+  app.get('/api-docs.json', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json(swaggerDocument);
+  });
+
+  app.get('/api-docs/swagger.json', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json(swaggerDocument);
+  });
+
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument, options));
 };
 
