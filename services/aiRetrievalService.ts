@@ -335,6 +335,16 @@ export const searchAuthorizedWorkspaceRecords = async (
   return mergedResults;
 };
 
+export const getTimeframeCutoff = (timeframe?: string): Date | undefined => {
+  if (timeframe === 'last_7_days') {
+    return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  }
+  if (timeframe === 'last_30_days') {
+    return new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  }
+  return undefined;
+};
+
 export interface AuthorizedProjectContext {
   projectId: string;
   projectName: string;
@@ -343,11 +353,13 @@ export interface AuthorizedProjectContext {
   members: Array<{ id: string; name: string; role: string }>;
   teams?: Array<{ id: string; name: string; description: string | null }>;
   discussions: Array<{ author: string; content: string; createdAt: string; commentCount?: number }>;
+  timeframeApplied?: string;
 }
 
 export const getAuthorizedProjectContext = async (
   userId: string,
-  target?: { organizationId?: string; teamId?: string; communityId?: string }
+  target?: { organizationId?: string; teamId?: string; communityId?: string },
+  timeframe?: string
 ): Promise<AuthorizedProjectContext> => {
   const ids = [target?.organizationId, target?.teamId, target?.communityId].filter(Boolean);
   if (ids.length === 0) {
@@ -356,6 +368,8 @@ export const getAuthorizedProjectContext = async (
   if (ids.length > 1) {
     throw new ApiError(400, 'Please provide exactly one target identifier (organizationId, teamId, or communityId)');
   }
+
+  const startDate = getTimeframeCutoff(timeframe);
 
   if (target?.organizationId) {
     const orgMember = await prisma.organizationMember.findUnique({
@@ -389,6 +403,25 @@ export const getAuthorizedProjectContext = async (
       throw new ApiError(404, 'Organization not found');
     }
 
+    const memberUserIds = org.members.map((m) => m.userId);
+    const meetings = await prisma.meeting.findMany({
+      where: {
+        hostId: { in: memberUserIds },
+        ...(startDate ? { createdAt: { gte: startDate } } : {})
+      },
+      take: 20,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        host: { select: { id: true, name: true } }
+      }
+    });
+
+    const activityRecords = meetings.map((m) => ({
+      author: m.host?.name || 'Meeting Host',
+      content: `Meeting Session: ${m.code} (Status: ${m.status})`,
+      createdAt: m.createdAt.toISOString()
+    }));
+
     return {
       projectId: org.id,
       projectName: org.name,
@@ -400,7 +433,8 @@ export const getAuthorizedProjectContext = async (
         role: m.role
       })),
       teams: org.teams,
-      discussions: []
+      discussions: activityRecords,
+      timeframeApplied: timeframe || 'all'
     };
   }
 
@@ -434,6 +468,25 @@ export const getAuthorizedProjectContext = async (
       throw new ApiError(404, 'Team not found');
     }
 
+    const memberUserIds = team.members.map((m) => m.userId);
+    const meetings = await prisma.meeting.findMany({
+      where: {
+        hostId: { in: memberUserIds },
+        ...(startDate ? { createdAt: { gte: startDate } } : {})
+      },
+      take: 20,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        host: { select: { id: true, name: true } }
+      }
+    });
+
+    const activityRecords = meetings.map((m) => ({
+      author: m.host?.name || 'Meeting Host',
+      content: `Team Meeting Session: ${m.code} (Status: ${m.status})`,
+      createdAt: m.createdAt.toISOString()
+    }));
+
     return {
       projectId: team.id,
       projectName: `${team.organization.name} - ${team.name}`,
@@ -444,7 +497,8 @@ export const getAuthorizedProjectContext = async (
         name: m.user?.name || 'Member',
         role: m.role
       })),
-      discussions: []
+      discussions: activityRecords,
+      timeframeApplied: timeframe || 'all'
     };
   }
 
@@ -469,14 +523,6 @@ export const getAuthorizedProjectContext = async (
           include: {
             user: { select: { id: true, name: true } }
           }
-        },
-        posts: {
-          take: 20,
-          orderBy: { createdAt: 'desc' },
-          include: {
-            author: { select: { name: true } },
-            _count: { select: { comments: true } }
-          }
         }
       }
     });
@@ -484,6 +530,19 @@ export const getAuthorizedProjectContext = async (
     if (!community) {
       throw new ApiError(404, 'Community not found');
     }
+
+    const posts = await prisma.communityPost.findMany({
+      where: {
+        communityId: target.communityId,
+        ...(startDate ? { createdAt: { gte: startDate } } : {})
+      },
+      take: 30,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        author: { select: { name: true } },
+        _count: { select: { comments: true } }
+      }
+    });
 
     return {
       projectId: community.id,
@@ -495,12 +554,13 @@ export const getAuthorizedProjectContext = async (
         name: m.user?.name || 'Member',
         role: m.role
       })),
-      discussions: community.posts.map((p) => ({
+      discussions: posts.map((p) => ({
         author: p.author?.name || 'Unknown',
         content: p.content,
         createdAt: p.createdAt.toISOString(),
         commentCount: p._count.comments
-      }))
+      })),
+      timeframeApplied: timeframe || 'all'
     };
   }
 

@@ -14,6 +14,9 @@ import verifyCSRF from './middlewares/csrfProtection.js';
 import logger from './utils/logger.js';
 import env, { isOriginAllowed } from './config/env.js';
 import prisma from './config/prisma.js';
+import { startAiHistoryCleanupTask } from './services/aiHistoryService.js';
+
+startAiHistoryCleanupTask();
 
 const app = express();
 

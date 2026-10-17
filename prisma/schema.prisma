@@ -351,5 +351,6 @@ model AiInteraction {
 
   @@index([userId, createdAt])
   @@index([conversationId])
+  @@index([createdAt])
 }
 

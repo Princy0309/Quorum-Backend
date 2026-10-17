@@ -3,6 +3,8 @@ import redis from '../config/redis.js';
 import logger from '../utils/logger.js';
 import { ApiError } from '../utils/ApiError.js';
 
+import env from '../config/env.js';
+
 export interface RecordAiInteractionInput {
   prompt: string;
   response: string;
@@ -21,7 +23,7 @@ export interface GetAiHistoryOptions {
 
 const REDIS_KEY_PREFIX = 'ai_history:user:';
 
-export const cleanExpiredAiHistory = async (retentionDays: number = 30) => {
+export const cleanExpiredAiHistory = async (retentionDays: number = env.AI_HISTORY_RETENTION_DAYS || 30) => {
   const safeDays = Math.max(retentionDays, 1);
   const cutoffDate = new Date(Date.now() - safeDays * 24 * 60 * 60 * 1000);
 
@@ -37,6 +39,27 @@ export const cleanExpiredAiHistory = async (retentionDays: number = 30) => {
     deletedCount: result.count,
     cutoffDate: cutoffDate.toISOString()
   };
+};
+
+export const startAiHistoryCleanupTask = () => {
+  const runCleanup = async () => {
+    try {
+      const result = await cleanExpiredAiHistory();
+      if (result.deletedCount > 0) {
+        logger.info('Cleaned expired AI interaction history', {
+          deletedCount: result.deletedCount,
+          cutoffDate: result.cutoffDate
+        });
+      }
+    } catch (err: any) {
+      logger.error('Failed to run scheduled AI history cleanup', {
+        error: err?.message
+      });
+    }
+  };
+
+  setTimeout(runCleanup, 5000).unref();
+  setInterval(runCleanup, 24 * 60 * 60 * 1000).unref();
 };
 
 export const recordAiInteraction = async (
@@ -62,10 +85,6 @@ export const recordAiInteraction = async (
       await redis.ltrim(cacheKey, 0, 49);
       await redis.expire(cacheKey, 86400);
     } catch {
-    }
-
-    if (Math.random() < 0.05) {
-      cleanExpiredAiHistory(30).catch(() => {});
     }
   } catch (err: any) {
     logger.warn('Failed to persist AI interaction to database', {
