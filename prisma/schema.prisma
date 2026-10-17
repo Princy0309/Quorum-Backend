@@ -60,6 +60,7 @@ model User {
   memberships              OrganizationMember[]
   sentOrgInvites           OrganizationInvite[]      @relation("OrgInviter")
   teamMemberships          TeamMember[]
+  aiInteractions           AiInteraction[]
 }
 
 model RefreshToken {
@@ -335,3 +336,20 @@ model TeamMember {
   @@index([teamId])
   @@index([userId])
 }
+
+model AiInteraction {
+  id             String    @id @default(uuid())
+  userId         String
+  conversationId String?
+  actionType     String    @default("chat")
+  prompt         String
+  response       String
+  model          String?
+  tokensUsed     Int?
+  createdAt      DateTime  @default(now())
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([conversationId])
+}
+

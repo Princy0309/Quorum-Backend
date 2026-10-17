@@ -38,3 +38,10 @@ export const aiProjectUpdateSchema = z.object({
   communityId: z.string().uuid().optional(),
   timeframe: z.enum(['last_7_days', 'last_30_days', 'all']).default('last_7_days'),
 });
+
+export const aiHistoryQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).optional().default(20),
+  cursor: z.string().optional(),
+  actionType: z.string().optional(),
+  conversationId: z.string().uuid().optional(),
+});
