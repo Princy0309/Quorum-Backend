@@ -21,11 +21,14 @@ export interface RetrievedConversationData {
 
 export interface WorkspaceRecord {
   id: string;
-  type: 'message' | 'community_post' | 'organization' | 'meeting';
+  type: 'message' | 'community_post' | 'organization' | 'meeting' | 'document';
   source: string;
   author: string;
   content: string;
   createdAt: string;
+  fileUrl?: string | null;
+  fileName?: string | null;
+  fileType?: string | null;
 }
 
 export const getAuthorizedConversationMessages = async (
@@ -115,7 +118,10 @@ export const searchAuthorizedWorkspaceRecords = async (
   const [messages, posts, orgs, meetings] = await Promise.all([
     prisma.message.findMany({
       where: {
-        content: { contains: trimmed, mode: 'insensitive' },
+        OR: [
+          { content: { contains: trimmed, mode: 'insensitive' } },
+          { fileName: { contains: trimmed, mode: 'insensitive' } }
+        ],
         conversation: {
           participants: {
             some: { userId }
@@ -131,7 +137,10 @@ export const searchAuthorizedWorkspaceRecords = async (
     }),
     prisma.communityPost.findMany({
       where: {
-        content: { contains: trimmed, mode: 'insensitive' },
+        OR: [
+          { content: { contains: trimmed, mode: 'insensitive' } },
+          { fileName: { contains: trimmed, mode: 'insensitive' } }
+        ],
         community: {
           members: {
             some: { userId }
@@ -184,24 +193,40 @@ export const searchAuthorizedWorkspaceRecords = async (
   const results: WorkspaceRecord[] = [];
 
   for (const m of messages) {
+    const isFileMatch = m.fileName && m.fileName.toLowerCase().includes(trimmed.toLowerCase());
+    const displayContent = m.fileName
+      ? (m.content ? `${m.content} [Attached File: ${m.fileName}]` : `Shared File: ${m.fileName}`)
+      : m.content;
+
     results.push({
       id: m.id,
-      type: 'message',
+      type: isFileMatch ? 'document' : 'message',
       source: m.conversation.name ? `Chat: ${m.conversation.name}` : `Chat (${m.conversation.id})`,
       author: m.sender?.name || 'Unknown',
-      content: m.content,
-      createdAt: m.createdAt.toISOString()
+      content: displayContent,
+      createdAt: m.createdAt.toISOString(),
+      fileUrl: m.fileUrl,
+      fileName: m.fileName,
+      fileType: m.fileType
     });
   }
 
   for (const p of posts) {
+    const isFileMatch = p.fileName && p.fileName.toLowerCase().includes(trimmed.toLowerCase());
+    const displayContent = p.fileName
+      ? (p.content ? `${p.content} [Attached File: ${p.fileName}]` : `Shared File: ${p.fileName}`)
+      : p.content;
+
     results.push({
       id: p.id,
-      type: 'community_post',
+      type: isFileMatch ? 'document' : 'community_post',
       source: `Community: ${p.community.name}`,
       author: p.author?.name || 'Unknown',
-      content: p.content,
-      createdAt: p.createdAt.toISOString()
+      content: displayContent,
+      createdAt: p.createdAt.toISOString(),
+      fileUrl: p.fileUrl,
+      fileName: p.fileName,
+      fileType: p.fileType
     });
   }
 
