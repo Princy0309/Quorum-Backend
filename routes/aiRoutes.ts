@@ -15,7 +15,9 @@ import {
   searchWorkspaceController,
   projectAssistanceController,
   quickRepliesController,
-  projectUpdateController
+  projectUpdateController,
+  getHistoryController,
+  deleteHistoryController
 } from '../controllers/aiController.js';
 
 const router = Router();
@@ -26,5 +28,8 @@ router.post('/search', authMiddleware, validate(aiSearchSchema), searchWorkspace
 router.post('/project-assistance', authMiddleware, validate(aiProjectAssistanceSchema), projectAssistanceController);
 router.post('/quick-replies', authMiddleware, validate(aiQuickRepliesSchema), quickRepliesController);
 router.post('/project-update', authMiddleware, validate(aiProjectUpdateSchema), projectUpdateController);
+router.get('/history', authMiddleware, getHistoryController);
+router.delete('/history', authMiddleware, deleteHistoryController);
+router.delete('/history/:id', authMiddleware, deleteHistoryController);
 
 export default router;
