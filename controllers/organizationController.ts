@@ -23,12 +23,15 @@ export const createOrganizationController = asyncHandler(
       return next(new ApiError(401, 'Unauthorized, login required'));
     }
 
-    const { name, description, logo } = req.body;
+    const { name, description, logo, email, industry, teamSize} = req.body;
 
     const organization = await createOrganization(req.user.id, {
       name,
       description,
       logo,
+      email,
+      industry,
+      teamSize,
     });
 
     return res.status(201).json({
@@ -80,12 +83,15 @@ export const updateOrganizationController = asyncHandler(
       return next(new ApiError(400, 'Valid Organization ID is required'));
     }
 
-    const { name, description, logo } = req.body;
+    const { name, description, logo, email, industry, teamSize } = req.body;
 
     const updatedOrg = await updateOrganization(orgId, {
       name,
       description,
       logo,
+      email,
+      industry,
+      teamSize,
     });
 
     return res.status(200).json({

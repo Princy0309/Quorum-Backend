@@ -15,7 +15,7 @@ function slugify(text: string): string{
 }
 
 export const createOrganization = async (userId: string, data: CreateOrgInput) => {
-  const { name, description, logo } = data;
+  const { name, description, logo, email, industry, teamSize } = data;
 
   if (!name || name.trim().length === 0) {
     throw new ApiError(400, 'Organization name is required');
@@ -39,6 +39,9 @@ export const createOrganization = async (userId: string, data: CreateOrgInput) =
         slug,
         description: description?.trim() || null,
         logo: logo || null,
+        email: email?.trim().toLowerCase() || null,
+        industry: industry?.trim() || null,
+        teamSize: teamSize?.trim() || null,
         ownerId: userId,
       },
     });
@@ -128,6 +131,10 @@ export const updateOrganization = async (orgId: string, data: UpdateOrgInput) =>
       name: data.name !== undefined ? data.name.trim() : undefined,
       description: data.description !== undefined ? data.description.trim() : undefined,
       logo: data.logo !== undefined ? data.logo : undefined,
+      email: data.email !== undefined ? data.email?.trim().toLowerCase() || null : undefined,
+      industry: data.industry !== undefined ? data.industry?.trim() || null : undefined,
+      teamSize: data.teamSize !== undefined ? data.teamSize?.trim() || null : undefined,
+
     },
   });
 

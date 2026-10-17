@@ -1,0 +1,18 @@
+enum MeetingStatus {
+  ACTIVE
+  ENDED
+}
+
+model Meeting {
+  id          String        @id @default(uuid())
+  code        String        @unique
+  hostId      String
+  waitingRoom Boolean       @default(true)
+  status      MeetingStatus @default(ACTIVE)
+  admitted    String[]      @default([])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  host        User          @relation(fields: [hostId], references: [id], onDelete: Cascade)
+
+  @@index([code])
+}

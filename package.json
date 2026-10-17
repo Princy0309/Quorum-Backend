@@ -75,5 +75,8 @@
     "werift": "^0.25.0",
     "winston": "^3.19.0",
     "zod": "^4.6.5"
+  },
+  "prisma": {
+    "schema": "prisma/schema"
   }
 }
