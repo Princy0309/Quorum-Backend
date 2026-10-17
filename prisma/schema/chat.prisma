@@ -17,6 +17,7 @@ model ConversationParticipant {
   id                String       @id @default(uuid())
   conversationId    String
   userId            String
+  role              String       @default("member")
   joinedAt          DateTime     @default(now())
   lastReadMessageId String?
   lastReadSeq       Int          @default(0)
@@ -34,6 +35,8 @@ model Message {
   content         String
   fileUrl         String?
   fileType        String?
+  fileName        String?
+  fileSize        Int?
   clientMessageId String?
   seq             Int          @default(0)
   createdAt       DateTime     @default(now())

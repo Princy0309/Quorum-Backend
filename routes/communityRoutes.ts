@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
-import { validateJoi } from '../middlewares/validate.js';
+import { validate } from '../middlewares/validate.js';
 import {
   createCommunitySchema,
   updateCommunitySchema,
@@ -12,6 +12,7 @@ import { createPostSchema } from '../validators/postValidators.js';
 import {
   createCommunityController,
   getUserCommunitiesController,
+  searchCommunitiesController,
   getCommunityDetailsController,
   updateCommunityController,
   deleteCommunityController,
@@ -28,32 +29,36 @@ import {
 } from '../controllers/communityController.js';
 import {
   createPostController,
-  getCommunityPostsController
+  getCommunityPostsController,
+  getCommunityFeedController
 } from '../controllers/postController.js';
 
 const router = Router();
 
-router.post('/', authMiddleware, validateJoi(createCommunitySchema), createCommunityController);
+router.post('/', authMiddleware, validate(createCommunitySchema), createCommunityController);
 router.get('/', authMiddleware, getUserCommunitiesController);
+router.get('/search', authMiddleware, searchCommunitiesController);
+router.get('/feed', authMiddleware, getCommunityFeedController);
 
 router.get('/invites/:token', validateInviteTokenController);
 router.post('/invites/:token/join', authMiddleware, joinCommunityViaInviteController);
 
 router.get('/:id/users/search', authMiddleware, searchUsersToInviteController);
-router.post('/:id/invites', authMiddleware, validateJoi(createInviteSchema), createInviteLinkController);
+router.post('/:id/invites', authMiddleware, validate(createInviteSchema), createInviteLinkController);
 router.delete('/:id/invites/:inviteId', authMiddleware, revokeInviteLinkController);
 
 router.get('/:id/members', authMiddleware, getCommunityMembersController);
-router.patch('/:id/members/:userId/role', authMiddleware, validateJoi(updateMemberRoleSchema), changeMemberRoleController);
+router.patch('/:id/members/:userId/role', authMiddleware, validate(updateMemberRoleSchema), changeMemberRoleController);
 router.post('/:id/leave', authMiddleware, leaveCommunityController);
-router.post('/:id/transfer-ownership', authMiddleware, validateJoi(transferOwnershipSchema), transferCommunityOwnershipController);
+router.post('/:id/transfer-ownership', authMiddleware, validate(transferOwnershipSchema), transferCommunityOwnershipController);
 router.delete('/:id/members/:userId', authMiddleware, removeCommunityMemberController);
 
-router.post('/:id/posts', authMiddleware, validateJoi(createPostSchema), createPostController);
+router.post('/:id/posts', authMiddleware, validate(createPostSchema), createPostController);
 router.get('/:id/posts', authMiddleware, getCommunityPostsController);
+router.get('/:id/feed', authMiddleware, getCommunityPostsController);
 
 router.get('/:id', authMiddleware, getCommunityDetailsController);
-router.patch('/:id', authMiddleware, validateJoi(updateCommunitySchema), updateCommunityController);
+router.patch('/:id', authMiddleware, validate(updateCommunitySchema), updateCommunityController);
 router.delete('/:id', authMiddleware, deleteCommunityController);
 
 export default router;

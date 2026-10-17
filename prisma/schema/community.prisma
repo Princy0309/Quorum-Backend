@@ -53,6 +53,10 @@ model CommunityPost {
   communityId String
   authorId    String
   content     String
+  fileUrl     String?
+  fileType    String?
+  fileName    String?
+  fileSize    Int?
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
   community   Community          @relation(fields: [communityId], references: [id], onDelete: Cascade)

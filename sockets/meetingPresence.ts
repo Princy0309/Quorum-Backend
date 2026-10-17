@@ -55,7 +55,7 @@ const meetingInitLocks = new Map<string, Promise<MeetingRoomState | null>>();
 
 export const normalizeMeetingCode = (code: string): string => {
     let cleaned = typeof code === 'string' ? code.trim().toLowerCase() : '';  
-    if(cleaned.includes('/')){
+    if (cleaned.includes('/')) {
         const parts = cleaned.split('/').filter(Boolean);
         cleaned = parts[parts.length - 1];
     }
@@ -74,10 +74,8 @@ export const formatParticipants = (participantsMap: Map<string, Participant>): P
     }));
 };
 
-
 export const getOrCreateMeetingState = async (meetingCode: string): Promise<MeetingRoomState | null> => {
     const cleanCode = normalizeMeetingCode(meetingCode);
-    
     const existing = meetingRooms.get(cleanCode);
     if (existing) {
         return existing;
@@ -140,7 +138,6 @@ export const getOrCreateMeetingState = async (meetingCode: string): Promise<Meet
     return await initPromise;
 };
 
-
 export const handleJoinMeeting = async (
     io: Server,
     socket: Socket,
@@ -181,13 +178,13 @@ export const handleJoinMeeting = async (
         return;
     }
 
-      if (!roomState.hostUserId && socket.handshake.auth?.role === 'host') {
-    roomState.hostUserId = user.id;
-  }
+    if (!roomState.hostUserId && socket.handshake.auth?.role === 'host') {
+        roomState.hostUserId = user.id;
+    }
 
-  const isHost = roomState.hostUserId === user.id;
+    const isHost = roomState.hostUserId === user.id;
 
-  logger.info(`[Join Debug] meeting=${normalizedCode}, socket=${socket.id}, resolvedUser=${user.id} (${user.name}), hostUserId=${roomState.hostUserId}, isHost=${isHost}`);
+    logger.info(`[Join Debug] meeting=${normalizedCode}, socket=${socket.id}, resolvedUser=${user.id} (${user.name}), hostUserId=${roomState.hostUserId}, isHost=${isHost}`);
 
     if (!isHost && roomState.waitingRoomEnabled && !roomState.participants.has(user.id)) {
         let waitingUser = roomState.waitingRoom.get(user.id);
@@ -206,9 +203,11 @@ export const handleJoinMeeting = async (
         socketMeetings.add(normalizedCode);
         socketToMeetingsMap.set(socket.id, socketMeetings);
 
+        socket.join(normalizedCode);
+
         const waitingPayload = {
-            message: 'You are in the waiting room. Please wait for the host to admit you.',
             meetingCode: normalizedCode,
+            message: 'Waiting for the host to admit you',
         };
 
         socket.emit('meeting:waiting-room', waitingPayload);
@@ -410,7 +409,7 @@ export const handleEndMeeting = async (
 
     const { meetingCode } = payload || {};
     const normalizedCode = normalizeMeetingCode(meetingCode);
-    if(!normalizedCode){
+    if (!normalizedCode) {
         const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code is required' };
         socket.emit('meeting:error', err);
         ack?.({ success: false, ...err });
@@ -428,13 +427,11 @@ export const handleEndMeeting = async (
         }
     }
 
-       
     if (normalizedCode.startsWith('test-')) {
         closeMeetingRoom(normalizedCode);
         ack?.({ success: true, message: 'Meeting ended successfully' });
         return;
     }
-
 
     try {
         await endMeeting(normalizedCode, user.id);

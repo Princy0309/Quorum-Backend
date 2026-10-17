@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import {
   createCommunity,
   getUserCommunities,
+  searchCommunities,
   getCommunityDetails,
   updateCommunity,
   deleteCommunity,
@@ -59,6 +60,29 @@ export const getUserCommunitiesController = async (req: Request, res: Response, 
     }
 
     const result = await getUserCommunities(userId);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const searchCommunitiesController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const query = typeof req.query.q === 'string' ? req.query.q : (typeof req.query.search === 'string' ? req.query.search : '');
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+    const limit = typeof req.query.limit === 'string' && /^\d+$/.test(req.query.limit)
+      ? parseInt(req.query.limit, 10)
+      : 20;
+
+    const result = await searchCommunities(userId, query, cursor, limit);
     res.status(200).json({
       success: true,
       data: result

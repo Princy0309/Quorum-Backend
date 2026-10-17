@@ -1,6 +1,6 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket } from '../socketAuth.js';
-import { saveMessage, markMessageAsRead, isParticipant } from '../../services/chatService.js';
+import { saveMessage, markMessageAsRead, isParticipant, resolveConversationId } from '../../services/chatService.js';
 import { sendPushToOfflineUsers } from '../../services/notificationService.js';
 import { checkSocketMessageRateLimit } from '../../middlewares/rateLimiter.js';
 import { sendMessageSchema, readMessageSchema } from '../../validators/chatValidators.js';
@@ -12,8 +12,15 @@ interface SendMessagePayload {
   conversationId: string;
   clientMessageId?: string;
   content?: string;
+  caption?: string;
   fileUrl?: string;
+  url?: string;
   fileType?: string;
+  type?: string;
+  fileName?: string;
+  name?: string;
+  fileSize?: number;
+  size?: number;
 }
 
 interface ReadMessagePayload {
@@ -45,8 +52,8 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
     ) => {
       try {
         const userId = socket.data.user?.id;
-        if (!userId) {
-          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+        if (!userId || !socket.data.user?.isAuthenticated) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
           return;
         }
 
@@ -55,14 +62,17 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           return;
         }
 
-        const valid = await isParticipant(userId, payload.conversationId);
-        if (!valid) {
+        const resolvedId = await resolveConversationId(userId, payload.conversationId);
+        if (!resolvedId) {
           if (callback) callback(formatErrorResponse('NOT_PARTICIPANT', 'User is not a participant in this conversation'));
           return;
         }
 
         socket.join(`conversation:${payload.conversationId}`);
-        if (callback) callback({ success: true });
+        if (resolvedId !== payload.conversationId) {
+          socket.join(`conversation:${resolvedId}`);
+        }
+        if (callback) callback({ success: true, data: { conversationId: resolvedId } });
       } catch (err: any) {
         logger.error('Error joining conversation room', { error: err.message });
         if (callback) {
@@ -79,13 +89,20 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
 
   socket.on(
     CHAT_EVENTS.CONVERSATION_LEAVE,
-    (
+    async (
       payload: { conversationId: string },
       callback?: (response: SocketCallbackResponse) => void
     ) => {
       try {
         if (payload?.conversationId) {
           socket.leave(`conversation:${payload.conversationId}`);
+          const userId = socket.data.user?.id;
+          if (userId) {
+            const resolvedId = await resolveConversationId(userId, payload.conversationId);
+            if (resolvedId && resolvedId !== payload.conversationId) {
+              socket.leave(`conversation:${resolvedId}`);
+            }
+          }
         }
         if (callback) callback({ success: true });
       } catch (err: any) {
@@ -103,8 +120,8 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
     ) => {
       try {
         const senderId = socket.data.user?.id;
-        if (!senderId) {
-          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+        if (!senderId || !socket.data.user?.isAuthenticated) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
           return;
         }
 
@@ -114,21 +131,33 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           return;
         }
 
-        const { error, value } = sendMessageSchema.validate(payload);
-        if (error) {
-          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', error.details[0].message));
+        const parsed = sendMessageSchema.safeParse(payload);
+        if (!parsed.success) {
+          const errMsg = parsed.error.issues[0]?.message || 'Invalid payload';
+          logger.warn('Socket message validation failed', { error: errMsg, payload });
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', errMsg));
           return;
         }
 
-        const { conversationId, clientMessageId, content, fileUrl, fileType } = value;
+        const value = parsed.data;
+
+        const conversationId = value.conversationId;
+        const clientMessageId = value.clientMessageId;
+        const rawContent = (typeof value.content === 'string' ? value.content : '') || value.caption || '';
+        const fileUrl = (value.fileUrl || value.url) || undefined;
+        const fileType = (value.fileType || value.type) || undefined;
+        const fileName = (value.fileName || (value as any).name) || undefined;
+        const fileSize = typeof value.fileSize === 'number' ? value.fileSize : (typeof (value as any).size === 'number' ? (value as any).size : undefined);
 
         const { message, participants, isDuplicate } = await saveMessage(
           senderId,
           conversationId,
-          content ? content.trim() : '',
+          rawContent.trim(),
           fileUrl,
           fileType,
-          clientMessageId
+          clientMessageId || undefined,
+          fileName,
+          fileSize
         );
 
         if (isDuplicate) {
@@ -138,22 +167,31 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           return;
         }
 
-        io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
+        const conversationRooms = [`conversation:${message.conversationId}`];
+        if (conversationId !== message.conversationId) {
+          conversationRooms.push(`conversation:${conversationId}`);
+        }
+        io.to(conversationRooms).emit(CHAT_EVENTS.MESSAGE_NEW, message);
 
         participants.forEach((p) => {
-          io.to(`user:${p.userId}`).emit(CHAT_EVENTS.MESSAGE_NEW, message);
           io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
-            conversationId,
+            conversationId: message.conversationId,
             lastMessage: message
           });
+          if (conversationId !== message.conversationId) {
+            io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+              conversationId,
+              lastMessage: message
+            });
+          }
         });
 
         const recipientUserIds = participants.map((p) => p.userId).filter((id) => id !== senderId);
         sendPushToOfflineUsers(
           recipientUserIds,
           `New message from ${message.sender.name}`,
-          content || 'Sent an attachment',
-          { conversationId, messageId: message.id }
+          rawContent || 'Sent an attachment',
+          { conversationId: message.conversationId, messageId: message.id }
         ).catch((err) => {
           logger.error('Background FCM notification dispatch error', { error: err.message });
         });
@@ -162,7 +200,11 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           callback({ success: true, data: message });
         }
       } catch (err: any) {
-        logger.error('Error sending message via socket', { error: err.message });
+        logger.error('Error sending message via socket', {
+          error: err.message,
+          senderId: socket.data.user?.id,
+          conversationId: payload?.conversationId
+        });
         if (callback) {
           if (err instanceof ApiError) {
             const code = err.statusCode === 403 ? 'NOT_PARTICIPANT' : 'INVALID_PAYLOAD';
@@ -188,18 +230,25 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           return;
         }
 
-        const { error, value } = readMessageSchema.validate(payload);
-        if (error) {
-          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', error.details[0].message));
+        const parsed = readMessageSchema.safeParse(payload);
+        if (!parsed.success) {
+          const errMsg = parsed.error.issues[0]?.message || 'Invalid payload';
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', errMsg));
           return;
         }
+
+        const value = parsed.data;
 
         const { conversationId, messageId } = value;
 
         const result = await markMessageAsRead(userId, conversationId, messageId);
 
         if (result.updated) {
-          io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_READ, {
+          const readRooms = [`conversation:${result.conversationId}`];
+          if (conversationId !== result.conversationId) {
+            readRooms.push(`conversation:${conversationId}`);
+          }
+          io.to(readRooms).emit(CHAT_EVENTS.MESSAGE_READ, {
             conversationId: result.conversationId,
             userId: result.userId,
             lastReadSeq: result.lastReadSeq,

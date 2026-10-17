@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import {
   createCommunityPost,
   getCommunityPosts,
+  getCommunityFeed,
   updateCommunityPost,
   deleteCommunityPost
 } from '../services/postService.js';
@@ -31,9 +32,9 @@ export const createPostController = async (req: Request, res: Response, next: Ne
     }
 
     const id = validateCommunityId(req.params.id);
-    const { content } = req.body;
+    const { content, fileUrl, fileType, fileName, fileSize } = req.body;
 
-    const result = await createCommunityPost(userId, id, content);
+    const result = await createCommunityPost(userId, id, { content, fileUrl, fileType, fileName, fileSize });
     res.status(201).json({
       success: true,
       data: result
@@ -66,6 +67,29 @@ export const getCommunityPostsController = async (req: Request, res: Response, n
   }
 };
 
+export const getCommunityFeedController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+    const limit = typeof req.query.limit === 'string' && /^\d+$/.test(req.query.limit)
+      ? parseInt(req.query.limit, 10)
+      : 20;
+    const scope = typeof req.query.scope === 'string' ? req.query.scope : (req.query.all === 'true' ? 'all' : undefined);
+
+    const result = await getCommunityFeed(userId, cursor, limit, scope);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const updatePostController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.id;
@@ -74,9 +98,9 @@ export const updatePostController = async (req: Request, res: Response, next: Ne
     }
 
     const postId = validatePostId(req.params.postId);
-    const { content } = req.body;
+    const { content, fileUrl, fileType, fileName, fileSize } = req.body;
 
-    const result = await updateCommunityPost(userId, postId, content);
+    const result = await updateCommunityPost(userId, postId, { content, fileUrl, fileType, fileName, fileSize });
     res.status(200).json({
       success: true,
       data: result

@@ -11,7 +11,6 @@ import {
   removeTeamMember,
 } from '../services/teamService.js';
 
-// Safe helper to extract string from Express req.params
 const getParam = (param: unknown): string => {
   if (typeof param === 'string') return param.trim();
   if (Array.isArray(param) && typeof param[0] === 'string') return param[0].trim();

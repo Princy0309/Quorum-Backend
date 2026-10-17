@@ -1,51 +1,56 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import { createServer } from 'http';
 import prisma from './config/prisma.js';
 import app from './app.js';
 import { emailWorker, queueRedisConnection } from './queues/emailQueue.js';
 import redis from './config/redis.js';
 import { initSocketServer } from './sockets/socketServer.js';
-
-
 let server: any;
 
 const startServer = async (): Promise<void> => {
-  const PORT = process.env.PORT || 5000;
-  
-
-  server = app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`Quorum server running on port ${PORT}`);
-  });
-
-  
-  initSocketServer(server);
-
-  
+  const PORT = Number(process.env.PORT || 5000);
   const maxRetries = 10;
+  let isConnected = false;
+
   for (let i = 1; i <= maxRetries; i++) {
     try {
       await prisma.$connect();
+      await prisma.$queryRaw`SELECT 1`;
       console.log('Database connected successfully');
+      isConnected = true;
       break;
     } catch (err) {
       console.warn(`Database connection attempt ${i}/${maxRetries} failed. Retrying in 2s...`);
       if (i === maxRetries) {
         console.error('Could not connect to database after maximum retries:', err);
+        process.exit(1);
       } else {
         await new Promise((res) => setTimeout(res, 2000));
       }
     }
   }
+
+  if (!isConnected) {
+    process.exit(1);
+  }
+
+  const httpServer = createServer(app);
+  initSocketServer(httpServer);
+
+  server = httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`Quorum server running on port ${PORT}`);
+  });
 };
 
 const gracefulShutdown = async (signal: string) => {
   console.log(`Received ${signal}. Shutting down gracefully...`);
-  
+
   if (server) {
     server.close(async () => {
       console.log('HTTP server closed.');
-      
+
       try {
         await emailWorker.close();
         console.log('Email worker closed.');

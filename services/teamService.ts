@@ -165,7 +165,6 @@ export const updateTeam = async (
       throw new ApiError(400, 'Team name cannot be empty');
     }
 
-    // Edge Case: Check if another team in this org already uses this name
     const duplicate = await prisma.team.findFirst({
       where: {
         organizationId,
@@ -227,7 +226,6 @@ export const addTeamMember = async (
     throw new ApiError(404, 'Team not found in this organization');
   }
 
-  // Edge Case: Target user must already belong to the organization
   const orgMember = await prisma.organizationMember.findUnique({
     where: {
       organizationId_userId: {
@@ -241,7 +239,6 @@ export const addTeamMember = async (
     throw new ApiError(400, 'User must be a member of the organization before joining a team');
   }
 
-  // Edge Case: Cannot add user if already a member of this team
   const existingTeamMember = await prisma.teamMember.findUnique({
     where: {
       teamId_userId: {

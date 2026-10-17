@@ -5,7 +5,7 @@
   "main": "server.ts",
   "scripts": {
     "postinstall": "prisma generate",
-    "test": "jest",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --forceExit",
     "start": "node dist/server.js",
     "dev": "nodemon -e ts --exec tsx server.ts",
     "db:migrate": ".\\node_modules\\.bin\\prisma migrate dev",
@@ -15,16 +15,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Princy0309/Quorum-Backend.git"
+    "url": "git+https://github.com/tusharTalan1/Quorum-Backend.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "bugs": {
-    "url": "https://github.com/Princy0309/Quorum-Backend/issues"
+    "url": "https://github.com/tusharTalan1/Quorum-Backend/issues"
   },
-  "homepage": "https://github.com/Princy0309/Quorum-Backend#readme",
+  "homepage": "https://github.com/tusharTalan1/Quorum-Backend#readme",
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.10",
@@ -33,6 +33,7 @@
     "@types/jest": "^30.0.0",
     "@types/joi": "^17.2.2",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.3.0",
     "@types/node": "^26.6.3",
     "@types/supertest": "^7.2.1",
     "@types/swagger-ui-express": "^4.1.8",
@@ -46,6 +47,9 @@
     "typescript": "5.8"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1151.0",
+    "@aws-sdk/s3-request-presigner": "^3.1151.0",
+    "@google/genai": "^2.30.0",
     "@prisma/client": "^6.19.3",
     "@socket.io/redis-adapter": "^8.3.0",
     "bcryptjs": "^3.0.3",
@@ -61,6 +65,7 @@
     "ioredis": "^6.0.0",
     "joi": "^18.2.9",
     "jsonwebtoken": "^9.0.3",
+    "multer": "^2.4.0",
     "nodemailer": "^10.0.10",
     "prisma": "^6.19.3",
     "rate-limiter-flexible": "^11.2.1",

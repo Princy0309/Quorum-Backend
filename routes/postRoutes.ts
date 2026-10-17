@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
-import { validateJoi } from '../middlewares/validate.js';
+import { validate } from '../middlewares/validate.js';
 import {
   updatePostSchema,
   createCommentSchema
 } from '../validators/postValidators.js';
 import {
   updatePostController,
-  deletePostController
+  deletePostController,
+  getCommunityFeedController
 } from '../controllers/postController.js';
 import {
   createCommentController,
@@ -16,10 +17,13 @@ import {
 
 const router = Router();
 
-router.post('/:postId/comments', authMiddleware, validateJoi(createCommentSchema), createCommentController);
+router.get('/feed', authMiddleware, getCommunityFeedController);
+router.get('/', authMiddleware, getCommunityFeedController);
+
+router.post('/:postId/comments', authMiddleware, validate(createCommentSchema), createCommentController);
 router.get('/:postId/comments', authMiddleware, getPostCommentsController);
 
-router.patch('/:postId', authMiddleware, validateJoi(updatePostSchema), updatePostController);
+router.patch('/:postId', authMiddleware, validate(updatePostSchema), updatePostController);
 router.delete('/:postId', authMiddleware, deletePostController);
 
 export default router;

@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
-import { validateJoi } from '../middlewares/validate.js';
+import { searchLimiter, chatLimiter } from '../middlewares/rateLimiter.js';
+import { validate } from '../middlewares/validate.js';
 import {
   createGroupSchema,
   addParticipantsSchema,
-  updateGroupSchema,
-  transferOwnershipSchema
+  updateGroupSchema
 } from '../validators/chatValidators.js';
 import {
   getUserConversationsController,
@@ -15,23 +15,36 @@ import {
   addGroupParticipantsController,
   removeGroupParticipantController,
   updateGroupConversationController,
-  transferGroupOwnershipController
+  leaveGroupConversationController,
+  getConversationDetailsController,
+  makeGroupAdminController,
+  dismissGroupAdminController
 } from '../controllers/conversationController.js';
+import { createOrGetDMController } from '../controllers/dmController.js';
 
 const router = Router();
 
 router.get('/', authMiddleware, getUserConversationsController);
-router.post('/group', authMiddleware, validateJoi(createGroupSchema), createGroupConversationController);
+router.post('/', authMiddleware, chatLimiter, createOrGetDMController);
+router.post('/direct', authMiddleware, chatLimiter, createOrGetDMController);
+router.post('/dm', authMiddleware, chatLimiter, createOrGetDMController);
+router.get('/search', authMiddleware, searchLimiter, getUserConversationsController);
+router.post('/group', authMiddleware, validate(createGroupSchema), createGroupConversationController);
+router.get('/:id', authMiddleware, getConversationDetailsController);
 router.get('/:id/messages', authMiddleware, getConversationMessagesController);
 router.get('/:id/search', authMiddleware, searchConversationMessagesController);
-router.patch('/:id', authMiddleware, validateJoi(updateGroupSchema), updateGroupConversationController);
-router.post('/:id/participants', authMiddleware, validateJoi(addParticipantsSchema), addGroupParticipantsController);
-router.post('/:id/members', authMiddleware, validateJoi(addParticipantsSchema), addGroupParticipantsController);
-router.post('/:id/transfer-ownership', authMiddleware, validateJoi(transferOwnershipSchema), transferGroupOwnershipController);
-router.post('/:id/leave', authMiddleware, (req, res, next) => {
-  req.params.userId = 'me';
-  return removeGroupParticipantController(req, res, next);
-});
+router.patch('/:id', authMiddleware, validate(updateGroupSchema), updateGroupConversationController);
+router.post('/:id/participants', authMiddleware, validate(addParticipantsSchema), addGroupParticipantsController);
+router.post('/:id/members', authMiddleware, validate(addParticipantsSchema), addGroupParticipantsController);
+router.delete('/:id/leave', authMiddleware, leaveGroupConversationController);
+router.post('/:id/leave', authMiddleware, leaveGroupConversationController);
+router.post('/:id/admins', authMiddleware, makeGroupAdminController);
+router.post('/:id/admins/:userId', authMiddleware, makeGroupAdminController);
+router.post('/:id/make-admin', authMiddleware, makeGroupAdminController);
+router.post('/:id/participants/:userId/make-admin', authMiddleware, makeGroupAdminController);
+router.delete('/:id/admins/:userId', authMiddleware, dismissGroupAdminController);
+router.post('/:id/remove-admin', authMiddleware, dismissGroupAdminController);
+
 router.delete('/:id/participants/:userId', authMiddleware, removeGroupParticipantController);
 router.delete('/:id/members/:userId', authMiddleware, removeGroupParticipantController);
 

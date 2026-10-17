@@ -2,597 +2,3368 @@ import { Express } from 'express';
 import swaggerUi from 'swagger-ui-express';
 
 const swaggerDocument = {
-  openapi: '3.0.0',
-  info: {
-    title: 'Quorum Backend API Documentation',
-    version: '1.0.0',
-    description: 'Interactive API documentation for Quorum Authentication, OTP verification, User Search, Conversations, Direct Messaging, and Session Management.',
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Quorum Backend API Documentation",
+    "version": "1.0.0",
+    "description": "Comprehensive interactive API documentation for Quorum Backend including Authentication, User Management, Real-Time Conversations, Communities, Posts, Comments, Organizations, Teams, Meetings (SFU/WebRTC), Media Storage, and Device Tokens."
   },
-  servers: [
+  "servers": [
     {
-      url: 'https://api.newquorum.me',
-      description: 'AWS EC2 (Live Production)',
+      "url": "https://api.newquorum.me",
+      "description": "AWS EC2 (Live Production)"
     },
     {
-      url: 'http://localhost:5000',
-      description: 'Local Development Server',
-    },
+      "url": "http://localhost:5000",
+      "description": "Local Development Server"
+    }
   ],
-  components: {
-    securitySchemes: {
-      BearerAuth: {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'Enter your Bearer Access Token in the format: Bearer <token>',
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Enter your Bearer Access Token in the format: Bearer <token>"
       },
-      CSRFAuth: {
-        type: 'apiKey',
-        in: 'header',
-        name: 'x-xsrf-token',
-        description: 'Enter the CSRF token retrieved from /api/csrf-token for all POST, PUT, DELETE requests.',
-      },
-    },
-  },
-  paths: {
-    '/api/csrf-token': {
-      get: {
-        tags: ['Authentication'],
-        summary: 'Get CSRF Token',
-        description: 'Retrieves a CSRF token to be included in the x-xsrf-token header of subsequent state-changing requests.',
-        responses: {
-          200: { description: 'Returns the CSRF token' },
-        },
-      },
-    },
-    '/api/auth/register': {
-      post: {
-        tags: ['Authentication'],
-        summary: 'Register a new user',
-        description: 'Creates a new user account and sends verification OTP to email. Tokens are issued after OTP verification via /api/otp/verify-email.',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['name', 'email', 'password'],
-                properties: {
-                  name: { type: 'string', example: 'John Doe' },
-                  email: { type: 'string', example: 'user@example.com' },
-                  password: { type: 'string', minLength: 8, maxLength: 72, example: 'Password123!' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          201: {
-            description: 'User registered successfully. OTP sent to email.',
-          },
-          400: { description: 'Validation error' },
-          409: { description: 'Email already registered' },
-        },
-      },
-    },
-    '/api/auth/login': {
-      post: {
-        tags: ['Authentication'],
-        summary: 'Login user',
-        description: 'Authenticates credentials and sets an HttpOnly, Secure refreshToken cookie for web clients. Mobile clients can pass x-client-platform: mobile header to receive refreshToken in response JSON body.',
-        parameters: [
-          {
-            name: 'x-client-platform',
-            in: 'header',
-            required: false,
-            schema: { type: 'string' },
-            description: 'Specify "mobile" for non-browser mobile app requests',
-          },
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['email', 'password'],
-                properties: {
-                  email: { type: 'string', example: 'user@example.com' },
-                  password: { type: 'string', minLength: 8, maxLength: 72, example: 'Password123!' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: {
-            description: 'Login successful. Sets HttpOnly refreshToken cookie.',
-          },
-          401: { description: 'Invalid credentials' },
-          403: { description: 'Email not verified or Account is temporarily locked' },
-          429: { description: 'Too many failed login attempts from IP or Account' },
-        },
-      },
-    },
-    '/api/auth/refresh-token': {
-      post: {
-        tags: ['Authentication'],
-        summary: 'Rotate refresh token',
-        description: 'Rotates active refresh token from HttpOnly cookie (for web browsers) or JSON body (for mobile clients with x-client-platform: mobile) and returns a new access token.',
-        parameters: [
-          {
-            name: 'x-client-platform',
-            in: 'header',
-            required: false,
-            schema: { type: 'string' },
-            description: 'Specify "mobile" for non-browser mobile app requests',
-          },
-        ],
-        requestBody: {
-          required: false,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  refreshToken: { type: 'string', description: 'Refresh token (required for mobile clients)' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: {
-            description: 'Token refreshed successfully. Sets updated HttpOnly refreshToken cookie.',
-          },
-          401: { description: 'Invalid or expired refresh token' },
-          403: { description: 'Account is temporarily locked' },
-          429: { description: 'Too many refresh token requests' },
-        },
-      },
-    },
-    '/api/auth/logout': {
-      post: {
-        tags: ['Authentication'],
-        summary: 'Logout user',
-        description: 'Revokes the active refresh token provided in HttpOnly cookie or JSON body.',
-        parameters: [
-          {
-            name: 'x-client-platform',
-            in: 'header',
-            required: false,
-            schema: { type: 'string' },
-            description: 'Specify "mobile" for non-browser mobile app requests',
-          },
-        ],
-        requestBody: {
-          required: false,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  refreshToken: { type: 'string' },
-                },
-              },
-            },
-          },
-        },
-        security: [{ BearerAuth: [] }],
-        responses: {
-          200: { description: 'Logged out successfully. Both access token and refresh tokens are revoked.' },
-        },
-      },
-    },
-    '/api/auth/logout-all': {
-      post: {
-        tags: ['Authentication'],
-        summary: 'Logout from all devices',
-        description: 'Revokes all active sessions across all devices for the authenticated user.',
-        security: [{ BearerAuth: [] }],
-        responses: {
-          200: { description: 'Logged out from all devices successfully' },
-          401: { description: 'Unauthorized' },
-        },
-      },
-    },
-    '/api/auth/me': {
-      get: {
-        tags: ['Authentication'],
-        summary: 'Get current user profile',
-        security: [{ BearerAuth: [] }],
-        responses: {
-          200: { description: 'User profile retrieved successfully' },
-          401: { description: 'Unauthorized' },
-          403: { description: 'Email not verified' },
-        },
-      },
-    },
-    '/api/users/search': {
-      get: {
-        tags: ['User Profile & Search'],
-        summary: 'Search users by name or email',
-        description: 'Performs a case-insensitive search across user names and email addresses. Automatically excludes the requesting user and supports limit/page pagination.',
-        security: [{ BearerAuth: [] }],
-        parameters: [
-          {
-            name: 'q',
-            in: 'query',
-            required: false,
-            schema: { type: 'string' },
-            description: 'Search term for name or email (e.g., "john" or "john@example.com")',
-          },
-          {
-            name: 'page',
-            in: 'query',
-            required: false,
-            schema: { type: 'integer', default: 1 },
-            description: 'Page number for pagination',
-          },
-          {
-            name: 'limit',
-            in: 'query',
-            required: false,
-            schema: { type: 'integer', default: 20, maximum: 100 },
-            description: 'Number of user results per page',
-          },
-        ],
-        responses: {
-          200: {
-            description: 'Matching users retrieved successfully with pagination details',
-          },
-          401: { description: 'Unauthorized' },
-        },
-      },
-    },
-    '/api/users/onboarding': {
-      patch: {
-        tags: ['User Profile & Search'],
-        summary: 'Save user onboarding use cases',
-        description: 'Saves user choices for how they want to use Quorum (Organization, Freelance, Hire & Collaborate, Community). Requires JWT Bearer authentication.',
-        security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: false,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  useCases: {
-                    type: 'array',
-                    items: {
-                      type: 'string',
-                      enum: ['ORGANIZATION', 'FREELANCE', 'HIRE_COLLABORATE', 'COMMUNITY'],
-                    },
-                    example: ['ORGANIZATION', 'COMMUNITY'],
-                  },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: {
-            description: 'Onboarding preferences saved successfully',
-          },
-          400: {
-            description: 'Validation error: invalid use cases',
-          },
-          401: {
-            description: 'Unauthorized: missing or invalid JWT token',
-          },
-          403: {
-            description: 'Email not verified',
-          },
-        },
-      },
-    },
-
-    '/api/otp/send-verification': {
-      post: {
-        tags: ['OTP & Verification'],
-        summary: 'Send email verification OTP',
-        requestBody: {
-          required: false,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  email: { type: 'string', example: 'user@example.com' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: { description: 'Verification OTP sent to email' },
-          400: { description: 'Email address required' },
-          404: { description: 'User not found' },
-        },
-      },
-    },
-    '/api/otp/verify-email': {
-      post: {
-        tags: ['OTP & Verification'],
-        summary: 'Verify email with 6-digit OTP',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['otp'],
-                properties: {
-                  email: { type: 'string', example: 'user@example.com' },
-                  otp: { type: 'string', example: '123456' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: {
-            description: 'Email verified successfully',
-          },
-          400: { description: 'Incorrect or expired OTP' },
-        },
-      },
-    },
-    '/api/otp/forgot-password': {
-      post: {
-        tags: ['OTP & Verification'],
-        summary: 'Request password reset OTP',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['email'],
-                properties: {
-                  email: { type: 'string', example: 'user@example.com' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: { description: 'Password reset OTP sent to email' },
-        },
-      },
-    },
-    '/api/otp/reset-password': {
-      post: {
-        tags: ['OTP & Verification'],
-        summary: 'Reset password with OTP',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['email', 'otp', 'newPassword'],
-                properties: {
-                  email: { type: 'string', example: 'user@example.com' },
-                  otp: { type: 'string', example: '123456' },
-                  newPassword: { type: 'string', minLength: 8, maxLength: 72, example: 'NewSecurePassword123!' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: { description: 'Password reset successfully. All active sessions have been atomically revoked.' },
-          400: { description: 'Incorrect OTP or validation error' },
-          404: { description: 'User not found' },
-        },
-      },
-    },
-    '/api/conversations': {
-      get: {
-        tags: ['Conversations'],
-        summary: 'Get user conversations',
-        description: 'Retrieves all conversations for the authenticated user, ordered by last activity, including unread message counts and last message preview.',
-        security: [{ BearerAuth: [] }],
-        responses: {
-          200: { description: 'Conversations retrieved successfully' },
-          401: { description: 'Unauthorized' }
-        }
-      }
-    },
-    '/api/conversations/{id}/messages': {
-      get: {
-        tags: ['Conversations'],
-        summary: 'Get conversation messages',
-        description: 'Fetches paginated message history for a specific conversation using cursor-based pagination.',
-        security: [{ BearerAuth: [] }],
-        parameters: [
-          {
-            name: 'id',
-            in: 'path',
-            required: true,
-            schema: { type: 'string' },
-            description: 'Conversation UUID'
-          },
-          {
-            name: 'cursor',
-            in: 'query',
-            required: false,
-            schema: { type: 'string' },
-            description: 'Message ID cursor for fetching older messages'
-          },
-          {
-            name: 'limit',
-            in: 'query',
-            required: false,
-            schema: { type: 'integer', default: 20, maximum: 50 },
-            description: 'Number of messages to retrieve per page'
-          }
-        ],
-        responses: {
-          200: { description: 'Messages retrieved successfully' },
-          401: { description: 'Unauthorized' },
-          403: { description: 'Forbidden, not a conversation participant' },
-          404: { description: 'Conversation not found' }
-        }
-      }
-    },
-    '/api/conversations/{id}/search': {
-      get: {
-        tags: ['Conversations'],
-        summary: 'Search conversation messages',
-        description: 'Performs full-text keyword search across messages in a conversation using cursor-based pagination.',
-        security: [{ BearerAuth: [] }],
-        parameters: [
-          {
-            name: 'id',
-            in: 'path',
-            required: true,
-            schema: { type: 'string' },
-            description: 'Conversation UUID'
-          },
-          {
-            name: 'q',
-            in: 'query',
-            required: true,
-            schema: { type: 'string' },
-            description: 'Search query keyword'
-          },
-          {
-            name: 'cursor',
-            in: 'query',
-            required: false,
-            schema: { type: 'string' },
-            description: 'Message ID cursor for pagination'
-          },
-          {
-            name: 'limit',
-            in: 'query',
-            required: false,
-            schema: { type: 'integer', default: 20, maximum: 50 },
-            description: 'Number of matching messages to retrieve'
-          }
-        ],
-        responses: {
-          200: { description: 'Search results retrieved successfully' },
-          401: { description: 'Unauthorized' },
-          403: { description: 'Forbidden, not a conversation participant' }
-        }
-      }
-    },
-    '/api/dm': {
-      post: {
-        tags: ['Direct Messaging'],
-        summary: 'Create or get direct message conversation',
-        description: 'Initiates or retrieves a 1-on-1 direct message conversation with another registered user.',
-        security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['targetUserId'],
-                properties: {
-                  targetUserId: { type: 'string', example: 'uuid-user-id' }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          200: { description: 'Direct message conversation retrieved or created successfully' },
-          400: { description: 'Cannot message yourself or invalid target user ID' },
-          401: { description: 'Unauthorized' },
-          404: { description: 'Target user not found' }
-        }
-      }
-    },
-    '/api/devices': {
-      post: {
-        tags: ['Push Notifications & Devices'],
-        summary: 'Register FCM device token',
-        description: 'Registers an FCM device registration token for offline push notifications.',
-        security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['token'],
-                properties: {
-                  token: { type: 'string', example: 'fcm-registration-token-123' },
-                  platform: { type: 'string', enum: ['web', 'android', 'ios'], default: 'web' }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          200: { description: 'Device token registered successfully' },
-          401: { description: 'Unauthorized' }
-        }
-      },
-      delete: {
-        tags: ['Push Notifications & Devices'],
-        summary: 'Unregister FCM device token',
-        description: 'Removes an FCM device registration token upon logout or device unregistration.',
-        security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['token'],
-                properties: {
-                  token: { type: 'string', example: 'fcm-registration-token-123' }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          200: { description: 'Device token unregistered successfully' },
-          401: { description: 'Unauthorized' }
-        }
-      }
-    },
-    '/api/uploads/sign': {
-      post: {
-        tags: ['Media & Uploads'],
-        summary: 'Generate signed media upload signature',
-        description: 'Generates a secure timestamped signature for uploading media files directly to Cloudinary.',
-        security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: false,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  folder: { type: 'string', example: 'avatars' }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          200: { description: 'Upload signature generated successfully' },
-          401: { description: 'Unauthorized' }
-        }
+      "CSRFAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-xsrf-token",
+        "description": "Enter the CSRF token retrieved from /api/csrf-token for all state-changing requests."
       }
     }
   },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "System & Health"
+        ],
+        "summary": "Check API and infrastructure health",
+        "description": "Returns health status of the API server, database connectivity, redis connectivity, and core secrets.",
+        "responses": {
+          "200": {
+            "description": "Health status summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "ok"
+                    },
+                    "hasDbUrl": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "hasRedisUrl": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "hasJwtSecret": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "hasSmtpUser": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "hasSmtpPass": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/csrf-token": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Get CSRF Token",
+        "description": "Retrieves a CSRF token to be included in the x-xsrf-token header of subsequent state-changing requests.",
+        "responses": {
+          "200": {
+            "description": "Returns the CSRF token"
+          }
+        }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Register a new user",
+        "description": "Creates a new user account and sends verification OTP to email. Tokens are issued after OTP verification via /api/otp/verify-email.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "John Doe"
+                  },
+                  "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 72,
+                    "example": "Password123!"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User registered successfully. OTP sent to email."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "409": {
+            "description": "Email already registered"
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Login user",
+        "description": "Authenticates credentials and sets an HttpOnly, Secure refreshToken cookie for web clients. Mobile clients can pass x-client-platform: mobile header to receive refreshToken in response JSON body.",
+        "parameters": [
+          {
+            "name": "x-client-platform",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Specify \"mobile\" for non-browser mobile app requests"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                  },
+                  "password": {
+                    "type": "string",
+                    "example": "Password123!"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login successful, returns accessToken and sets refreshToken cookie (or body for mobile)"
+          },
+          "401": {
+            "description": "Invalid email or password"
+          },
+          "403": {
+            "description": "Email not verified"
+          },
+          "429": {
+            "description": "Too many failed login attempts"
+          }
+        }
+      }
+    },
+    "/api/auth/refresh-token": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Rotate and refresh access token",
+        "description": "Generates a new access token and rotated refresh token using the existing refresh token.",
+        "parameters": [
+          {
+            "name": "x-client-platform",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Specify \"mobile\" if passing refreshToken in request body"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refreshToken": {
+                    "type": "string",
+                    "example": "raw-refresh-token"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tokens rotated and refreshed successfully"
+          },
+          "401": {
+            "description": "Invalid or expired refresh token"
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Logout current session",
+        "description": "Revokes the current refresh token and blacklists the current access token.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logged out successfully"
+          }
+        }
+      }
+    },
+    "/api/auth/logout-all": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Logout all active sessions",
+        "description": "Revokes all active refresh tokens and sessions for the authenticated user.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logged out of all sessions successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Get current user profile",
+        "description": "Fetches the authenticated user profile information.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User profile fetched successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/otp/send-verification": {
+      "post": {
+        "tags": [
+          "OTP & Password Reset"
+        ],
+        "summary": "Send email verification OTP",
+        "description": "Sends a 6-digit verification OTP to the user email.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verification OTP sent to email"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "429": {
+            "description": "Too many OTP requests"
+          }
+        }
+      }
+    },
+    "/api/otp/verify-email": {
+      "post": {
+        "tags": [
+          "OTP & Password Reset"
+        ],
+        "summary": "Verify email with OTP",
+        "description": "Verifies user email and issues initial auth tokens.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "otp"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "example": "123456"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Email verified successfully and tokens returned"
+          },
+          "400": {
+            "description": "Invalid or expired OTP"
+          }
+        }
+      }
+    },
+    "/api/otp/forgot-password": {
+      "post": {
+        "tags": [
+          "OTP & Password Reset"
+        ],
+        "summary": "Request password reset OTP",
+        "description": "Dispatches password reset OTP to user email if the account exists.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "If account exists, password reset OTP sent"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/api/otp/reset-password": {
+      "post": {
+        "tags": [
+          "OTP & Password Reset"
+        ],
+        "summary": "Reset password with OTP",
+        "description": "Resets account password using received OTP and revokes previous active sessions.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "otp",
+                  "newPassword"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "example": "123456"
+                  },
+                  "newPassword": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 72,
+                    "example": "NewSecret123!"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset successfully"
+          },
+          "400": {
+            "description": "Invalid or expired OTP"
+          }
+        }
+      }
+    },
+    "/api/users/search": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Search users",
+        "description": "Searches users by name or email with rate limiting.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search keyword"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            },
+            "description": "Maximum users to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching users list"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/users/onboarding": {
+      "patch": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Complete onboarding profile",
+        "description": "Updates onboarding profile attributes including role, useCase, bio, and interests.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "example": "SOFTWARE_ENGINEER"
+                  },
+                  "useCase": {
+                    "type": "string",
+                    "enum": [
+                      "ORGANIZATION",
+                      "FREELANCE",
+                      "HIRE_COLLABORATE",
+                      "COMMUNITY",
+                      "WORK",
+                      "PERSONAL",
+                      "EDUCATION"
+                    ],
+                    "example": "COMMUNITY"
+                  },
+                  "bio": {
+                    "type": "string",
+                    "example": "Full stack engineer building real-time collaboration apps."
+                  },
+                  "avatar": {
+                    "type": "string",
+                    "example": "https://res.cloudinary.com/demo/image/upload/avatar.png"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Onboarding completed successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/conversations": {
+      "get": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "List user conversations",
+        "description": "Fetches all direct and group conversations for the user with last messages and unread counts.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional search filter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of conversations"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Create or get direct 1-on-1 conversation",
+        "description": "Initiates or resolves a direct message conversation between the caller and target user.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userId"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "example": "target-user-uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Direct conversation created or resolved"
+          },
+          "400": {
+            "description": "Cannot message yourself or invalid target"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/conversations/direct": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Create or get direct conversation (alias)",
+        "description": "Alias route for initiating or getting 1-on-1 direct conversations.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userId"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "example": "target-user-uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Direct conversation resolved"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/conversations/search": {
+      "get": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Search conversations",
+        "description": "Searches user conversations by participant name or recent message content.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching conversations list"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/conversations/group": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Create a group conversation",
+        "description": "Creates a new group conversation with a designated name and participant list. Creator is automatically assigned group admin.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "participantIds"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Product Launch Group"
+                  },
+                  "avatar": {
+                    "type": "string",
+                    "example": "https://example.com/avatar.png"
+                  },
+                  "participantIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "example": [
+                      "uuid-user-1",
+                      "uuid-user-2"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Group conversation created successfully"
+          },
+          "400": {
+            "description": "Invalid group payload"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}": {
+      "get": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Get conversation details",
+        "description": "Returns conversation metadata, participant profiles, and participant roles.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Conversation ID or target user ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation details"
+          },
+          "403": {
+            "description": "Not a participant in this conversation"
+          },
+          "404": {
+            "description": "Conversation not found"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Update group conversation",
+        "description": "Updates group conversation name or avatar. Only group admins can update group metadata.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Group conversation ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Engineering Core Team"
+                  },
+                  "avatar": {
+                    "type": "string",
+                    "example": "https://example.com/new-avatar.png"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Group conversation updated successfully"
+          },
+          "403": {
+            "description": "Forbidden: only group admins can update group"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/messages": {
+      "get": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Get conversation messages (Cursor Pagination)",
+        "description": "Retrieves chronological messages for the conversation with keyset cursor pagination on sequence number.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Conversation ID"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Message ID of the last item in previous page"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            },
+            "description": "Number of messages to retrieve (1-50)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Messages list with nextCursor and hasNextPage"
+          },
+          "403": {
+            "description": "Not a participant in this conversation"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/search": {
+      "get": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Search messages within a conversation",
+        "description": "Performs case-insensitive text search on messages within a specific conversation.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Conversation ID"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search term"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Cursor message ID"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching messages list"
+          },
+          "403": {
+            "description": "Not a participant"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/participants": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Add participants to group",
+        "description": "Adds new participants to an existing group conversation. Requires group admin privileges.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Group conversation ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userIds"
+                ],
+                "properties": {
+                  "userIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "example": [
+                      "uuid-participant-1"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Participants added successfully"
+          },
+          "403": {
+            "description": "Forbidden: only group admins can add participants"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/leave": {
+      "delete": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Leave group conversation",
+        "description": "Removes the authenticated user from the group. If the leaving user was the sole admin, admin privileges are reassigned.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Group conversation ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Left group successfully"
+          },
+          "403": {
+            "description": "Not a participant in this group"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/admins": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Promote participant to group admin",
+        "description": "Promotes an existing participant to group admin role.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Group conversation ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userId"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "example": "uuid-to-promote"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Participant promoted to admin successfully"
+          },
+          "403": {
+            "description": "Only group admins can promote other members"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/admins/{userId}": {
+      "delete": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Dismiss group admin",
+        "description": "Demotes a group admin back to standard member role.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Group conversation ID"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "User ID of admin to dismiss"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Admin dismissed successfully"
+          },
+          "403": {
+            "description": "Only group admins can dismiss admins"
+          }
+        }
+      }
+    },
+    "/api/communities": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List user joined communities",
+        "description": "Fetches all communities the authenticated user is currently a member of.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of joined communities"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Create a new community",
+        "description": "Creates a community space with name, description, category, and privacy setting.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "description"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Open Source AI Builders"
+                  },
+                  "description": {
+                    "type": "string",
+                    "example": "Collaborative hub for open source AI engineers."
+                  },
+                  "category": {
+                    "type": "string",
+                    "example": "Technology"
+                  },
+                  "isPrivate": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "avatar": {
+                    "type": "string",
+                    "example": "https://example.com/comm-avatar.png"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Community created successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/communities/search": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Search public communities",
+        "description": "Searches public communities by name or description with member counts and cursor pagination.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search query"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching communities list"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/communities/feed": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Get consolidated communities feed",
+        "description": "Fetches aggregated recent posts from all communities the authenticated user has joined.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Consolidated feed posts"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Get community details",
+        "description": "Retrieves metadata, creator, member count, and caller membership status for a community.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Community details"
+          },
+          "404": {
+            "description": "Community not found"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Update community details",
+        "description": "Updates community metadata. Requires OWNER or ADMIN role.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Updated Community Name"
+                  },
+                  "description": {
+                    "type": "string",
+                    "example": "Updated Description"
+                  },
+                  "avatar": {
+                    "type": "string",
+                    "example": "https://example.com/avatar.png"
+                  },
+                  "isPrivate": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Community updated successfully"
+          },
+          "403": {
+            "description": "Forbidden: Insufficient community permissions"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Delete community",
+        "description": "Permanently deletes a community. Only the community OWNER can perform this action.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Community deleted successfully"
+          },
+          "403": {
+            "description": "Only community owner can delete community"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/members": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Get community members",
+        "description": "Lists all active members of the community with their roles and join dates.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Members list"
+          },
+          "403": {
+            "description": "Community is private and caller is not a member"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/members/{userId}/role": {
+      "patch": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Change community member role",
+        "description": "Changes a member role to ADMIN or MEMBER. Only the OWNER can modify member roles.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "User ID of target member"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "ADMIN",
+                      "MEMBER"
+                    ],
+                    "example": "ADMIN"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Member role updated successfully"
+          },
+          "403": {
+            "description": "Only owner can change member roles"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/members/{userId}": {
+      "delete": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Remove member from community",
+        "description": "Removes or kicks a member from the community. Allowed for OWNER and ADMIN.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "User ID to remove"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Member removed successfully"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/leave": {
+      "post": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Leave community",
+        "description": "Leaves the specified community. The OWNER must transfer ownership before leaving.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Left community successfully"
+          },
+          "400": {
+            "description": "Owner must transfer ownership before leaving"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/transfer-ownership": {
+      "post": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Transfer community ownership",
+        "description": "Transfers community OWNER status to another existing member.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "newOwnerId"
+                ],
+                "properties": {
+                  "newOwnerId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "example": "uuid-target-new-owner"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ownership transferred successfully"
+          },
+          "403": {
+            "description": "Only current owner can transfer ownership"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/invites": {
+      "post": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Create invite link",
+        "description": "Generates an invite token/link with optional expiration and max uses.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expiresInHours": {
+                    "type": "integer",
+                    "default": 168
+                  },
+                  "maxUses": {
+                    "type": "integer",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Invite link created successfully"
+          },
+          "403": {
+            "description": "Only owner and admins can generate invites"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/invites/{inviteId}": {
+      "delete": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Revoke invite link",
+        "description": "Revokes an active community invite link.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "inviteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Invite ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invite link revoked successfully"
+          }
+        }
+      }
+    },
+    "/api/communities/invites/{token}": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Validate invite token preview",
+        "description": "Public endpoint to check if an invite link is valid and fetch preview metadata.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Invite token"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invite token is valid, returns community preview"
+          },
+          "404": {
+            "description": "Invalid, expired, or depleted invite token"
+          }
+        }
+      }
+    },
+    "/api/communities/invites/{token}/join": {
+      "post": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Join community via invite token",
+        "description": "Adds the authenticated user to the community using a valid invite link.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Invite token"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully joined community"
+          },
+          "400": {
+            "description": "Already a member"
+          },
+          "404": {
+            "description": "Invalid or expired invite token"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/posts": {
+      "get": {
+        "tags": [
+          "Community Posts & Comments"
+        ],
+        "summary": "Get posts in community",
+        "description": "Retrieves chronological posts with attachments, comments count, and cursor pagination.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Community posts list"
+          },
+          "403": {
+            "description": "Access denied: Must be a community member"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Community Posts & Comments"
+        ],
+        "summary": "Create post in community",
+        "description": "Creates a new post with optional file attachment, image, or video.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "content"
+                ],
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "example": "Hello world from our community!"
+                  },
+                  "fileUrl": {
+                    "type": "string",
+                    "nullable": true,
+                    "example": "https://bucket.s3.amazonaws.com/post.pdf"
+                  },
+                  "fileType": {
+                    "type": "string",
+                    "nullable": true,
+                    "example": "pdf"
+                  },
+                  "fileName": {
+                    "type": "string",
+                    "nullable": true,
+                    "example": "post.pdf"
+                  },
+                  "fileSize": {
+                    "type": "integer",
+                    "nullable": true,
+                    "example": 1048576
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Post created successfully"
+          },
+          "403": {
+            "description": "Must be a member of the community to post"
+          }
+        }
+      }
+    },
+    "/api/posts/feed": {
+      "get": {
+        "tags": [
+          "Community Posts & Comments"
+        ],
+        "summary": "Get post feed",
+        "description": "Aggregates posts across user communities for the main application feed.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Feed posts list"
+          }
+        }
+      }
+    },
+    "/api/posts/{postId}": {
+      "patch": {
+        "tags": [
+          "Community Posts & Comments"
+        ],
+        "summary": "Update post",
+        "description": "Updates content or attachments of an existing post. Caller must be post author or community admin.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Post ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "example": "Updated post content"
+                  },
+                  "fileUrl": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Post updated successfully"
+          },
+          "403": {
+            "description": "Forbidden: Cannot edit another user post"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Community Posts & Comments"
+        ],
+        "summary": "Delete post",
+        "description": "Deletes a post and cascades all attached comments.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Post ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Post deleted successfully"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/api/posts/{postId}/comments": {
+      "get": {
+        "tags": [
+          "Community Posts & Comments"
+        ],
+        "summary": "Get post comments",
+        "description": "Retrieves all threaded comments for a community post.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Post ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comments list"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Community Posts & Comments"
+        ],
+        "summary": "Add comment to post",
+        "description": "Adds a new comment or reply to a post.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Post ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "content"
+                ],
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "example": "Great update! Looking forward to this."
+                  },
+                  "parentId": {
+                    "type": "string",
+                    "nullable": true,
+                    "example": "parent-comment-uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Comment created successfully"
+          }
+        }
+      }
+    },
+    "/api/comments/{commentId}": {
+      "patch": {
+        "tags": [
+          "Community Posts & Comments"
+        ],
+        "summary": "Update comment",
+        "description": "Edits comment content. Caller must be the comment author.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "commentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comment ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "content"
+                ],
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "example": "Updated comment text"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Comment updated successfully"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Community Posts & Comments"
+        ],
+        "summary": "Delete comment",
+        "description": "Deletes a comment.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "commentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comment ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comment deleted successfully"
+          }
+        }
+      }
+    },
+    "/api/organizations": {
+      "get": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "List user organizations",
+        "description": "Fetches all organizations the caller belongs to with member roles and teams.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of organizations"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Create organization",
+        "description": "Creates a new enterprise organization workspace. Caller becomes ORG_ADMIN.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Acme Corporation"
+                  },
+                  "description": {
+                    "type": "string",
+                    "example": "Engineering & Design Organization"
+                  },
+                  "logo": {
+                    "type": "string",
+                    "example": "https://example.com/logo.png"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Organization created successfully"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}": {
+      "get": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Get organization details",
+        "description": "Retrieves organization details, members, and teams. Requires membership.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization details"
+          },
+          "403": {
+            "description": "Must be an organization member"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Update organization",
+        "description": "Updates organization metadata. Requires ORG_ADMIN role.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Acme Global Inc"
+                  },
+                  "description": {
+                    "type": "string",
+                    "example": "Updated description"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Organization updated successfully"
+          },
+          "403": {
+            "description": "Requires ORG_ADMIN role"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/members": {
+      "get": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "List organization members",
+        "description": "Lists all members with roles (ORG_ADMIN, TEAM_HEAD, MEMBER).",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Members list"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/members/{userId}": {
+      "patch": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Update organization member role",
+        "description": "Changes a member role in the organization. Requires ORG_ADMIN.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Member user ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "ORG_ADMIN",
+                      "TEAM_HEAD",
+                      "MEMBER"
+                    ],
+                    "example": "TEAM_HEAD"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Member role updated successfully"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Remove organization member",
+        "description": "Removes a user from the organization. Requires ORG_ADMIN.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Member user ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Member removed successfully"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/leave": {
+      "post": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Leave organization",
+        "description": "Leaves the organization. Last ORG_ADMIN cannot leave without reassigning admin.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Left organization successfully"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/invites": {
+      "get": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "List organization invites",
+        "description": "Lists pending and active invite tokens for the organization.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invites list"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Create organization invite",
+        "description": "Generates an invite token/link for an email address.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "role"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "colleague@example.com"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "ORG_ADMIN",
+                      "TEAM_HEAD",
+                      "MEMBER"
+                    ],
+                    "default": "MEMBER"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Invite created successfully"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/invites/{inviteId}": {
+      "delete": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Revoke organization invite",
+        "description": "Revokes a pending organization invitation.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          },
+          {
+            "name": "inviteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Invite ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invite revoked successfully"
+          }
+        }
+      }
+    },
+    "/api/organizations/join/{token}": {
+      "get": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Preview organization invite",
+        "description": "Public endpoint to view organization name and invitation details before joining.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Invite token"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invite preview"
+          },
+          "404": {
+            "description": "Invalid or expired invite"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Accept organization invite",
+        "description": "Accepts the invitation and adds authenticated user to the organization.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Invite token"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Joined organization successfully"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/teams": {
+      "get": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "List organization teams",
+        "description": "Fetches all teams inside the organization.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Teams list"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Create team in organization",
+        "description": "Creates a team within the organization. Requires ORG_ADMIN or TEAM_HEAD.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Frontend Platform"
+                  },
+                  "description": {
+                    "type": "string",
+                    "example": "Responsible for Web and Mobile UI"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Team created successfully"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/teams/{teamId}": {
+      "get": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Get team details",
+        "description": "Retrieves team information, member roster, and head.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Team ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Team details"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Update team",
+        "description": "Updates team name or description. Requires ORG_ADMIN or TEAM_HEAD.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Team ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Platform Infrastructure"
+                  },
+                  "description": {
+                    "type": "string",
+                    "example": "Core backend and reliability team"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Team updated successfully"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Delete team",
+        "description": "Deletes a team within the organization.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Team ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Team deleted successfully"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/teams/{teamId}/members": {
+      "post": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Add team member",
+        "description": "Adds an organization member to a specific team.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Team ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userId"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "example": "uuid-org-member"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Member added to team successfully"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/teams/{teamId}/members/{userId}": {
+      "delete": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Remove team member",
+        "description": "Removes a member from a team.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Team ID"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Member user ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Member removed from team successfully"
+          }
+        }
+      }
+    },
+    "/api/meetings": {
+      "post": {
+        "tags": [
+          "Meetings & Video Calls"
+        ],
+        "summary": "Create a meeting room",
+        "description": "Creates a new meeting room with unique code and optional waiting room protection.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Sprint Planning Sync"
+                  },
+                  "waitingRoom": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Meeting room created with meeting code"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/meetings/{code}": {
+      "get": {
+        "tags": [
+          "Meetings & Video Calls"
+        ],
+        "summary": "Get meeting room details",
+        "description": "Retrieves meeting title, host information, status, and waiting room configuration by meeting code.",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting code (e.g. tkp-hue-bhw)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meeting details"
+          },
+          "404": {
+            "description": "Meeting not found"
+          }
+        }
+      }
+    },
+    "/api/meetings/{code}/end": {
+      "post": {
+        "tags": [
+          "Meetings & Video Calls"
+        ],
+        "summary": "End active meeting room",
+        "description": "Terminates an active meeting for all participants. Caller must be the meeting host.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting code"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meeting ended successfully"
+          },
+          "403": {
+            "description": "Only host can end meeting"
+          }
+        }
+      }
+    },
+    "/api/uploads/sign": {
+      "post": {
+        "tags": [
+          "Media & Uploads"
+        ],
+        "summary": "Generate signed upload signature (Cloudinary)",
+        "description": "Generates a secure timestamped signature for uploading media files directly to Cloudinary.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "folder": {
+                    "type": "string",
+                    "example": "avatars"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upload signature generated successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/uploads/s3": {
+      "post": {
+        "tags": [
+          "Media & Uploads"
+        ],
+        "summary": "Direct multipart file upload to AWS S3",
+        "description": "Uploads images, videos, audio, or documents directly to AWS S3 with mime validation and size limits (100MB max).",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Binary file payload"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "File uploaded successfully, returns permanent S3 URL and metadata"
+          },
+          "400": {
+            "description": "Invalid file or file too large"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/devices": {
+      "post": {
+        "tags": [
+          "Device Tokens"
+        ],
+        "summary": "Register FCM device token",
+        "description": "Associates a Firebase Cloud Messaging device registration token with the authenticated user for push notifications.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "example": "fcm-registration-token-123"
+                  },
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "android",
+                      "ios",
+                      "web"
+                    ],
+                    "default": "android"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Device token registered successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Device Tokens"
+        ],
+        "summary": "Unregister FCM device token",
+        "description": "Removes a device token on logout or app uninstall so push notifications cease.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "example": "fcm-registration-token-123"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Device token unregistered successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    }
+  }
 };
 
 export const setupSwagger = (app: Express): void => {
   const options = {
     swaggerOptions: {
       requestInterceptor: (req: any) => {
-        const match = document.cookie.match(/(?:^|;\\s*)XSRF-TOKEN=([^;]*)/);
+        const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
         if (match) {
           req.headers['x-xsrf-token'] = decodeURIComponent(match[1]);
         }

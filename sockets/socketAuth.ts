@@ -8,7 +8,7 @@ export type SafeUser = Omit<User, 'passwordHash'>;
 
 export interface AuthenticatedSocket extends Socket {
   data: {
-    user?: SafeUser;
+    user?: SafeUser & { isAuthenticated?: boolean };
     tokenPayload?: AccessTokenPayload;
   };
 }

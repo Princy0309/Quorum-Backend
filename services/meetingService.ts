@@ -70,14 +70,15 @@ export const getMeeting = async (code: string) => {
 
 export const endMeeting = async (code: string, hostId: string) => {
   const meeting = await prisma.meeting.findFirst({
-    where: {
-      code,
-      status: MeetingStatus.ACTIVE,
-    },
+    where: { code },
   });
 
   if (!meeting) {
-    throw new ApiError(404, 'Meeting not found or already ended');
+    throw new ApiError(404, 'Meeting not found');
+  }
+
+  if (meeting.status === MeetingStatus.ENDED) {
+    throw new ApiError(400, 'Meeting has already ended');
   }
 
   if (meeting.hostId !== hostId) {
@@ -89,7 +90,11 @@ export const endMeeting = async (code: string, hostId: string) => {
     data: { status: MeetingStatus.ENDED },
   });
 
-  closeMeetingRoom(code);
+  try {
+    closeMeetingRoom(code);
+  } catch (err) {
+    console.error('Failed to teardown meeting socket room:', err);
+  }
 
   return { message: 'Meeting ended successfully' };
 };

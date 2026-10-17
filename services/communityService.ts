@@ -1,11 +1,24 @@
 import crypto from 'crypto';
 import prisma from '../config/prisma.js';
+import env from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
-import { CommunityRole } from '../types/community.js';
-import type { CreateCommunityInput, UpdateCommunityInput } from '../types/community.js';
-export { CommunityRole };
-export type { CreateCommunityInput, UpdateCommunityInput };
 
+export const CommunityRole = {
+  OWNER: 'OWNER',
+  ADMIN: 'ADMIN',
+  MEMBER: 'MEMBER'
+} as const;
+export type CommunityRole = (typeof CommunityRole)[keyof typeof CommunityRole];
+
+export interface CreateCommunityInput {
+  name: string;
+  description?: string;
+}
+
+export interface UpdateCommunityInput {
+  name?: string;
+  description?: string;
+}
 
 export const createCommunity = async (userId: string, data: CreateCommunityInput) => {
   return await prisma.$transaction(async (tx) => {
@@ -270,11 +283,17 @@ export const createInviteLink = async (userId: string, communityId: string, expi
       }
     });
 
+    const baseUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || env.CLIENT_URL;
+    const cleanBase = baseUrl.replace(/\/$/, '');
+    const inviteUrl = `${cleanBase}/communities/invites/${invite.token}`;
+
     return {
       id: invite.id,
       communityId: invite.communityId,
       communityName: invite.community.name,
       token: invite.token,
+      inviteUrl,
+      link: inviteUrl,
       expiresAt: invite.expiresAt,
       createdAt: invite.createdAt
     };
@@ -868,3 +887,78 @@ export const transferCommunityOwnership = async (
     };
   });
 };
+
+export const searchCommunities = async (
+  userId: string,
+  query: string,
+  cursor?: string,
+  limit: number = 20
+) => {
+  const cleanQuery = typeof query === 'string' ? query.trim() : '';
+  const take = Math.min(Math.max(limit, 1), 50);
+
+  const whereClause: any = {};
+  if (cleanQuery) {
+    whereClause.OR = [
+      { name: { contains: cleanQuery, mode: 'insensitive' } },
+      { description: { contains: cleanQuery, mode: 'insensitive' } }
+    ];
+  }
+
+  const communities = await prisma.community.findMany({
+    where: whereClause,
+    take: take + 1,
+    skip: cursor ? 1 : 0,
+    cursor: cursor ? { id: cursor } : undefined,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    include: {
+      owner: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      },
+      members: {
+        where: { userId },
+        select: {
+          role: true,
+          joinedAt: true
+        }
+      },
+      _count: {
+        select: {
+          members: true,
+          posts: true
+        }
+      }
+    }
+  });
+
+  const hasNextPage = communities.length > take;
+  const pagedCommunities = hasNextPage ? communities.slice(0, take) : communities;
+  const nextCursor = hasNextPage && pagedCommunities.length > 0 ? pagedCommunities[pagedCommunities.length - 1].id : null;
+
+  return {
+    communities: pagedCommunities.map((c) => {
+      const userMembership = c.members && c.members.length > 0 ? c.members[0] : null;
+      return {
+        id: c.id,
+        name: c.name,
+        description: c.description,
+        ownerId: c.ownerId,
+        owner: c.owner,
+        memberCount: c._count.members,
+        postCount: c._count.posts,
+        isMember: !!userMembership,
+        role: userMembership ? userMembership.role : null,
+        joinedAt: userMembership ? userMembership.joinedAt : null,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt
+      };
+    }),
+    nextCursor,
+    hasNextPage
+  };
+};
+

@@ -14,7 +14,6 @@ export class ApiResponse<T = any> {
   }
 }
 
-
 export const sendSuccess = (res: Response, statusCode: number, message: string, data: any = null) => {
   return res.status(statusCode).json(new ApiResponse(statusCode, data, message));
 };

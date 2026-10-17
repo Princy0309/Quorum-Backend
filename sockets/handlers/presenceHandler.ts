@@ -7,7 +7,7 @@ import logger from '../../utils/logger.js';
 
 export const registerPresenceHandler = async (io: SocketIOServer, socket: AuthenticatedSocket) => {
   const userId = socket.data.user?.id;
-  if (!userId) return;
+  if (!userId || !socket.data.user?.isAuthenticated) return;
 
   try {
     const isFirstConnection = await setUserOnline(userId, socket.id);

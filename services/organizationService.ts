@@ -141,8 +141,6 @@ export const updateOrganization = async (orgId: string, data: UpdateOrgInput) =>
   return updatedOrg;
 };
 
-//organization-creation
-
 export const getOrganizationMembers = async (orgId: string) => {
   
   const org = await prisma.organization.findUnique({
@@ -482,7 +480,6 @@ export const acceptOrganizationInvite = async (
     throw new ApiError(400, 'This invite link has reached its maximum usage limit');
   }
 
-  // Edge Case: Email Hijacking Protection
   if (invite.email && invite.email.toLowerCase() !== userEmail.toLowerCase()) {
     throw new ApiError(
       403,
@@ -490,7 +487,6 @@ export const acceptOrganizationInvite = async (
     );
   }
 
-  // Edge Case: Check if user is already a member
   const existingMember = await prisma.organizationMember.findUnique({
     where: {
       organizationId_userId: {

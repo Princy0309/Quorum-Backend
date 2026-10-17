@@ -6,10 +6,10 @@ import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.j
 import logger from '../utils/logger.js';
 import { verifyAccessToken } from '../services/tokenService.js';
 import prisma from '../config/prisma.js';
+import { isOriginAllowed } from '../config/env.js';
 import { registerMessageHandler } from './handlers/messageHandler.js';
 import { registerTypingHandler } from './handlers/typingHandler.js';
 import { registerPresenceHandler } from './handlers/presenceHandler.js';
-
 
 let ioInstance: Server | null = null;
 
@@ -23,7 +23,13 @@ export const getIO = (): Server => {
 export const initSocketServer = (httpServer: any) => {
   const io = new Server(httpServer, {
     cors: {
-      origin: '*',
+      origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+        if (isOriginAllowed(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
       credentials: true,
     },
   });
@@ -35,7 +41,6 @@ export const initSocketServer = (httpServer: any) => {
     const query = socket.handshake.query || {};
     let userId: string | null = null;
     let name: string = auth.name || (typeof query.name === 'string' ? query.name : '') || 'Participant';
-
 
     let rawToken = auth.token ||
       (typeof socket.handshake.headers.authorization === 'string' ? socket.handshake.headers.authorization : '') ||
@@ -51,11 +56,8 @@ export const initSocketServer = (httpServer: any) => {
         }
       } catch (err: any) {
         logger.warn(`[Socket Auth] Token verification failed for socket ${socket.id}: ${err.message}`);
+        return next(new Error('Authentication error: jwt expired'));
       }
-    }
-
-    if (!userId && auth.userId) {
-      userId = String(auth.userId);
     }
 
     if (userId && (!name || name === 'Participant')) {
@@ -72,7 +74,6 @@ export const initSocketServer = (httpServer: any) => {
       }
     }
 
-
     socket.data.user = {
       id: String(userId || socket.id),
       name: String(name),
@@ -82,8 +83,6 @@ export const initSocketServer = (httpServer: any) => {
     logger.info(`[Socket Auth] Client ${socket.id} resolved: userId=${socket.data.user.id}, name=${socket.data.user.name}, isAuth=${socket.data.user.isAuthenticated}`);
     next();
   });
-
-
 
   io.on('connection', (socket) => {
     logger.info(`[Socket] Client connected: ${socket.id}`);
@@ -97,21 +96,53 @@ export const initSocketServer = (httpServer: any) => {
     registerTypingHandler(io, socket as any);
     registerPresenceHandler(io, socket as any);
 
+    const handleDynamicAuth = async (data: { token?: string }, ack?: (res: any) => void) => {
+      try {
+        const raw = data?.token;
+        const freshToken = typeof raw === 'string' ? raw.replace(/^Bearer\s+/i, '').trim() : '';
+        if (!freshToken) {
+          ack?.({ success: false, message: 'Token required' });
+          return;
+        }
+        const decoded = verifyAccessToken(freshToken);
+        if (!decoded?.id) {
+          ack?.({ success: false, message: 'Invalid token payload' });
+          return;
+        }
+        const dbUser = await prisma.user.findUnique({
+          where: { id: decoded.id },
+          select: { id: true, name: true }
+        });
+        if (!dbUser) {
+          ack?.({ success: false, message: 'User not found' });
+          return;
+        }
+        socket.data.user = {
+          id: dbUser.id,
+          name: dbUser.name || 'User',
+          isAuthenticated: true,
+        };
+        socket.join(`user:${dbUser.id}`);
+        logger.info(`[Socket Auth] Client ${socket.id} dynamically authenticated as userId=${dbUser.id}`);
+        ack?.({ success: true, user: socket.data.user });
+      } catch (err: any) {
+        ack?.({ success: false, message: err.message });
+      }
+    };
 
+    socket.on('socket:authenticate', handleDynamicAuth);
+    socket.on('authenticate', handleDynamicAuth);
 
     registerSfuSignaling(io, socket);
 
-
-    socket.on('meeting:join', (data, ack) => handleJoinMeeting(io, socket, data.meetingCode, ack));
-    socket.on('meeting:leave', (data, ack) => handleLeaveMeeting(io, socket, data.meetingCode, ack));
+    socket.on('meeting:join', (data, ack) => handleJoinMeeting(io, socket, data?.meetingCode, ack));
+    socket.on('meeting:leave', (data, ack) => handleLeaveMeeting(io, socket, data?.meetingCode, ack));
     socket.on('meeting:end', (data, ack) => handleEndMeeting(io, socket, data, ack));
-
 
     socket.on('meeting:toggle-mic', (data, ack) => handleToggleMic(io, socket, data, ack));
     socket.on('meeting:toggle-cam', (data, ack) => handleToggleCam(io, socket, data, ack));
     socket.on('meeting:mute-participant', (data, ack) => handleMuteParticipant(io, socket, data, ack));
     socket.on('meeting:send-message', (data, ack) => handleSendMeetingMessage(io, socket, data, ack));
-
 
     socket.on('meeting:admit-participant', (data, ack) => handleAdmitParticipant(io, socket, data, ack));
     socket.on('meeting:reject-participant', (data, ack) => handleRejectParticipant(io, socket, data, ack));
@@ -124,5 +155,3 @@ export const initSocketServer = (httpServer: any) => {
 
   return io;
 };
-
-

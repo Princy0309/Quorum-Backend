@@ -7,7 +7,9 @@ import {
   addGroupParticipants,
   removeGroupParticipant,
   updateGroupConversation,
-  transferGroupOwnership
+  getConversationById,
+  makeGroupAdmin,
+  dismissGroupAdmin
 } from '../services/chatService.js';
 import { ApiError } from '../utils/ApiError.js';
 
@@ -45,10 +47,14 @@ export const getUserConversationsController = async (req: Request, res: Response
       throw new ApiError(401, 'Unauthorized');
     }
 
-    const conversations = await getUserConversations(userId);
+    const rawQuery = req.query.q ?? req.query.search ?? req.query.query;
+    const query = typeof rawQuery === 'string' ? rawQuery.trim() : undefined;
+
+    const conversations = await getUserConversations(userId, query);
     res.status(200).json({
       success: true,
-      data: conversations
+      data: conversations,
+      conversations: conversations
     });
   } catch (err) {
     next(err);
@@ -217,7 +223,7 @@ export const updateGroupConversationController = async (req: Request, res: Respo
   }
 };
 
-export const transferGroupOwnershipController = async (req: Request, res: Response, next: NextFunction) => {
+export const leaveGroupConversationController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.id;
     if (!userId) {
@@ -230,13 +236,60 @@ export const transferGroupOwnershipController = async (req: Request, res: Respon
       throw new ApiError(400, 'conversationId is required');
     }
 
-    const { newOwnerId } = req.body;
-    if (!newOwnerId || typeof newOwnerId !== 'string') {
-      throw new ApiError(400, 'newOwnerId is required');
+    const result = await removeGroupParticipant(userId, conversationId, userId);
+
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getConversationDetailsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
     }
 
-    const conversation = await transferGroupOwnership(userId, conversationId, newOwnerId.trim());
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
 
+    const conversation = await getConversationById(userId, conversationId);
+    res.status(200).json({
+      success: true,
+      data: conversation,
+      conversation
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const makeGroupAdminController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+    const targetUserId = req.params.userId || req.body?.userId || req.body?.memberId || req.body?.targetUserId;
+
+    if (!targetUserId || typeof targetUserId !== 'string') {
+      throw new ApiError(400, 'userId is required');
+    }
+
+    const conversation = await makeGroupAdmin(userId, conversationId, targetUserId.trim());
     res.status(200).json({
       success: true,
       data: conversation
@@ -245,4 +298,33 @@ export const transferGroupOwnershipController = async (req: Request, res: Respon
     next(err);
   }
 };
+
+export const dismissGroupAdminController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+    const targetUserId = req.params.userId || req.body?.userId || req.body?.memberId || req.body?.targetUserId;
+
+    if (!targetUserId || typeof targetUserId !== 'string') {
+      throw new ApiError(400, 'userId is required');
+    }
+
+    const conversation = await dismissGroupAdmin(userId, conversationId, targetUserId.trim());
+    res.status(200).json({
+      success: true,
+      data: conversation
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 

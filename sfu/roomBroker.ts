@@ -65,7 +65,6 @@ export class RoomBroker extends EventEmitter {
       throw new Error(`Peer ${peerId} not found in room ${roomCode}`);
     }
 
-    // Use track.id or fallback to track.uuid (guaranteed string)
     const trackId = track.id || track.uuid;
 
     const publishedTrack: PublishedTrack = {

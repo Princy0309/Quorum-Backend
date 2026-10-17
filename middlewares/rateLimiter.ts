@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { RateLimiterRedis } from 'rate-limiter-flexible';
+import { RateLimiterRedis, RateLimiterMemory } from 'rate-limiter-flexible';
 import redisClient from '../config/redis.js';
-
+import logger from '../utils/logger.js';
 import crypto from 'crypto';
 import env from '../config/env.js';
 
@@ -250,5 +250,48 @@ export const checkSfuIceRateLimit = async (userId: string): Promise<boolean> => 
   }
 };
 
+const aiMemoryFallbackLimiter = new RateLimiterMemory({
+  points: 20,
+  duration: 60,
+  blockDuration: 60
+});
+
+export const aiUserRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'ai_user_req_v1',
+  points: 20,
+  duration: 60,
+  blockDuration: 60,
+  insuranceLimiter: aiMemoryFallbackLimiter
+});
+
+export const aiRateLimiterMiddleware = async (req: Request, res: Response, next: NextFunction): Promise<any> => {
+  try {
+    const key = req.user?.id || req.ip || '127.0.0.1';
+    await aiUserRateLimiter.consume(key);
+    next();
+  } catch (err: any) {
+    if (err && typeof err.msBeforeNext === 'number') {
+      const retryAfterSec = Math.ceil(err.msBeforeNext / 1000);
+      res.set('Retry-After', String(retryAfterSec));
+      return res.status(429).json({
+        success: false,
+        message: 'Too many AI requests. Please wait a moment before trying again.',
+        retryAfter: retryAfterSec
+      });
+    }
+
+    logger.error('AI rate limiter infrastructure failure', {
+      error: err instanceof Error ? err.message : String(err),
+      userId: req.user?.id,
+      ip: req.ip
+    });
+
+    return res.status(503).json({
+      success: false,
+      message: 'Rate limiting service temporarily unavailable. Please retry shortly.'
+    });
+  }
+};
 
 

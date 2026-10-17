@@ -1,18 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { ApiError } from '../utils/ApiError.js';
 import crypto from 'crypto';
-import env from '../config/env.js';
-
-const allowedOrigins = env.ALLOWED_ORIGINS 
-  ? env.ALLOWED_ORIGINS.split(',').map((o: string) => o.trim()).filter(Boolean)
-  : [
-      'https://quorum-web-omega.vercel.app',
-      'https://newquorum.me',
-      'https://www.newquorum.me',
-      'https://api.newquorum.me',
-      'http://localhost:3000',
-      'http://localhost:5173',
-    ];
+import env, { isOriginAllowed } from '../config/env.js';
 
 export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
   const isMobile = req.headers['x-client-platform'] === 'mobile';
@@ -20,9 +9,21 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
     return next();
   }
 
- 
   const originHeader = req.headers.origin;
-  if (originHeader && (originHeader.includes('api.newquorum.me') || originHeader.includes('localhost') || originHeader.includes('127.0.0.1'))) {
+  const host = req.get('host');
+  if (originHeader && host && originHeader.includes(host)) {
+    return next();
+  }
+
+  const isAuthEndpoint = 
+    req.path.includes('/login') ||
+    req.path.includes('/register') ||
+    req.path.includes('/refresh') ||
+    req.path.includes('/forgot-password') ||
+    req.path.includes('/reset-password') ||
+    req.path.includes('/otp');
+
+  if (isAuthEndpoint) {
     return next();
   }
 
@@ -42,7 +43,7 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
     if (!origin && req.headers.referer) {
       try {
         origin = new URL(req.headers.referer).origin;
-      } catch (err) {
+      } catch {
         return next();
       }
     }
@@ -51,17 +52,11 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
       return next();
     }
 
-    const isAllowedDomain = allowedOrigins.includes(origin);
-    const isLocalDev = env.NODE_ENV !== 'production' && (
-      origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')
-    );
-
-    const isOwnDomain = origin.includes('newquorum.me');
-    if (!isAllowedDomain && !isLocalDev && !isOwnDomain) {
+    if (!isOriginAllowed(origin)) {
       return next(new ApiError(403, 'CSRF validation failed: Unauthorized origin'));
     }
+
     const hasAuthCookie = !!req.cookies['refreshToken'];
-    
     if (hasAuthCookie) {
       const headerToken = req.headers['x-xsrf-token'] || req.headers['x-csrf-token'];
       if (!headerToken || headerToken !== csrfToken) {
