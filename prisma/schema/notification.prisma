@@ -1,0 +1,30 @@
+enum NotificationType {
+  ORG_INVITE
+  TEAM_INVITE
+  COMMUNITY_INVITE
+  COMMUNITY_POST_COMMENT
+  MEETING_STARTED
+  DIRECT_MESSAGE
+  SYSTEM
+}
+
+model Notification {
+  id           String           @id @default(uuid())
+  recipientId  String
+  actorId      String?
+  type         NotificationType
+  title        String
+  body         String
+  data         Json?
+  isRead       Boolean          @default(false)
+  readAt       DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  recipient    User             @relation("RecipientNotifications", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor        User?            @relation("ActorNotifications", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([recipientId])
+  @@index([recipientId, isRead])
+  @@index([createdAt])
+}

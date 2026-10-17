@@ -37,6 +37,9 @@ model User {
   memberships              OrganizationMember[]
   sentOrgInvites           OrganizationInvite[]      @relation("OrgInviter")
   teamMemberships          TeamMember[]
+  receivedNotifications    Notification[]            @relation("RecipientNotifications")
+  triggeredNotifications   Notification[]            @relation("ActorNotifications")
+
 }
 
 model RefreshToken {
