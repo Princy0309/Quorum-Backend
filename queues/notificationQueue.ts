@@ -13,7 +13,10 @@ export const notificationQueue = new Queue('notificationQueue', {
 
 export const queueNotification = async (payload: CreateNotificationInput) => {
   if (!payload.recipientId || !payload.title || !payload.body || !payload.type) {
-    logger.warn('[NotificationQueue] Skipping invalid payload', { payload });
+    logger.warn('[NotificationQueue] Skipping invalid payload',  { 
+  recipientId: payload?.recipientId, 
+  type: payload?.type 
+});
     return null;
   }
 
@@ -43,10 +46,26 @@ export const notificationWorker = new Worker(
       return null;
     }
 
-    logger.info(`[NotificationWorker] Processing job #${job.id} for user ${recipientId}`);
+    const preference = await prisma.userNotificationPreference.findUnique({
+      where: {
+        userId_notificationType: {
+          userId: recipientId,
+          notificationType: type,
+        },
+      },
+    });
+    const allowInApp = preference ? preference.inApp : true;
+    const allowPush = preference ? preference.push : true;
+    if (!allowInApp && !allowPush) {
+      logger.info(`[NotificationWorker] User ${recipientId} muted all alerts for ${type}`);
+      return null;
+    }
+    logger.info(`[NotificationWorker] Processing job #${job.id} for user ${recipientId}`);    
+
 
     let notification;
-    try {
+    if(allowInApp){
+      try {
       notification = await prisma.notification.create({
         data: {
           recipientId,
@@ -71,6 +90,9 @@ export const notificationWorker = new Worker(
       throw dbErr;
     }
 
+    }
+    
+
     let isOnline = false;
     try {
       const presenceMap = await getMultipleUserPresences([recipientId]);
@@ -79,7 +101,7 @@ export const notificationWorker = new Worker(
       logger.warn('[NotificationWorker] Presence check failed', { error: err.message });
     }
 
-    if (isOnline) {
+    if (isOnline && allowInApp && notification) {
       try {
         const io = getIO();
         io.to(`user:${recipientId}`).emit('notification:new', notification);
@@ -87,7 +109,7 @@ export const notificationWorker = new Worker(
       } catch (socketErr: any) {
         logger.debug('[NotificationWorker] Socket broadcast skipped', { error: socketErr.message });
       }
-    } else {
+    } else if (!isOnline && allowPush){
       try {
         const stringifiedData: Record<string, string> = { type };
         if (data && typeof data === 'object') {
