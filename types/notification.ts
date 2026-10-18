@@ -46,3 +46,10 @@ export interface PaginatedNotificationsResult {
   };
   unreadCount: number;
 }
+
+export interface UpdateNotificationPreferenceInput {
+  notificationType: NotificationType;
+  inApp?: boolean;
+  push?: boolean;
+  email?: boolean;
+}

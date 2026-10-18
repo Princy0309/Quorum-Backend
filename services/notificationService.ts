@@ -4,7 +4,8 @@ import { getMultipleUserPresences } from './presenceService.js';
 import logger from '../utils/logger.js';
 import type { 
   GetNotificationsOptions,
-  PaginatedNotificationsResult 
+  PaginatedNotificationsResult,
+  UpdateNotificationPreferenceInput
 } from '../types/index.js';
 
 export const getUserNotifications = async (
@@ -144,4 +145,37 @@ export const sendPushToOfflineUsers = async (
       where: { token: { in: result.invalidTokens } },
     });
   }
+};
+
+export const getUserPreferences = async (userId: string) => {
+  return await prisma.userNotificationPreference.findMany({
+    where: { userId },
+  });
+};
+
+export const upsertUserPreference = async (
+  userId: string,
+  input: UpdateNotificationPreferenceInput
+) => {
+  const { notificationType, inApp, push, email } = input;
+  return await prisma.userNotificationPreference.upsert({
+    where: {
+      userId_notificationType: {
+        userId,
+        notificationType,
+      },
+    },
+    update: {
+      ...(inApp !== undefined && { inApp }),
+      ...(push !== undefined && { push }),
+      ...(email !== undefined && { email }),
+    },
+    create: {
+      userId,
+      notificationType,
+      inApp: inApp ?? true,
+      push: push ?? true,
+      email: email ?? true,
+    },
+  });
 };

@@ -6,6 +6,8 @@ import {
   markAsReadController,
   markAllAsReadController,
   deleteNotificationController,
+  getPreferencesController,
+  updatePreferenceController,
 } from '../controllers/notificationController.js';
 
 const router = Router();
@@ -17,5 +19,8 @@ router.get('/unread-count', getUnreadCountController);
 router.patch('/read-all', markAllAsReadController);
 router.patch('/:id/read', markAsReadController);
 router.delete('/:id', deleteNotificationController);
+router.get('/preferences', getPreferencesController);
+router.put('/preferences', updatePreferenceController);
+
 
 export default router;
