@@ -1,4 +1,4 @@
-import { Express } from 'express';
+import { Express, Request, Response } from 'express';
 import swaggerUi from 'swagger-ui-express';
 
 const swaggerDocument = {
@@ -1080,6 +1080,44 @@ const swaggerDocument = {
             "description": "Not a participant in this group"
           }
         }
+      },
+      "post": {
+        "tags": [
+          "Group Conversations"
+        ],
+        "summary": "Leave group conversation (POST alias for DELETE /leave)",
+        "description": "Leaves the group conversation. Automatically reassigns owner if the leaving user was the sole owner.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Conversation UUID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully left conversation"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Conversation not found"
+          }
+        }
       }
     },
     "/api/conversations/{id}/admins": {
@@ -1136,6 +1174,57 @@ const swaggerDocument = {
       }
     },
     "/api/conversations/{id}/admins/{userId}": {
+      "post": {
+        "tags": [
+          "Group Conversations"
+        ],
+        "summary": "Promote participant to group admin (by path)",
+        "description": "Promotes an existing participant to admin status within the group conversation.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Conversation UUID"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "User UUID to promote"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Participant promoted to admin"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Only group owners or admins can promote"
+          },
+          "404": {
+            "description": "Conversation or participant not found"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "Conversations & Chat"
@@ -3355,8 +3444,1139 @@ const swaggerDocument = {
           }
         }
       }
+    },
+    "/api/users": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Search and list users (alias for /search)",
+        "description": "Searches for registered platform users matching username, full name, or email with rate limiting.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search query for name, username, or email"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            },
+            "description": "Maximum users to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching users list"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/users/search": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Search users eligible to invite to community",
+        "description": "Finds platform users that are not already active members of this community.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Community UUID"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search query filter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of invitable users"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Community not found"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/feed": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Get community feed posts (alias for /posts)",
+        "description": "Returns feed posts for the specified community with cursor-based pagination.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Community UUID"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Cursor ID of the last post received"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            },
+            "description": "Maximum posts to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of community posts"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Community not found"
+          }
+        }
+      }
+    },
+    "/api/posts": {
+      "get": {
+        "tags": [
+          "Community Posts"
+        ],
+        "summary": "Get global community feed (alias for /feed)",
+        "description": "Returns consolidated post feed across public communities and member feeds.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Cursor for pagination"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            },
+            "description": "Number of posts to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated community feed posts"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/dm": {
+      "post": {
+        "tags": [
+          "Direct Messaging"
+        ],
+        "summary": "Initiate or retrieve 1:1 direct conversation (root alias)",
+        "description": "Finds an existing direct conversation or establishes a new one between caller and recipient.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "recipientId"
+                ],
+                "properties": {
+                  "recipientId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "example": "d3b07384-d113-4607-bb89-53609804b407"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Existing conversation returned"
+          },
+          "201": {
+            "description": "New conversation created"
+          },
+          "400": {
+            "description": "Invalid recipient ID or cannot DM self"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/conversations/dm": {
+      "post": {
+        "tags": [
+          "Direct Messaging"
+        ],
+        "summary": "Initiate or retrieve 1:1 direct conversation (conversations alias)",
+        "description": "Alias for /api/conversations/direct.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "recipientId"
+                ],
+                "properties": {
+                  "recipientId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "example": "d3b07384-d113-4607-bb89-53609804b407"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Conversation retrieved"
+          },
+          "201": {
+            "description": "Conversation established"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/members": {
+      "post": {
+        "tags": [
+          "Group Conversations"
+        ],
+        "summary": "Add participants to group conversation (alias for /participants)",
+        "description": "Adds one or more user IDs to the group conversation.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Conversation UUID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userIds"
+                ],
+                "properties": {
+                  "userIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "example": [
+                      "d3b07384-d113-4607-bb89-53609804b407"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Members added successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - only group admins can add members"
+          },
+          "404": {
+            "description": "Conversation not found"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/make-admin": {
+      "post": {
+        "tags": [
+          "Group Conversations"
+        ],
+        "summary": "Promote participant to group admin (by body)",
+        "description": "Alternative endpoint to promote a member to group admin by providing userId in request body.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Conversation UUID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userId"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "example": "d3b07384-d113-4607-bb89-53609804b407"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Participant promoted to admin"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Conversation not found"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/participants/{userId}/make-admin": {
+      "post": {
+        "tags": [
+          "Group Conversations"
+        ],
+        "summary": "Promote participant to group admin (RESTful path alias)",
+        "description": "Promotes participant to group admin.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Conversation UUID"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "User UUID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Participant promoted to admin"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/remove-admin": {
+      "post": {
+        "tags": [
+          "Group Conversations"
+        ],
+        "summary": "Demote group admin to standard participant (by body)",
+        "description": "Demotes an admin to normal participant status by providing userId in request body.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Conversation UUID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userId"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "example": "d3b07384-d113-4607-bb89-53609804b407"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Admin demoted to participant"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/participants/{userId}": {
+      "delete": {
+        "tags": [
+          "Group Conversations"
+        ],
+        "summary": "Remove participant from group conversation",
+        "description": "Removes a participant from the group conversation. Only group admins or owners can remove participants.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Conversation UUID"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "User UUID to remove"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Participant removed successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Participant or conversation not found"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/members/{userId}": {
+      "delete": {
+        "tags": [
+          "Group Conversations"
+        ],
+        "summary": "Remove member from group conversation (alias for /participants/{userId})",
+        "description": "Removes a member from the group conversation.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Conversation UUID"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "User UUID to remove"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Member removed successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/api/ai/chat": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Conversational AI question-answering assistant",
+        "description": "Provides intelligent answers with optional context budgeting and privacy sanitization.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "prompt"
+                ],
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "example": "How do I invite external collaborators to a team in Quorum?"
+                  },
+                  "context": {
+                    "type": "string",
+                    "example": "Optional context string (up to 10,000 characters)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "AI generated answer with token metadata"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "429": {
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "description": "AI service unavailable"
+          }
+        }
+      }
+    },
+    "/api/ai/search": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Workspace unified multi-entity AI search",
+        "description": "Searches direct messages, community posts, file attachments, and meetings with grounded citations and TF-IDF ranking.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "query"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "example": "Q4 design sprint deadlines"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 15,
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Synthesized answer with ranked source evidence citations"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/api/ai/summarize": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Summarize conversation chat history",
+        "description": "Generates structured summary with key decisions, action items, and participants for an authorized conversation.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "conversationId"
+                ],
+                "properties": {
+                  "conversationId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "example": "c4b9d031-18e4-4d45-933e-b490f2302821"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 1,
+                    "maximum": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Executive summary with action items"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Not a participant of this conversation"
+          },
+          "404": {
+            "description": "Conversation not found"
+          }
+        }
+      }
+    },
+    "/api/ai/assist": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Project & workspace contextual assistance",
+        "description": "Answers inquiries scoped to an authorized organization, team, or community.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "prompt"
+                ],
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "example": "Give me a high-level breakdown of our current team structure."
+                  },
+                  "organizationId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "teamId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "communityId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Contextual project assistance answer"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "User does not belong to specified project or workspace"
+          }
+        }
+      }
+    },
+    "/api/ai/quick-replies": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Context-aware quick replies & message tone rewrites",
+        "description": "Generates smart response suggestions, proactive follow-ups, or professional rewrites with review-first disclaimers.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "replies",
+                      "follow_up",
+                      "rewrite"
+                    ],
+                    "default": "replies"
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "professional",
+                      "casual",
+                      "friendly",
+                      "concise",
+                      "enthusiastic"
+                    ],
+                    "default": "professional"
+                  },
+                  "message": {
+                    "type": "string",
+                    "example": "Hey team, could everyone submit their sprint status reports by 3 PM?"
+                  },
+                  "conversationId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Suggestions list with review disclaimer"
+          },
+          "400": {
+            "description": "Either message or conversationId must be provided"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/ai/project-update": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Project status update (verified facts vs recommendations)",
+        "description": "Generates structured status reports distinguishing verified historical facts from AI recommendations.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "timeframe": {
+                    "type": "string",
+                    "enum": [
+                      "today",
+                      "yesterday",
+                      "last_7_days",
+                      "last_30_days",
+                      "last_90_days"
+                    ],
+                    "default": "last_7_days"
+                  },
+                  "organizationId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "teamId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "communityId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Structured project status update"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/api/ai/history": {
+      "get": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Get paginated AI interaction history",
+        "description": "Retrieves past prompts and answers for the authenticated user with cursor-based pagination.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "minimum": 1,
+              "maximum": 50
+            },
+            "description": "Number of interactions to return"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "ID of the last item from previous page"
+          },
+          {
+            "name": "actionType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "chat",
+                "search",
+                "project_assistance",
+                "quick_replies",
+                "project_update"
+              ]
+            },
+            "description": "Filter by action type"
+          },
+          {
+            "name": "conversationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Filter by conversation UUID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated interactions list with nextCursor"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Clear all AI interaction history",
+        "description": "Purges all interaction history records belonging to the authenticated user.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All AI history deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/ai/history/{id}": {
+      "delete": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Delete single AI interaction record",
+        "description": "Deletes a specific interaction record by its UUID.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Interaction record UUID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Interaction deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Interaction not found or does not belong to user"
+          }
+        }
+      }
     }
-  }
+  },
+  "tags": [
+    {
+      "name": "AI Assistant",
+      "description": "Workplace intelligence, generative assistant, contextual quick replies, grounded workspace search, and interaction history."
+    }
+  ]
 };
 
 export const setupSwagger = (app: Express): void => {
@@ -3371,6 +4591,17 @@ export const setupSwagger = (app: Express): void => {
       }
     }
   };
+
+  app.get('/api-docs.json', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json(swaggerDocument);
+  });
+
+  app.get('/api-docs/swagger.json', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json(swaggerDocument);
+  });
+
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument, options));
 };
 
