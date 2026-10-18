@@ -39,6 +39,7 @@ model User {
   teamMemberships          TeamMember[]
   receivedNotifications    Notification[]            @relation("RecipientNotifications")
   triggeredNotifications   Notification[]            @relation("ActorNotifications")
+  notificationPreferences  UserNotificationPreference[]
 
 }
 

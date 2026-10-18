@@ -28,3 +28,18 @@ model Notification {
   @@index([recipientId, isRead])
   @@index([createdAt])
 }
+
+
+model UserNotificationPreference {
+  id               String           @id @default(uuid())
+  userId           String
+  notificationType NotificationType
+  inApp            Boolean          @default(true)
+  push             Boolean          @default(true)
+  email            Boolean          @default(true)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, notificationType])
+  @@index([userId])
+}
