@@ -7,8 +7,8 @@ export interface PublisherOptions {
   id: string;
   peerId: string;
   kind: MediaKind;
-  ssrc?: number;
-  payloadType?: number;
+  ssrc: number;
+  payloadType: number;
   srtpSession?: SrtpSession;
 }
 
@@ -23,8 +23,8 @@ export class Publisher extends EventEmitter {
   public readonly id: string;
   public readonly peerId: string;
   public readonly kind: MediaKind;
-  public ssrc: number;
-  public payloadType: number;
+  public readonly ssrc: number;
+  public readonly payloadType: number;
   private srtpSession: SrtpSession | null = null;
   private isClosed: boolean = false;
   private stats: PublisherStats = {
@@ -39,8 +39,8 @@ export class Publisher extends EventEmitter {
     this.id = options.id;
     this.peerId = options.peerId;
     this.kind = options.kind;
-    this.ssrc = options.ssrc || 0;
-    this.payloadType = options.payloadType || 0;
+    this.ssrc = options.ssrc;
+    this.payloadType = options.payloadType;
     if (options.srtpSession) {
       this.srtpSession = options.srtpSession;
     }
@@ -48,6 +48,38 @@ export class Publisher extends EventEmitter {
 
   public setSrtpSession(session: SrtpSession): void {
     this.srtpSession = session;
+  }
+
+  private validateAndIngestRtp(rtpBuffer: Buffer): boolean {
+    if (this.isClosed || rtpBuffer.length < 12) {
+      this.stats.packetsDropped++;
+      return false;
+    }
+
+    const version = (rtpBuffer[0] >> 6) & 0x03;
+    if (version !== 2) {
+      this.stats.packetsDropped++;
+      return false;
+    }
+
+    const payloadType = rtpBuffer[1] & 0x7f;
+    if (this.payloadType !== 0 && payloadType !== this.payloadType) {
+      this.stats.packetsDropped++;
+      return false;
+    }
+
+    const ssrc = rtpBuffer.readUInt32BE(8);
+    if (this.ssrc !== 0 && ssrc !== this.ssrc) {
+      this.stats.packetsDropped++;
+      return false;
+    }
+
+    this.stats.packetsReceived++;
+    this.stats.bytesReceived += rtpBuffer.length;
+    this.stats.lastPacketTimestamp = Date.now();
+
+    this.emit('rtp', rtpBuffer, this);
+    return true;
   }
 
   public pushSrtp(encryptedBuffer: Buffer): boolean {
@@ -62,34 +94,11 @@ export class Publisher extends EventEmitter {
 
     try {
       const plaintextRtp = this.srtpSession.unprotect(encryptedBuffer);
-      this.pushRtp(plaintextRtp);
-      return true;
+      return this.validateAndIngestRtp(plaintextRtp);
     } catch {
       this.stats.packetsDropped++;
       return false;
     }
-  }
-
-  public pushRtp(rtpBuffer: Buffer): void {
-    if (this.isClosed || rtpBuffer.length < 12) {
-      return;
-    }
-
-    const ssrc = rtpBuffer.readUInt32BE(8);
-    const payloadType = rtpBuffer[1] & 0x7f;
-
-    if (this.ssrc === 0) {
-      this.ssrc = ssrc;
-    }
-    if (this.payloadType === 0) {
-      this.payloadType = payloadType;
-    }
-
-    this.stats.packetsReceived++;
-    this.stats.bytesReceived += rtpBuffer.length;
-    this.stats.lastPacketTimestamp = Date.now();
-
-    this.emit('rtp', rtpBuffer, this);
   }
 
   public getStats(): PublisherStats {
