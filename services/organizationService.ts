@@ -5,6 +5,8 @@ import crypto from 'crypto';
 import type { CreateOrgInput, UpdateOrgInput, CreateInviteInput } from '../types/organization.js';
 import {queueNotification} from '../queues/notificationQueue.js';
 import logger from "../utils/logger.js";
+import { addOrgInviteEmailToQueue } from '../queues/emailQueue.js';
+import env from '../config/env.js';
 
 
 
@@ -416,14 +418,22 @@ export const createOrganizationInvite = async (
     },
   });
 
-  if(normalizedEmail){
-    const existingUser = await prisma.user.findMany({
-      where: {email: normalizedEmail},
-      select: {id: true},
-    });
-  }
-
     if (normalizedEmail) {
+    const inviteLink = `${env.CLIENT_URL}/join/${invite.token}`;
+
+    try {
+      await addOrgInviteEmailToQueue({
+        email: normalizedEmail,
+        inviterName: invite.inviter.name,
+        orgName: invite.organization.name,
+        role: invite.role,
+        inviteLink,
+        expiresInDays: days,
+      });
+    } catch (err: any) {
+      logger.warn('[OrganizationInvite] Email queue failed', { error: err.message });
+    }
+
     const existingUser = await prisma.user.findUnique({
       where: { email: normalizedEmail },
       select: { id: true },
@@ -451,8 +461,6 @@ export const createOrganizationInvite = async (
 
   return invite;
 
-
-  return invite;
 };
 
 export const getInvitePreview = async (token: string) => {
