@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { getNotificationDigestHtml, NotificationDigestItem } from '../utils/emailTemplate.js';
+import { getNotificationDigestHtml, getOrgInviteEmailHtml, NotificationDigestItem } from '../utils/emailTemplate.js';
 
 export const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
@@ -57,5 +57,24 @@ export const sendNotificationDigestEmail = async (
   });
 };
 
+export const sendOrgInviteEmail = async (
+  to: string,
+  inviterName: string,
+  orgName: string,
+  role: string,
+  inviteLink: string,
+  expiresInDays: number = 7
+): Promise<any> => {
+  const html = getOrgInviteEmailHtml(inviterName, orgName, role, inviteLink, expiresInDays);
+  const subject = `${inviterName} invited you to join ${orgName} on Quorum`;
 
-export default { transporter, sendOTPEmail, sendNotificationDigestEmail };
+  return await transporter.sendMail({
+    from: `"Quorum" <${process.env.SMTP_USER}>`,
+    to,
+    subject,
+    html,
+  });
+};
+
+
+export default { transporter, sendOTPEmail, sendNotificationDigestEmail, sendOrgInviteEmail };
