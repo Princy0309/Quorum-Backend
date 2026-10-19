@@ -26,3 +26,12 @@ export interface CreateInviteInput {
   maxUses?: number;
   expiresInDays?: number;
 }
+
+export interface OrgInviteEmailJobData {
+  email: string;
+  inviterName: string;
+  orgName: string;
+  role: string;
+  inviteLink: string;
+  expiresInDays?: number;
+}

@@ -6,8 +6,6 @@ import expressWinston from 'express-winston';
 import helmet from 'helmet';
 import apiRouter from './routes/index.js';
 
-
-
 dotenv.config();
 
 import setupSwagger from './config/swagger.js';

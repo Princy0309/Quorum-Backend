@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { getNotificationDigestHtml, getOrgInviteEmailHtml, NotificationDigestItem } from '../utils/emailTemplate.js';
 
 export const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
@@ -40,4 +41,40 @@ export const sendOTPEmail = async (to: string, otp: string, purpose: 'verificati
   return await transporter.sendMail(mailOptions);
 };
 
-export default { transporter, sendOTPEmail };
+export const sendNotificationDigestEmail = async (
+  to: string,
+  recipientName: string,
+  notifications: NotificationDigestItem[]
+): Promise<any> => {
+  const html = getNotificationDigestHtml(recipientName, notifications);
+  const subject = `You have ${notifications.length} unread notification${notifications.length > 1 ? 's' : ''} on Quorum`;
+
+  return await transporter.sendMail({
+    from: `"Quorum" <${process.env.SMTP_USER}>`,
+    to,
+    subject,
+    html,
+  });
+};
+
+export const sendOrgInviteEmail = async (
+  to: string,
+  inviterName: string,
+  orgName: string,
+  role: string,
+  inviteLink: string,
+  expiresInDays: number = 7
+): Promise<any> => {
+  const html = getOrgInviteEmailHtml(inviterName, orgName, role, inviteLink, expiresInDays);
+  const subject = `${inviterName} invited you to join ${orgName} on Quorum`;
+
+  return await transporter.sendMail({
+    from: `"Quorum" <${process.env.SMTP_USER}>`,
+    to,
+    subject,
+    html,
+  });
+};
+
+
+export default { transporter, sendOTPEmail, sendNotificationDigestEmail, sendOrgInviteEmail };

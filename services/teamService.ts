@@ -1,6 +1,8 @@
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import type { CreateTeamInput, UpdateTeamInput } from '../types/team.js';
+import { queueNotification } from '../queues/notificationQueue.js';
+import logger from '../utils/logger.js';
 
 
 export const createTeam = async (
@@ -255,7 +257,7 @@ export const addTeamMember = async (
     throw new ApiError(409, 'User is already a member of this team');
   }
 
-  return await prisma.teamMember.create({
+    const createdMember = await prisma.teamMember.create({
     data: {
       teamId,
       userId: targetUserId,
@@ -272,6 +274,24 @@ export const addTeamMember = async (
       },
     },
   });
+
+  try {
+    await queueNotification({
+      recipientId: targetUserId,
+      type: 'TEAM_INVITE',
+      title: 'Added to Team',
+      body: `You were added to team "${team.name}"`,
+      data: {
+        organizationId,
+        teamId,
+        role: createdMember.role,
+      },
+    });
+  } catch (err: any) {
+    logger.warn('[TeamMember] Notification trigger failed', { error: err.message });
+  }
+
+  return createdMember;
 };
 
 export const removeTeamMember = async (
