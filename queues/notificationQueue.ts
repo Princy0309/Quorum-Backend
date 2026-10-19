@@ -6,6 +6,7 @@ import { sendPushToOfflineUsers } from '../services/notificationService.js';
 import { getMultipleUserPresences } from '../services/presenceService.js';
 import logger from '../utils/logger.js';
 import type { CreateNotificationInput } from '../types/index.js';
+import { queueEmailDigest } from './emailDigestQueue.js';
 
 export const notificationQueue = new Queue('notificationQueue', {
   connection: queueRedisConnection,
@@ -56,10 +57,13 @@ export const notificationWorker = new Worker(
     });
     const allowInApp = preference ? preference.inApp : true;
     const allowPush = preference ? preference.push : true;
-    if (!allowInApp && !allowPush) {
+    const allowEmail = preference ? preference.email : true;
+
+    if (!allowInApp && !allowPush && !allowEmail) {
       logger.info(`[NotificationWorker] User ${recipientId} muted all alerts for ${type}`);
       return null;
     }
+
     logger.info(`[NotificationWorker] Processing job #${job.id} for user ${recipientId}`);    
 
 
@@ -124,6 +128,15 @@ export const notificationWorker = new Worker(
         logger.warn('[NotificationWorker] FCM push dispatch failed', { error: pushErr.message });
       }
     }
+
+    if (allowEmail) {
+      try {
+        await queueEmailDigest(recipientId);
+      } catch (digestErr: any) {
+        logger.warn('[NotificationWorker] Failed to queue email digest', { error: digestErr.message });
+      }
+    }
+
 
     return notification;
   },
