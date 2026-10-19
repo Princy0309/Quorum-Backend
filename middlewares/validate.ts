@@ -23,3 +23,14 @@ export const validateJoi = (schema: any) => {
     next();
   };
 };
+
+export const validateQuery = (schema: ZodSchema) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const result = schema.safeParse(req.query);
+    if (!result.success) {
+      return next(new ApiError(400, result.error.issues[0].message));
+    }
+    req.query = result.data as any;
+    next();
+  };
+};

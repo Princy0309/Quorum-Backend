@@ -1,0 +1,199 @@
+import prisma from '../config/prisma.js';
+import redis from '../config/redis.js';
+import logger from '../utils/logger.js';
+import { ApiError } from '../utils/ApiError.js';
+
+import env from '../config/env.js';
+
+export interface RecordAiInteractionInput {
+  prompt: string;
+  response: string;
+  actionType?: string;
+  conversationId?: string;
+  model?: string;
+  tokensUsed?: number;
+}
+
+export interface GetAiHistoryOptions {
+  limit?: number;
+  cursor?: string;
+  actionType?: string;
+  conversationId?: string;
+}
+
+const REDIS_KEY_PREFIX = 'ai_history:user:';
+
+export const cleanExpiredAiHistory = async (retentionDays: number = env.AI_HISTORY_RETENTION_DAYS || 30) => {
+  const safeDays = Math.max(retentionDays, 1);
+  const cutoffDate = new Date(Date.now() - safeDays * 24 * 60 * 60 * 1000);
+
+  const result = await prisma.aiInteraction.deleteMany({
+    where: {
+      createdAt: {
+        lt: cutoffDate
+      }
+    }
+  });
+
+  return {
+    deletedCount: result.count,
+    cutoffDate: cutoffDate.toISOString()
+  };
+};
+
+export const startAiHistoryCleanupTask = () => {
+  const runCleanup = async () => {
+    try {
+      const lockKey = 'lock:ai_history_cleanup';
+      let lockAcquired = false;
+      try {
+        const res = await redis.set(lockKey, 'locked', 'EX', 82800, 'NX');
+        lockAcquired = res === 'OK';
+      } catch (lockErr: any) {
+        logger.warn('Failed to acquire AI history cleanup lock due to Redis error, skipping cleanup until Redis recovers', {
+          error: lockErr?.message
+        });
+        return;
+      }
+
+      if (!lockAcquired) {
+        return;
+      }
+
+      const result = await cleanExpiredAiHistory();
+      if (result.deletedCount > 0) {
+        logger.info('Cleaned expired AI interaction history', {
+          deletedCount: result.deletedCount,
+          cutoffDate: result.cutoffDate
+        });
+      }
+    } catch (err: any) {
+      logger.error('Failed to run scheduled AI history cleanup', {
+        error: err?.message
+      });
+    }
+  };
+
+  setTimeout(runCleanup, 5000).unref();
+  setInterval(runCleanup, 24 * 60 * 60 * 1000).unref();
+};
+
+export const recordAiInteraction = async (
+  userId: string,
+  data: RecordAiInteractionInput
+): Promise<void> => {
+  try {
+    const record = await prisma.aiInteraction.create({
+      data: {
+        userId,
+        conversationId: data.conversationId || null,
+        actionType: data.actionType || 'chat',
+        prompt: data.prompt,
+        response: data.response,
+        model: data.model || null,
+        tokensUsed: data.tokensUsed || null
+      }
+    });
+
+    try {
+      const cacheKey = `${REDIS_KEY_PREFIX}${userId}`;
+      await redis.lpush(cacheKey, JSON.stringify(record));
+      await redis.ltrim(cacheKey, 0, 49);
+      await redis.expire(cacheKey, 86400);
+    } catch {
+    }
+  } catch (err: any) {
+    logger.warn('Failed to persist AI interaction to database', {
+      userId,
+      error: err?.message
+    });
+  }
+};
+
+export const getUserAiHistory = async (
+  userId: string,
+  options?: GetAiHistoryOptions
+) => {
+  const limit = Math.min(Math.max(options?.limit ?? 20, 1), 50);
+  const cursor = options?.cursor;
+  const actionType = options?.actionType;
+  const conversationId = options?.conversationId;
+
+  const whereClause: any = {
+    userId,
+    ...(actionType ? { actionType } : {}),
+    ...(conversationId ? { conversationId } : {})
+  };
+
+  const records = await prisma.aiInteraction.findMany({
+    where: whereClause,
+    take: limit + 1,
+    skip: cursor ? 1 : 0,
+    cursor: cursor ? { id: cursor } : undefined,
+    orderBy: [
+      { createdAt: 'desc' },
+      { id: 'desc' }
+    ]
+  });
+
+  let hasNextPage = false;
+  let nextCursor: string | null = null;
+
+  if (records.length > limit) {
+    hasNextPage = true;
+    records.pop();
+  }
+
+  if (records.length > 0 && hasNextPage) {
+    nextCursor = records[records.length - 1].id;
+  }
+
+  return {
+    history: records,
+    pagination: {
+      limit,
+      hasNextPage,
+      nextCursor
+    }
+  };
+};
+
+export const deleteUserAiHistory = async (
+  userId: string,
+  interactionId?: string
+) => {
+  let deletedCount = 0;
+
+  if (interactionId) {
+    const result = await prisma.aiInteraction.deleteMany({
+      where: {
+        id: interactionId,
+        userId
+      }
+    });
+
+    if (result.count === 0) {
+      throw new ApiError(404, 'AI interaction not found');
+    }
+    deletedCount = result.count;
+  } else {
+    const result = await prisma.aiInteraction.deleteMany({
+      where: {
+        userId
+      }
+    });
+    deletedCount = result.count;
+  }
+
+  try {
+    const cacheKey = `${REDIS_KEY_PREFIX}${userId}`;
+    await redis.del(cacheKey);
+  } catch {
+  }
+
+  return {
+    success: true,
+    deletedCount,
+    deletedId: interactionId || 'all'
+  };
+};

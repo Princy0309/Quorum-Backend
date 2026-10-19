@@ -50,6 +50,9 @@ export const env = {
   SMTP_PASS: data?.SMTP_PASS || '',
   ALLOWED_ORIGINS: data?.ALLOWED_ORIGINS,
   REDIS_URL: data?.REDIS_URL,
+  GEMINI_API_KEY: data?.GEMINI_API_KEY || process.env.GEMINI_API_KEY || '',
+  GEMINI_MODEL: data?.GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+  AI_HISTORY_RETENTION_DAYS: Number(process.env.AI_HISTORY_RETENTION_DAYS || 30),
 };
 
 export default env;
