@@ -6,6 +6,7 @@ export const aiChatSchema = z.object({
 });
 
 export const aiSummarySchema = z.object({
+  conversationId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   focus: z.string().trim().max(500).optional(),
 });

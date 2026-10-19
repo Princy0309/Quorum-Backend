@@ -1002,8 +1002,8 @@ const swaggerDocument = {
         "tags": [
           "AI Assistant"
         ],
-        "summary": "Summarize conversation chat history",
-        "description": "Generates structured summary with key decisions, action items, and participants for an authorized conversation.",
+        "summary": "Summarize conversation chat history (via request body)",
+        "description": "Generates structured summary with key decisions, action items, and participants for an authorized conversation using conversationId in JSON body.",
         "security": [
           {
             "BearerAuth": []
@@ -1032,6 +1032,78 @@ const swaggerDocument = {
                     "default": 50,
                     "minimum": 1,
                     "maximum": 200
+                  },
+                  "focus": {
+                    "type": "string",
+                    "example": "action items"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Executive summary with action items"
+          },
+          "400": {
+            "description": "Missing conversationId or invalid input"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Not a participant of this conversation"
+          },
+          "404": {
+            "description": "Conversation not found"
+          }
+        }
+      }
+    },
+    "/api/ai/chat/{conversationId}/summary": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Summarize conversation chat history (via route param)",
+        "description": "Generates structured summary with key decisions and action items for an authorized conversation using conversationId in URL path.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "UUID of the conversation to summarize"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 1,
+                    "maximum": 200
+                  },
+                  "focus": {
+                    "type": "string",
+                    "example": "action items"
                   }
                 }
               }
@@ -1054,13 +1126,72 @@ const swaggerDocument = {
         }
       }
     },
-    "/api/ai/assist": {
+    "/api/ai/project-assistance": {
       "post": {
         "tags": [
           "AI Assistant"
         ],
         "summary": "Project & workspace contextual assistance",
         "description": "Answers inquiries scoped to an authorized organization, team, or community.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "prompt"
+                ],
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "example": "Give me a high-level breakdown of our current team structure."
+                  },
+                  "organizationId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "teamId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "communityId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Contextual project assistance answer"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "User does not belong to specified project or workspace"
+          }
+        }
+      }
+    },
+    "/api/ai/assistance": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Project assistance alias",
+        "description": "Direct alias for /api/ai/project-assistance.",
         "security": [
           {
             "BearerAuth": []

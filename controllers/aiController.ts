@@ -40,7 +40,10 @@ export const summarizeChatController = asyncHandler(async (req: Request, res: Re
     throw new ApiError(401, 'Unauthorized');
   }
 
-  const conversationId = String(req.params.conversationId);
+  const conversationId = String(req.params.conversationId || req.body?.conversationId || '').trim();
+  if (!conversationId) {
+    throw new ApiError(400, 'conversationId is required in route params or request body');
+  }
   const { limit, focus } = req.body || {};
 
   const result = await summarizeConversationChat(userId, conversationId, {
