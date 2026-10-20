@@ -62,3 +62,94 @@ export const exportSrtpKeyMaterial = (
     serverWriteMasterSalt: keyMaterial.subarray(46, 60)
   };
 };
+
+export interface DtlsRecordKeyMaterial {
+  clientWriteKey: Buffer;
+  serverWriteKey: Buffer;
+  clientWriteIv: Buffer;
+  serverWriteIv: Buffer;
+}
+
+export const deriveDtlsRecordKeys = (
+  masterSecret: Buffer,
+  clientRandom: Buffer,
+  serverRandom: Buffer
+): DtlsRecordKeyMaterial => {
+  const seed = Buffer.concat([serverRandom, clientRandom]);
+  const keyBlock = pseudoRandomFunction(masterSecret, 'key expansion', seed, 40);
+
+  return {
+    clientWriteKey: keyBlock.subarray(0, 16),
+    serverWriteKey: keyBlock.subarray(16, 32),
+    clientWriteIv: keyBlock.subarray(32, 36),
+    serverWriteIv: keyBlock.subarray(36, 40)
+  };
+};
+
+export const protectDtlsRecord = (
+  contentType: number,
+  plaintext: Buffer,
+  epoch: number,
+  seq: bigint,
+  key: Buffer,
+  fixedIv: Buffer
+): Buffer => {
+  const explicitNonce = Buffer.alloc(8);
+  explicitNonce.writeUInt16BE(epoch, 0);
+  explicitNonce.writeUInt16BE(Number((seq >> 32n) & 0xffffn), 2);
+  explicitNonce.writeUInt32BE(Number(seq & 0xffffffffn), 4);
+
+  const iv = Buffer.concat([fixedIv, explicitNonce]);
+
+  const aad = Buffer.alloc(13);
+  explicitNonce.copy(aad, 0);
+  aad[8] = contentType;
+  aad.writeUInt16BE(0xfefd, 9);
+  aad.writeUInt16BE(plaintext.length, 11);
+
+  const cipher = crypto.createCipheriv('aes-128-gcm', key, iv);
+  cipher.setAAD(aad);
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+
+  const fragment = Buffer.concat([explicitNonce, ciphertext, authTag]);
+
+  const header = Buffer.alloc(13);
+  header[0] = contentType;
+  header.writeUInt16BE(0xfefd, 1);
+  header.writeUInt16BE(epoch, 3);
+  header.writeUInt16BE(Number((seq >> 32n) & 0xffffn), 5);
+  header.writeUInt32BE(Number(seq & 0xffffffffn), 7);
+  header.writeUInt16BE(fragment.length, 11);
+
+  return Buffer.concat([header, fragment]);
+};
+
+export const unprotectDtlsRecord = (
+  record: { contentType: number; protocolVersion: number; epoch: number; sequenceNumber: bigint; fragment: Buffer },
+  key: Buffer,
+  fixedIv: Buffer
+): Buffer => {
+  if (record.fragment.length < 24) {
+    throw new Error('DTLS record fragment too short for AEAD');
+  }
+
+  const explicitNonce = record.fragment.subarray(0, 8);
+  const ciphertext = record.fragment.subarray(8, record.fragment.length - 16);
+  const authTag = record.fragment.subarray(record.fragment.length - 16);
+
+  const iv = Buffer.concat([fixedIv, explicitNonce]);
+
+  const aad = Buffer.alloc(13);
+  aad.writeUInt16BE(record.epoch, 0);
+  aad.writeUInt16BE(Number((record.sequenceNumber >> 32n) & 0xffffn), 2);
+  aad.writeUInt32BE(Number(record.sequenceNumber & 0xffffffffn), 4);
+  aad[8] = record.contentType;
+  aad.writeUInt16BE(record.protocolVersion, 9);
+  aad.writeUInt16BE(ciphertext.length, 11);
+
+  const decipher = crypto.createDecipheriv('aes-128-gcm', key, iv);
+  decipher.setAAD(aad);
+  decipher.setAuthTag(authTag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+};

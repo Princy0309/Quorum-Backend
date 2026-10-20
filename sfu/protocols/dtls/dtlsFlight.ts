@@ -6,7 +6,11 @@ import {
   wrapDtlsRecord,
   wrapHandshakeMessage
 } from './dtlsRecords.js';
-import { pseudoRandomFunction } from './dtlsKeys.js';
+import {
+  DtlsRecordKeyMaterial,
+  protectDtlsRecord,
+  pseudoRandomFunction
+} from './dtlsKeys.js';
 
 export interface ServerFlight4Result {
   serverRandom: Buffer;
@@ -167,6 +171,7 @@ export const buildServerFlight4 = (
 
 export const buildServerFlight6 = (
   masterSecret: Buffer,
+  recordKeys: DtlsRecordKeyMaterial,
   handshakeTranscript: Buffer,
   startHandshakeSeq: number,
   startRecordSeq: bigint
@@ -188,7 +193,14 @@ export const buildServerFlight6 = (
     startHandshakeSeq
   );
 
-  const finishedRecord = wrapDtlsRecord(DTLS_CONTENT_TYPE.HANDSHAKE, finishedMsg, 1, 0n);
+  const finishedRecord = protectDtlsRecord(
+    DTLS_CONTENT_TYPE.HANDSHAKE,
+    finishedMsg,
+    1,
+    0n,
+    recordKeys.serverWriteKey,
+    recordKeys.serverWriteIv
+  );
 
   return {
     changeCipherSpecRecord,
