@@ -138,6 +138,15 @@ export const unprotectDtlsRecord = (
   const ciphertext = record.fragment.subarray(8, record.fragment.length - 16);
   const authTag = record.fragment.subarray(record.fragment.length - 16);
 
+  const expectedNonce = Buffer.alloc(8);
+  expectedNonce.writeUInt16BE(record.epoch, 0);
+  expectedNonce.writeUInt16BE(Number((record.sequenceNumber >> 32n) & 0xffffn), 2);
+  expectedNonce.writeUInt32BE(Number(record.sequenceNumber & 0xffffffffn), 4);
+
+  if (!crypto.timingSafeEqual(explicitNonce, expectedNonce)) {
+    throw new Error('DTLS record explicit nonce does not match header sequence');
+  }
+
   const iv = Buffer.concat([fixedIv, explicitNonce]);
 
   const aad = Buffer.alloc(13);
