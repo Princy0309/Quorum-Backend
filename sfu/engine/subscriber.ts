@@ -231,7 +231,7 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
       return false;
     }
 
-    if (!this.srtpSession || !this.transportSender) {
+    if (!this.transportSender) {
       this.stats.packetsDropped++;
       return false;
     }
@@ -260,13 +260,15 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
 
     outgoing = this.rewriteHeaderExtensions(outgoing);
 
-    let dispatchPacket: Buffer;
-    try {
-      dispatchPacket = this.srtpSession.protect(outgoing);
-    } catch (err: any) {
-      this.stats.packetsDropped++;
-      this.emit('error', err);
-      return false;
+    let dispatchPacket: Buffer = outgoing;
+    if (this.srtpSession) {
+      try {
+        dispatchPacket = this.srtpSession.protect(outgoing);
+      } catch (err: any) {
+        this.stats.packetsDropped++;
+        this.emit('error', err);
+        return false;
+      }
     }
 
     try {
@@ -294,16 +296,18 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
       return false;
     }
 
-    if (!this.srtpSession || !this.transportSender) {
+    if (!this.transportSender) {
       return false;
     }
 
-    let dispatchPacket: Buffer;
-    try {
-      dispatchPacket = this.srtpSession.protectRtcp(packet);
-    } catch (err: any) {
-      this.emit('error', err);
-      return false;
+    let dispatchPacket: Buffer = packet;
+    if (this.srtpSession) {
+      try {
+        dispatchPacket = this.srtpSession.protectRtcp(packet);
+      } catch (err: any) {
+        this.emit('error', err);
+        return false;
+      }
     }
 
     try {

@@ -143,16 +143,18 @@ export class Publisher extends EventEmitter {
       return false;
     }
 
-    if (!this.srtpSession || !this.transportSender) {
+    if (!this.transportSender) {
       return false;
     }
 
-    let dispatchPacket: Buffer;
-    try {
-      dispatchPacket = this.srtpSession.protectRtcp(packet);
-    } catch (err: any) {
-      this.emit('error', err);
-      return false;
+    let dispatchPacket: Buffer = packet;
+    if (this.srtpSession) {
+      try {
+        dispatchPacket = this.srtpSession.protectRtcp(packet);
+      } catch (err: any) {
+        this.emit('error', err);
+        return false;
+      }
     }
 
     try {

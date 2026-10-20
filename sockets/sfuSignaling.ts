@@ -258,12 +258,18 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           });
         }
 
-        roomBroker.subscribeToTrack(
+        const subscribed = roomBroker.subscribeToTrack(
           roomCode,
           subscriberPeerId,
           trackId,
           transceiver.sender
         );
+
+        if (!subscribed) {
+          logger.error(`[Signaling] Failed to subscribe peer ${subscriberPeerId} to track ${trackId}`);
+          socket.emit('sfu:error', { message: 'Failed to subscribe to track' });
+          return;
+        }
 
         await consumerPc.setRemoteDescription(
           new RTCSessionDescription(sdp.sdp, sdp.type)

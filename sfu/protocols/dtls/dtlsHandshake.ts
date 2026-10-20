@@ -146,8 +146,7 @@ export class DtlsServerHandshake extends EventEmitter {
         }
         this.retransmitAttempts++;
         if (this.retransmitAttempts > this.maxRetransmitAttempts) {
-          this.emit('error', new Error('DTLS handshake retransmission limit exceeded'));
-          this.close();
+          this.emitTerminalError(new Error('DTLS handshake retransmission limit exceeded'));
           return;
         }
         if (this.state === 'WAIT_CLIENT_KEY_EXCHANGE' && this.cachedFlight4) {
@@ -201,6 +200,14 @@ export class DtlsServerHandshake extends EventEmitter {
     }
   }
 
+  private emitTerminalError(err: Error): void {
+    this.clearRetransmitTimer();
+    this.clearFlight6RetransmitTimer();
+    this.state = 'CLOSED';
+    this.emit('error', err);
+    this.close();
+  }
+
   public handleIncomingDatagram(datagram: Buffer, rinfo?: { address: string; port: number }): void {
     try {
       if (this.state === 'CLOSED' || datagram.length < 13) {
@@ -224,12 +231,12 @@ export class DtlsServerHandshake extends EventEmitter {
               const decrypted = unprotectDtlsRecord(record, this.recordKeys.clientWriteKey, this.recordKeys.clientWriteIv);
               this.processHandshakeRecord(decrypted, 1);
             } catch (err: any) {
-              this.emit('error', new Error('DTLS record decryption failed: ' + err.message));
+              this.emitTerminalError(new Error('DTLS record decryption failed: ' + err.message));
             }
           }
         } else if (record.contentType === DTLS_CONTENT_TYPE.CHANGE_CIPHER_SPEC) {
           if (record.epoch !== 0 || record.fragment.length !== 1 || record.fragment[0] !== 0x01 || this.state !== 'WAIT_FINISHED') {
-            this.emit('error', new Error('Invalid ChangeCipherSpec record, epoch, or state'));
+            this.emitTerminalError(new Error('Invalid ChangeCipherSpec record, epoch, or state'));
             return;
           }
           this.receivedChangeCipherSpec = true;
@@ -246,7 +253,7 @@ export class DtlsServerHandshake extends EventEmitter {
         }
       }
     } catch (err: any) {
-      this.emit('error', err);
+      this.emitTerminalError(err);
     }
   }
 
@@ -255,7 +262,7 @@ export class DtlsServerHandshake extends EventEmitter {
     for (const msg of messages) {
       if (msg.msgType === DTLS_HANDSHAKE_TYPE.CLIENT_HELLO) {
         if (epoch !== 0) {
-          this.emit('error', new Error('ClientHello received in invalid epoch'));
+          this.emitTerminalError(new Error('ClientHello received in invalid epoch'));
           return;
         }
         if (this.state === 'WAIT_CLIENT_KEY_EXCHANGE') {
@@ -264,42 +271,42 @@ export class DtlsServerHandshake extends EventEmitter {
             this.startRetransmitTimer();
             return;
           }
-          this.emit('error', new Error('Unexpected ClientHello in WAIT_CLIENT_KEY_EXCHANGE with seq ' + msg.messageSeq));
+          this.emitTerminalError(new Error('Unexpected ClientHello in WAIT_CLIENT_KEY_EXCHANGE with seq ' + msg.messageSeq));
           return;
         }
         if (this.state !== 'INITIAL' && this.state !== 'VERIFY_REQUESTED') {
-          this.emit('error', new Error('Unexpected ClientHello in state ' + this.state));
+          this.emitTerminalError(new Error('Unexpected ClientHello in state ' + this.state));
           return;
         }
         if (this.state === 'INITIAL' && msg.messageSeq !== 0) {
-          this.emit('error', new Error('Invalid initial ClientHello messageSeq: ' + msg.messageSeq));
+          this.emitTerminalError(new Error('Invalid initial ClientHello messageSeq: ' + msg.messageSeq));
           return;
         }
         if (this.state === 'VERIFY_REQUESTED' && msg.messageSeq !== 1 && msg.messageSeq !== 0) {
-          this.emit('error', new Error('Invalid ClientHello retry messageSeq: ' + msg.messageSeq));
+          this.emitTerminalError(new Error('Invalid ClientHello retry messageSeq: ' + msg.messageSeq));
           return;
         }
         this.onClientHello(msg);
       } else if (msg.msgType === DTLS_HANDSHAKE_TYPE.CLIENT_KEY_EXCHANGE) {
         if (epoch !== 0) {
-          this.emit('error', new Error('ClientKeyExchange received in invalid epoch'));
+          this.emitTerminalError(new Error('ClientKeyExchange received in invalid epoch'));
           return;
         }
         if (this.state === 'WAIT_FINISHED' && msg.messageSeq === (this.expectedClientHandshakeSeq - 1)) {
           return;
         }
         if (this.state !== 'WAIT_CLIENT_KEY_EXCHANGE') {
-          this.emit('error', new Error('Unexpected ClientKeyExchange in state ' + this.state));
+          this.emitTerminalError(new Error('Unexpected ClientKeyExchange in state ' + this.state));
           return;
         }
         if (msg.messageSeq !== this.expectedClientHandshakeSeq) {
-          this.emit('error', new Error('Invalid ClientKeyExchange messageSeq: ' + msg.messageSeq + ', expected ' + this.expectedClientHandshakeSeq));
+          this.emitTerminalError(new Error('Invalid ClientKeyExchange messageSeq: ' + msg.messageSeq + ', expected ' + this.expectedClientHandshakeSeq));
           return;
         }
         this.onClientKeyExchange(msg);
       } else if (msg.msgType === DTLS_HANDSHAKE_TYPE.FINISHED) {
         if (epoch !== 1) {
-          this.emit('error', new Error('Finished received in invalid epoch'));
+          this.emitTerminalError(new Error('Finished received in invalid epoch'));
           return;
         }
         if (this.state === 'CONNECTED') {
@@ -314,19 +321,19 @@ export class DtlsServerHandshake extends EventEmitter {
             this.clearFlight6RetransmitTimer();
             return;
           }
-          this.emit('error', new Error('Unexpected Finished sequence in CONNECTED state'));
+          this.emitTerminalError(new Error('Unexpected Finished sequence in CONNECTED state'));
           return;
         }
         if (this.state !== 'WAIT_FINISHED') {
-          this.emit('error', new Error('Unexpected Finished in state ' + this.state));
+          this.emitTerminalError(new Error('Unexpected Finished in state ' + this.state));
           return;
         }
         if (!this.receivedChangeCipherSpec) {
-          this.emit('error', new Error('Finished received before ChangeCipherSpec'));
+          this.emitTerminalError(new Error('Finished received before ChangeCipherSpec'));
           return;
         }
         if (msg.messageSeq !== this.expectedClientHandshakeSeq) {
-          this.emit('error', new Error('Invalid Finished messageSeq: ' + msg.messageSeq + ', expected ' + this.expectedClientHandshakeSeq));
+          this.emitTerminalError(new Error('Invalid Finished messageSeq: ' + msg.messageSeq + ', expected ' + this.expectedClientHandshakeSeq));
           return;
         }
         this.onClientFinished(msg, epoch);
@@ -337,7 +344,7 @@ export class DtlsServerHandshake extends EventEmitter {
   private onClientHello(msg: DtlsHandshakeMessage): void {
     const body = msg.body;
     if (body.length < 34) {
-      this.emit('error', new Error('ClientHello body too short'));
+      this.emitTerminalError(new Error('ClientHello body too short'));
       return;
     }
 
@@ -346,7 +353,7 @@ export class DtlsServerHandshake extends EventEmitter {
     offset += 2;
 
     if (clientVersion !== 0xfefd && clientVersion !== 0xfeff) {
-      this.emit('error', new Error('Unsupported DTLS client version: 0x' + clientVersion.toString(16)));
+      this.emitTerminalError(new Error('Unsupported DTLS client version: 0x' + clientVersion.toString(16)));
       return;
     }
 
@@ -354,28 +361,28 @@ export class DtlsServerHandshake extends EventEmitter {
     offset += 32;
 
     if (offset >= body.length) {
-      this.emit('error', new Error('ClientHello truncated before session ID'));
+      this.emitTerminalError(new Error('ClientHello truncated before session ID'));
       return;
     }
 
     const sessionIdLength = body[offset];
     offset += 1;
     if (offset + sessionIdLength > body.length) {
-      this.emit('error', new Error('ClientHello session ID exceeds message length'));
+      this.emitTerminalError(new Error('ClientHello session ID exceeds message length'));
       return;
     }
     const sessionId = body.subarray(offset, offset + sessionIdLength);
     offset += sessionIdLength;
 
     if (offset >= body.length) {
-      this.emit('error', new Error('ClientHello truncated before cookie length'));
+      this.emitTerminalError(new Error('ClientHello truncated before cookie length'));
       return;
     }
 
     const cookieLength = body[offset];
     offset += 1;
     if (offset + cookieLength > body.length) {
-      this.emit('error', new Error('ClientHello cookie exceeds message length'));
+      this.emitTerminalError(new Error('ClientHello cookie exceeds message length'));
       return;
     }
     const cookie = body.subarray(offset, offset + cookieLength);
@@ -412,13 +419,13 @@ export class DtlsServerHandshake extends EventEmitter {
     }
 
     if (offset + 2 > body.length) {
-      this.emit('error', new Error('ClientHello truncated before cipher suites length'));
+      this.emitTerminalError(new Error('ClientHello truncated before cipher suites length'));
       return;
     }
     const cipherSuitesLength = body.readUInt16BE(offset);
     offset += 2;
     if (cipherSuitesLength % 2 !== 0 || offset + cipherSuitesLength > body.length) {
-      this.emit('error', new Error('ClientHello invalid cipher suites length'));
+      this.emitTerminalError(new Error('ClientHello invalid cipher suites length'));
       return;
     }
     let supportedCipherOffered = false;
@@ -432,19 +439,18 @@ export class DtlsServerHandshake extends EventEmitter {
     offset += cipherSuitesLength;
 
     if (!supportedCipherOffered) {
-      this.emit('error', new Error('ClientHello did not offer supported cipher suite 0xC02B'));
-      this.close();
+      this.emitTerminalError(new Error('ClientHello did not offer supported cipher suite 0xC02B'));
       return;
     }
 
     if (offset >= body.length) {
-      this.emit('error', new Error('ClientHello truncated before compression methods length'));
+      this.emitTerminalError(new Error('ClientHello truncated before compression methods length'));
       return;
     }
     const compressionMethodsLength = body[offset];
     offset += 1;
     if (offset + compressionMethodsLength > body.length) {
-      this.emit('error', new Error('ClientHello invalid compression methods length'));
+      this.emitTerminalError(new Error('ClientHello invalid compression methods length'));
       return;
     }
     offset += compressionMethodsLength;
@@ -453,20 +459,20 @@ export class DtlsServerHandshake extends EventEmitter {
 
     if (offset < body.length) {
       if (offset + 2 > body.length) {
-        this.emit('error', new Error('ClientHello truncated before extensions length'));
+        this.emitTerminalError(new Error('ClientHello truncated before extensions length'));
         return;
       }
       const extensionsLength = body.readUInt16BE(offset);
       offset += 2;
       if (offset + extensionsLength !== body.length) {
-        this.emit('error', new Error('ClientHello extensions length mismatch'));
+        this.emitTerminalError(new Error('ClientHello extensions length mismatch'));
         return;
       }
 
       const extensionsEnd = offset + extensionsLength;
       while (offset < extensionsEnd) {
         if (offset + 4 > extensionsEnd) {
-          this.emit('error', new Error('ClientHello extension header truncated'));
+          this.emitTerminalError(new Error('ClientHello extension header truncated'));
           return;
         }
         const extType = body.readUInt16BE(offset);
@@ -474,24 +480,24 @@ export class DtlsServerHandshake extends EventEmitter {
         offset += 4;
 
         if (offset + extLen > extensionsEnd) {
-          this.emit('error', new Error('ClientHello extension length exceeds bounds'));
+          this.emitTerminalError(new Error('ClientHello extension length exceeds bounds'));
           return;
         }
 
         if (extType === 14) {
           if (extLen < 3) {
-            this.emit('error', new Error('Malformed use_srtp extension'));
+            this.emitTerminalError(new Error('Malformed use_srtp extension'));
             return;
           }
           const profilesLength = body.readUInt16BE(offset);
           if (profilesLength % 2 !== 0 || 2 + profilesLength + 1 > extLen) {
-            this.emit('error', new Error('Malformed SRTP profiles length'));
+            this.emitTerminalError(new Error('Malformed SRTP profiles length'));
             return;
           }
           const mkiOffset = offset + 2 + profilesLength;
           const mkiLength = body[mkiOffset];
           if (2 + profilesLength + 1 + mkiLength !== extLen) {
-            this.emit('error', new Error('Malformed use_srtp MKI structure'));
+            this.emitTerminalError(new Error('Malformed use_srtp MKI structure'));
             return;
           }
           let pOffset = offset + 2;
@@ -510,8 +516,7 @@ export class DtlsServerHandshake extends EventEmitter {
     }
 
     if (!profileSelected) {
-      this.emit('error', new Error('No supported DTLS-SRTP profile offered by client'));
-      this.close();
+      this.emitTerminalError(new Error('No supported DTLS-SRTP profile offered by client'));
       return;
     }
 
@@ -542,13 +547,13 @@ export class DtlsServerHandshake extends EventEmitter {
   private onClientKeyExchange(msg: DtlsHandshakeMessage): void {
     const body = msg.body;
     if (body.length < 2 || !this.ecdh || !this.clientRandom || !this.serverRandom) {
-      this.emit('error', new Error('Malformed ClientKeyExchange message'));
+      this.emitTerminalError(new Error('Malformed ClientKeyExchange message'));
       return;
     }
 
     const keyLength = body[0];
     if (keyLength + 1 > body.length) {
-      this.emit('error', new Error('ClientKeyExchange key length exceeds message bounds'));
+      this.emitTerminalError(new Error('ClientKeyExchange key length exceeds message bounds'));
       return;
     }
 
@@ -559,7 +564,7 @@ export class DtlsServerHandshake extends EventEmitter {
       this.masterSecret = computeMasterSecret(preMasterSecret, this.clientRandom, this.serverRandom);
       this.recordKeys = deriveDtlsRecordKeys(this.masterSecret, this.clientRandom, this.serverRandom);
     } catch (err: any) {
-      this.emit('error', err);
+      this.emitTerminalError(err);
       return;
     }
 
@@ -586,7 +591,7 @@ export class DtlsServerHandshake extends EventEmitter {
 
     const clientVerifyData = msg.body.subarray(0, 12);
     if (msg.body.length !== 12 || clientVerifyData.length !== 12) {
-      this.emit('error', new Error('Invalid Finished message length'));
+      this.emitTerminalError(new Error('Invalid Finished message length'));
       return;
     }
 
@@ -595,7 +600,7 @@ export class DtlsServerHandshake extends EventEmitter {
     const expectedVerifyData = pseudoRandomFunction(this.masterSecret, 'client finished', transcriptHash, 12);
 
     if (!crypto.timingSafeEqual(clientVerifyData, expectedVerifyData)) {
-      this.emit('error', new Error('DTLS client Finished verify_data mismatch'));
+      this.emitTerminalError(new Error('DTLS client Finished verify_data mismatch'));
       return;
     }
 

@@ -107,6 +107,19 @@ export class RoomBroker extends EventEmitter {
       payloadType: (track as any).payloadType || (track.kind === 'video' ? 96 : 111)
     });
 
+    publisher.setTransportSender((packet: Buffer) => {
+      try {
+        const pc = peer.peerConnection as any;
+        if (pc && typeof pc.sendRtcp === 'function') {
+          pc.sendRtcp(packet);
+          return true;
+        }
+      } catch {
+        return false;
+      }
+      return false;
+    });
+
     publisher.on('rtcp-feedback', () => {
       this.requestKeyframe(roomCode, peerId, trackId);
     });
@@ -146,20 +159,32 @@ export class RoomBroker extends EventEmitter {
     subscriberPeerId: string,
     trackId: string,
     sender: RTCRtpSender
-  ): void {
+  ): boolean {
     const room = this.rooms.get(roomCode);
-    if (!room) return;
+    if (!room) {
+      logger.error(`[SFU Broker] Room ${roomCode} not found for subscription`);
+      return false;
+    }
 
-    let subscribers = room.channels.get(trackId);
-    if (!subscribers) {
-      subscribers = [];
-      room.channels.set(trackId, subscribers);
+    const peer = room.peers.get(subscriberPeerId);
+    if (!peer) {
+      logger.error(`[SFU Broker] Peer ${subscriberPeerId} not found in room ${roomCode}`);
+      return false;
     }
 
     const publishedTrack = this.getRoomTracks(roomCode).find((t) => t.trackId === trackId);
-    const kind = publishedTrack?.kind || 'video';
+    if (!publishedTrack) {
+      logger.error(`[SFU Broker] Track ${trackId} not found in room ${roomCode}`);
+      return false;
+    }
 
     const router = this.getOrCreateRouter(roomCode);
+    if (!router.getPublisher(trackId)) {
+      logger.error(`[SFU Broker] Publisher for track ${trackId} not found in router`);
+      return false;
+    }
+
+    const kind = publishedTrack.kind || 'video';
     const subId = `${subscriberPeerId}:${trackId}`;
 
     const subscriber = new Subscriber({
@@ -183,7 +208,23 @@ export class RoomBroker extends EventEmitter {
       }
     });
 
-    router.addSubscription(trackId, subscriber);
+    const srtpSession = (peer as any).srtpSession || (peer.peerConnection as any)?.srtpSession;
+    if (srtpSession) {
+      subscriber.setSrtpSession(srtpSession);
+    }
+
+    const success = router.addSubscription(trackId, subscriber);
+    if (!success) {
+      logger.error(`[SFU Broker] Failed to add subscription for peer ${subscriberPeerId} to track ${trackId}`);
+      subscriber.close();
+      return false;
+    }
+
+    let subscribers = room.channels.get(trackId);
+    if (!subscribers) {
+      subscribers = [];
+      room.channels.set(trackId, subscribers);
+    }
 
     const existingIndex = subscribers.findIndex(
       (s) => s.subscriberPeerId === subscriberPeerId
@@ -200,6 +241,8 @@ export class RoomBroker extends EventEmitter {
         `[SFU Broker] Peer ${subscriberPeerId} subscribed to track ${trackId}`
       );
     }
+
+    return true;
   }
 
   public requestKeyframe(roomCode: string, publisherPeerId: string, trackId?: string): void {
@@ -207,32 +250,42 @@ export class RoomBroker extends EventEmitter {
     if (!room) return;
 
     const router = this.routers.get(roomCode);
+    let targetSsrc = 0;
     if (trackId && router) {
       const pub = router.getPublisher(trackId);
+      targetSsrc = pub?.ssrc || 0;
       const pli = Buffer.alloc(12);
       pli[0] = 0x81;
       pli[1] = 206;
       pli.writeUInt16BE(1, 2);
       pli.writeUInt32BE(0, 4);
-      pli.writeUInt32BE(pub?.ssrc || 0, 8);
+      pli.writeUInt32BE(targetSsrc, 8);
       router.sendRtcpFeedback(trackId, pli);
     }
 
     const peer = room.peers.get(publisherPeerId);
     if (!peer?.peerConnection) return;
 
-    let videoSsrc: number | undefined;
-    for (const track of peer.publishedTracks.values()) {
-      if (track.kind === 'video' && track.ssrc) {
-        videoSsrc = track.ssrc;
-        break;
+    if (!targetSsrc && trackId) {
+      const published = peer.publishedTracks.get(trackId);
+      if (published?.ssrc) {
+        targetSsrc = published.ssrc;
+      }
+    }
+
+    if (!targetSsrc) {
+      for (const track of peer.publishedTracks.values()) {
+        if (track.kind === 'video' && track.ssrc) {
+          targetSsrc = track.ssrc;
+          break;
+        }
       }
     }
 
     const receivers = peer.peerConnection.getReceivers();
     for (const receiver of receivers) {
       if (receiver.kind === 'video') {
-        const ssrc = videoSsrc || receiver.track?.ssrc || (receiver.tracks[0]?.ssrc);
+        const ssrc = targetSsrc || receiver.track?.ssrc || (receiver.tracks[0]?.ssrc);
         if (ssrc) {
           receiver.sendRtcpPLI(ssrc).then(() => {
             logger.info(`[SFU Broker] Sent RTCP PLI keyframe request to publisher ${publisherPeerId} (ssrc: ${ssrc})`);

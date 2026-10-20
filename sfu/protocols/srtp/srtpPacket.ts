@@ -251,13 +251,19 @@ export class SrtpSession {
     return Buffer.concat([protectedWithoutTag, authTag]);
   }
 
-  public validateRtcpHeader(packet: Buffer): void {
+  public validateRtcpHeader(packet: Buffer, isSrtcp: boolean = false): void {
     if (packet.length < 8) {
       throw new Error('Packet smaller than minimum RTCP header size');
     }
     const version = (packet[0] >> 6) & 0x03;
     if (version !== 2) {
       throw new Error('Invalid RTCP version');
+    }
+    const declaredWords = packet.readUInt16BE(2);
+    const declaredLength = (declaredWords + 1) * 4;
+    const maxAllowed = isSrtcp ? (packet.length - 4) : packet.length;
+    if (declaredLength > maxAllowed) {
+      throw new Error('Malformed RTCP: declared length exceeds packet bounds');
     }
   }
 
@@ -315,11 +321,15 @@ export class SrtpSession {
       throw new Error('SRTCP authentication tag mismatch');
     }
 
-    this.validateRtcpHeader(authenticatedPortion);
+    this.validateRtcpHeader(authenticatedPortion, true);
     const ssrc = authenticatedPortion.readUInt32BE(4);
     const indexWord = authenticatedPortion.readUInt32BE(authenticatedPortion.length - 4);
     const eFlag = (indexWord >>> 31) === 1;
     const srtcpIndex = indexWord & 0x7fffffff;
+
+    if (srtcpIndex <= 0 || srtcpIndex > 0x7fffffff) {
+      throw new Error('Invalid SRTCP index: out of valid range');
+    }
 
     let state = this.inboundRtcpStreams.get(ssrc);
     if (!state) {
