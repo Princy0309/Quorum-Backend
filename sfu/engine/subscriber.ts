@@ -88,6 +88,11 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
       return false;
     }
 
+    if (!this.srtpSession || !this.transportSender) {
+      this.stats.packetsDropped++;
+      return false;
+    }
+
     const version = (packet[0] >> 6) & 0x03;
     if (version !== 2) {
       this.stats.packetsDropped++;
@@ -110,30 +115,25 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
       this.nextSeqNum = (this.nextSeqNum + 1) & 0xffff;
     }
 
-    let dispatchPacket = outgoing;
-
-    if (this.srtpSession) {
-      try {
-        dispatchPacket = this.srtpSession.protect(outgoing);
-      } catch (err: any) {
-        this.stats.packetsDropped++;
-        this.emit('error', err);
-        return false;
-      }
+    let dispatchPacket: Buffer;
+    try {
+      dispatchPacket = this.srtpSession.protect(outgoing);
+    } catch (err: any) {
+      this.stats.packetsDropped++;
+      this.emit('error', err);
+      return false;
     }
 
-    if (this.transportSender) {
-      try {
-        const result = this.transportSender(dispatchPacket);
-        if (result === false) {
-          this.stats.packetsDropped++;
-          return false;
-        }
-      } catch (err: any) {
+    try {
+      const result = this.transportSender(dispatchPacket);
+      if (result === false) {
         this.stats.packetsDropped++;
-        this.emit('error', err);
         return false;
       }
+    } catch (err: any) {
+      this.stats.packetsDropped++;
+      this.emit('error', err);
+      return false;
     }
 
     this.stats.packetsSent++;

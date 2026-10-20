@@ -4,6 +4,7 @@ import { DtlsCertificate } from './dtlsCertificate.js';
 import {
   computeMasterSecret,
   exportSrtpKeyMaterial,
+  pseudoRandomFunction,
   SrtpKeyMaterial
 } from './dtlsKeys.js';
 import { SrtpContext } from '../srtp/srtpContext.js';
@@ -12,13 +13,18 @@ import {
   DTLS_CONTENT_TYPE,
   DTLS_HANDSHAKE_TYPE,
   SRTP_PROFILE,
+  DtlsRecord,
+  DtlsHandshakeMessage,
+  HandshakeReassembler,
   parseDtlsRecords,
-  parseHandshakeMessages
+  parseHandshakeMessages,
+  wrapHandshakeMessage
 } from './dtlsRecords.js';
 import {
   generateDtlsCookie,
   buildHelloVerifyRequest,
-  buildServerFlight4
+  buildServerFlight4,
+  buildServerFlight6
 } from './dtlsFlight.js';
 
 export {
@@ -47,7 +53,7 @@ export class DtlsServerHandshake extends EventEmitter {
   private transportSender: ((packet: Buffer) => boolean | void) | null = null;
   private requireCookie: boolean;
   private cookieSecret: Buffer;
-  private state: 'INITIAL' | 'VERIFY_REQUESTED' | 'WAIT_CLIENT_KEY_EXCHANGE' | 'CONNECTED' | 'CLOSED' = 'INITIAL';
+  private state: 'INITIAL' | 'VERIFY_REQUESTED' | 'WAIT_CLIENT_KEY_EXCHANGE' | 'WAIT_FINISHED' | 'CONNECTED' | 'CLOSED' = 'INITIAL';
 
   private clientRandom: Buffer | null = null;
   private serverRandom: Buffer | null = null;
@@ -61,6 +67,9 @@ export class DtlsServerHandshake extends EventEmitter {
   private inboundSession: SrtpSession | null = null;
   private outboundSession: SrtpSession | null = null;
   private cachedFlight4: Buffer | null = null;
+  private handshakeTranscript: Buffer[] = [];
+  private reassembler: HandshakeReassembler = new HandshakeReassembler();
+  private receivedChangeCipherSpec: boolean = false;
 
   constructor(options: DtlsHandshakeOptions) {
     super();
@@ -105,6 +114,10 @@ export class DtlsServerHandshake extends EventEmitter {
     for (const record of records) {
       if (record.contentType === DTLS_CONTENT_TYPE.HANDSHAKE) {
         this.processHandshakeRecord(record.fragment);
+      } else if (record.contentType === DTLS_CONTENT_TYPE.CHANGE_CIPHER_SPEC) {
+        if (record.fragment.length >= 1 && record.fragment[0] === 0x01) {
+          this.receivedChangeCipherSpec = true;
+        }
       } else if (record.contentType === DTLS_CONTENT_TYPE.ALERT) {
         this.emit('alert', record.fragment);
       }
@@ -112,17 +125,20 @@ export class DtlsServerHandshake extends EventEmitter {
   }
 
   private processHandshakeRecord(fragment: Buffer): void {
-    const messages = parseHandshakeMessages(fragment);
+    const messages = parseHandshakeMessages(fragment, this.reassembler);
     for (const msg of messages) {
       if (msg.msgType === DTLS_HANDSHAKE_TYPE.CLIENT_HELLO) {
-        this.onClientHello(msg.body);
+        this.onClientHello(msg);
       } else if (msg.msgType === DTLS_HANDSHAKE_TYPE.CLIENT_KEY_EXCHANGE) {
-        this.onClientKeyExchange(msg.body);
+        this.onClientKeyExchange(msg);
+      } else if (msg.msgType === DTLS_HANDSHAKE_TYPE.FINISHED) {
+        this.onClientFinished(msg);
       }
     }
   }
 
-  private onClientHello(body: Buffer): void {
+  private onClientHello(msg: DtlsHandshakeMessage): void {
+    const body = msg.body;
     if (body.length < 34) {
       return;
     }
@@ -171,6 +187,8 @@ export class DtlsServerHandshake extends EventEmitter {
       offset += 1 + compressionMethodsLength;
     }
 
+    let profileSelected = false;
+
     if (offset + 2 <= body.length) {
       const extensionsLength = body.readUInt16BE(offset);
       offset += 2;
@@ -187,8 +205,9 @@ export class DtlsServerHandshake extends EventEmitter {
           const pEnd = pOffset + profilesLength;
           while (pOffset + 2 <= pEnd && pOffset + 2 <= body.length) {
             const profile = body.readUInt16BE(pOffset);
-            if (profile === SRTP_PROFILE.SRTP_AES128_CM_HMAC_SHA1_80 || profile === SRTP_PROFILE.SRTP_AEAD_AES_128_GCM) {
+            if (profile === SRTP_PROFILE.SRTP_AES128_CM_HMAC_SHA1_80) {
               this.selectedProfile = profile;
+              profileSelected = true;
               break;
             }
             pOffset += 2;
@@ -197,6 +216,13 @@ export class DtlsServerHandshake extends EventEmitter {
         offset += extLen;
       }
     }
+
+    if (!profileSelected) {
+      this.selectedProfile = SRTP_PROFILE.SRTP_AES128_CM_HMAC_SHA1_80;
+    }
+
+    const rawClientHelloMsg = wrapHandshakeMessage(msg.msgType, msg.body, msg.messageSeq);
+    this.handshakeTranscript = [rawClientHelloMsg];
 
     const flight4 = buildServerFlight4(
       this.clientRandom,
@@ -211,21 +237,74 @@ export class DtlsServerHandshake extends EventEmitter {
     this.serverHandshakeSeq = flight4.nextHandshakeSeq;
     this.serverRecordSeq = flight4.nextRecordSeq;
     this.cachedFlight4 = flight4.record;
+    this.handshakeTranscript.push(flight4.handshakeMessages);
 
     this.dispatch(flight4.record);
     this.state = 'WAIT_CLIENT_KEY_EXCHANGE';
   }
 
-  private onClientKeyExchange(body: Buffer): void {
+  private onClientKeyExchange(msg: DtlsHandshakeMessage): void {
+    const body = msg.body;
     if (body.length < 2 || !this.ecdh || !this.clientRandom || !this.serverRandom) {
       return;
     }
 
     const keyLength = body[0];
+    if (keyLength + 1 > body.length) {
+      return;
+    }
+
     const clientPublicKey = body.subarray(1, 1 + keyLength);
 
-    const preMasterSecret = this.ecdh.computeSecret(clientPublicKey);
-    this.masterSecret = computeMasterSecret(preMasterSecret, this.clientRandom, this.serverRandom);
+    try {
+      const preMasterSecret = this.ecdh.computeSecret(clientPublicKey);
+      this.masterSecret = computeMasterSecret(preMasterSecret, this.clientRandom, this.serverRandom);
+    } catch (err: any) {
+      this.emit('error', err);
+      return;
+    }
+
+    const rawClientKeyExchangeMsg = wrapHandshakeMessage(msg.msgType, msg.body, msg.messageSeq);
+    this.handshakeTranscript.push(rawClientKeyExchangeMsg);
+
+    this.state = 'WAIT_FINISHED';
+  }
+
+  private onClientFinished(msg: DtlsHandshakeMessage): void {
+    if (this.state !== 'WAIT_FINISHED' || !this.masterSecret || !this.clientRandom || !this.serverRandom) {
+      return;
+    }
+
+    const clientVerifyData = msg.body.subarray(0, 12);
+    if (clientVerifyData.length !== 12) {
+      return;
+    }
+
+    const transcriptBuffer = Buffer.concat(this.handshakeTranscript);
+    const transcriptHash = crypto.createHash('sha256').update(transcriptBuffer).digest();
+    const expectedVerifyData = pseudoRandomFunction(this.masterSecret, 'client finished', transcriptHash, 12);
+
+    if (!crypto.timingSafeEqual(clientVerifyData, expectedVerifyData)) {
+      this.emit('error', new Error('DTLS client Finished verify_data mismatch'));
+      return;
+    }
+
+    const rawFinishedMsg = wrapHandshakeMessage(msg.msgType, msg.body, msg.messageSeq);
+    this.handshakeTranscript.push(rawFinishedMsg);
+
+    const flight6 = buildServerFlight6(
+      this.masterSecret,
+      Buffer.concat(this.handshakeTranscript),
+      this.serverHandshakeSeq,
+      this.serverRecordSeq
+    );
+
+    this.serverHandshakeSeq = flight6.nextHandshakeSeq;
+    this.serverRecordSeq = flight6.nextRecordSeq;
+
+    this.dispatch(flight6.changeCipherSpecRecord);
+    this.dispatch(flight6.finishedRecord);
+
     this.srtpKeyMaterial = exportSrtpKeyMaterial(this.masterSecret, this.clientRandom, this.serverRandom);
 
     const inboundContext = new SrtpContext(
@@ -267,6 +346,8 @@ export class DtlsServerHandshake extends EventEmitter {
     this.transportSender = null;
     this.ecdh = null;
     this.cachedFlight4 = null;
+    this.handshakeTranscript = [];
+    this.reassembler.clear();
     this.emit('close');
     this.removeAllListeners();
   }

@@ -21,9 +21,7 @@ export const DTLS_HANDSHAKE_TYPE = {
 
 export const SRTP_PROFILE = {
   SRTP_AES128_CM_HMAC_SHA1_80: 0x0001,
-  SRTP_AES128_CM_HMAC_SHA1_32: 0x0002,
-  SRTP_AEAD_AES_128_GCM: 0x0007,
-  SRTP_AEAD_AES_256_GCM: 0x0008
+  SRTP_AES128_CM_HMAC_SHA1_32: 0x0002
 } as const;
 
 export interface DtlsRecord {
@@ -44,12 +42,91 @@ export interface DtlsHandshakeMessage {
   body: Buffer;
 }
 
+export class HandshakeReassembler {
+  private fragments: Map<number, {
+    msgType: number;
+    length: number;
+    buffer: Buffer;
+    receivedBytes: number;
+    offsets: Set<number>;
+  }> = new Map();
+
+  public processFragment(
+    msgType: number,
+    length: number,
+    messageSeq: number,
+    fragmentOffset: number,
+    fragmentLength: number,
+    fragmentBody: Buffer
+  ): DtlsHandshakeMessage | null {
+    if (fragmentOffset + fragmentLength > length || fragmentBody.length < fragmentLength) {
+      return null;
+    }
+
+    if (fragmentOffset === 0 && fragmentLength === length) {
+      return {
+        msgType,
+        length,
+        messageSeq,
+        fragmentOffset: 0,
+        fragmentLength: length,
+        body: fragmentBody.subarray(0, length)
+      };
+    }
+
+    let item = this.fragments.get(messageSeq);
+    if (!item) {
+      item = {
+        msgType,
+        length,
+        buffer: Buffer.alloc(length),
+        receivedBytes: 0,
+        offsets: new Set()
+      };
+      this.fragments.set(messageSeq, item);
+    }
+
+    if (!item.offsets.has(fragmentOffset)) {
+      fragmentBody.copy(item.buffer, fragmentOffset, 0, fragmentLength);
+      item.receivedBytes += fragmentLength;
+      item.offsets.add(fragmentOffset);
+    }
+
+    if (item.receivedBytes >= item.length) {
+      this.fragments.delete(messageSeq);
+      return {
+        msgType: item.msgType,
+        length: item.length,
+        messageSeq,
+        fragmentOffset: 0,
+        fragmentLength: item.length,
+        body: item.buffer
+      };
+    }
+
+    return null;
+  }
+
+  public clear(): void {
+    this.fragments.clear();
+  }
+}
+
 export const parseDtlsRecords = (buffer: Buffer): DtlsRecord[] => {
   const records: DtlsRecord[] = [];
   let offset = 0;
 
   while (offset + 13 <= buffer.length) {
     const contentType = buffer[offset];
+    if (
+      contentType !== DTLS_CONTENT_TYPE.CHANGE_CIPHER_SPEC &&
+      contentType !== DTLS_CONTENT_TYPE.ALERT &&
+      contentType !== DTLS_CONTENT_TYPE.HANDSHAKE &&
+      contentType !== DTLS_CONTENT_TYPE.APPLICATION_DATA
+    ) {
+      break;
+    }
+
     const protocolVersion = buffer.readUInt16BE(offset + 1);
     const epoch = buffer.readUInt16BE(offset + 3);
 
@@ -58,8 +135,11 @@ export const parseDtlsRecords = (buffer: Buffer): DtlsRecord[] => {
     const sequenceNumber = (seqHigh << 32n) | seqLow;
 
     const length = buffer.readUInt16BE(offset + 11);
-    const recordEnd = offset + 13 + length;
+    if (length > 16384) {
+      break;
+    }
 
+    const recordEnd = offset + 13 + length;
     if (recordEnd > buffer.length) {
       break;
     }
@@ -80,7 +160,10 @@ export const parseDtlsRecords = (buffer: Buffer): DtlsRecord[] => {
   return records;
 };
 
-export const parseHandshakeMessages = (fragment: Buffer): DtlsHandshakeMessage[] => {
+export const parseHandshakeMessages = (
+  fragment: Buffer,
+  reassembler?: HandshakeReassembler
+): DtlsHandshakeMessage[] => {
   const messages: DtlsHandshakeMessage[] = [];
   let offset = 0;
 
@@ -91,20 +174,41 @@ export const parseHandshakeMessages = (fragment: Buffer): DtlsHandshakeMessage[]
     const fragmentOffset = (fragment[offset + 6] << 16) | (fragment[offset + 7] << 8) | fragment[offset + 8];
     const fragmentLength = (fragment[offset + 9] << 16) | (fragment[offset + 10] << 8) | fragment[offset + 11];
 
+    if (fragmentOffset + fragmentLength > length || length > 65535) {
+      break;
+    }
+
     const bodyEnd = offset + 12 + fragmentLength;
     if (bodyEnd > fragment.length) {
       break;
     }
 
     const body = fragment.subarray(offset + 12, bodyEnd);
-    messages.push({
-      msgType,
-      length,
-      messageSeq,
-      fragmentOffset,
-      fragmentLength,
-      body
-    });
+
+    if (reassembler) {
+      const reassembled = reassembler.processFragment(
+        msgType,
+        length,
+        messageSeq,
+        fragmentOffset,
+        fragmentLength,
+        body
+      );
+      if (reassembled) {
+        messages.push(reassembled);
+      }
+    } else {
+      if (fragmentOffset === 0 && fragmentLength === length) {
+        messages.push({
+          msgType,
+          length,
+          messageSeq,
+          fragmentOffset,
+          fragmentLength,
+          body
+        });
+      }
+    }
 
     offset = bodyEnd;
   }

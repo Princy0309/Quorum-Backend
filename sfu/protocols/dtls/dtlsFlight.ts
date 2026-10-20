@@ -6,11 +6,20 @@ import {
   wrapDtlsRecord,
   wrapHandshakeMessage
 } from './dtlsRecords.js';
+import { pseudoRandomFunction } from './dtlsKeys.js';
 
 export interface ServerFlight4Result {
   serverRandom: Buffer;
   ecdh: crypto.ECDH;
   record: Buffer;
+  handshakeMessages: Buffer;
+  nextHandshakeSeq: number;
+  nextRecordSeq: bigint;
+}
+
+export interface ServerFlight6Result {
+  changeCipherSpecRecord: Buffer;
+  finishedRecord: Buffer;
   nextHandshakeSeq: number;
   nextRecordSeq: bigint;
 }
@@ -150,7 +159,41 @@ export const buildServerFlight4 = (
     serverRandom,
     ecdh,
     record,
+    handshakeMessages: flightFragment,
     nextHandshakeSeq: handshakeSeq,
+    nextRecordSeq: startRecordSeq + 1n
+  };
+};
+
+export const buildServerFlight6 = (
+  masterSecret: Buffer,
+  handshakeTranscript: Buffer,
+  startHandshakeSeq: number,
+  startRecordSeq: bigint
+): ServerFlight6Result => {
+  const ccsPayload = Buffer.from([0x01]);
+  const changeCipherSpecRecord = wrapDtlsRecord(
+    DTLS_CONTENT_TYPE.CHANGE_CIPHER_SPEC,
+    ccsPayload,
+    0,
+    startRecordSeq
+  );
+
+  const transcriptHash = crypto.createHash('sha256').update(handshakeTranscript).digest();
+  const serverVerifyData = pseudoRandomFunction(masterSecret, 'server finished', transcriptHash, 12);
+
+  const finishedMsg = wrapHandshakeMessage(
+    DTLS_HANDSHAKE_TYPE.FINISHED,
+    serverVerifyData,
+    startHandshakeSeq
+  );
+
+  const finishedRecord = wrapDtlsRecord(DTLS_CONTENT_TYPE.HANDSHAKE, finishedMsg, 1, 0n);
+
+  return {
+    changeCipherSpecRecord,
+    finishedRecord,
+    nextHandshakeSeq: startHandshakeSeq + 1,
     nextRecordSeq: startRecordSeq + 1n
   };
 };
