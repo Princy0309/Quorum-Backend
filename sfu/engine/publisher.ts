@@ -63,13 +63,13 @@ export class Publisher extends EventEmitter {
     }
 
     const payloadType = rtpBuffer[1] & 0x7f;
-    if (this.payloadType !== 0 && payloadType !== this.payloadType) {
+    if (payloadType !== this.payloadType) {
       this.stats.packetsDropped++;
       return false;
     }
 
     const ssrc = rtpBuffer.readUInt32BE(8);
-    if (this.ssrc !== 0 && ssrc !== this.ssrc) {
+    if (ssrc !== this.ssrc) {
       this.stats.packetsDropped++;
       return false;
     }

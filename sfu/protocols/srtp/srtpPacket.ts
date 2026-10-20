@@ -11,15 +11,16 @@ interface StreamState {
 export class SrtpSession {
   private context: SrtpContext;
   private isOutbound: boolean;
-  private streams: Map<number, StreamState> = new Map();
+  private inboundStreams: Map<number, StreamState> = new Map();
+  private outboundStreams: Map<number, StreamState> = new Map();
 
   constructor(context: SrtpContext, isOutbound: boolean = false) {
     this.context = context;
     this.isOutbound = isOutbound;
   }
 
-  private getStreamState(ssrc: number): StreamState {
-    let state = this.streams.get(ssrc);
+  private getInboundStreamState(ssrc: number): StreamState {
+    let state = this.inboundStreams.get(ssrc);
     if (!state) {
       state = {
         highestSeq: 0,
@@ -27,7 +28,21 @@ export class SrtpSession {
         replayWindow: 0n,
         initialized: false
       };
-      this.streams.set(ssrc, state);
+      this.inboundStreams.set(ssrc, state);
+    }
+    return state;
+  }
+
+  private getOutboundStreamState(ssrc: number): StreamState {
+    let state = this.outboundStreams.get(ssrc);
+    if (!state) {
+      state = {
+        highestSeq: 0,
+        roc: 0,
+        replayWindow: 0n,
+        initialized: false
+      };
+      this.outboundStreams.set(ssrc, state);
     }
     return state;
   }
@@ -159,7 +174,7 @@ export class SrtpSession {
     const headerLength = this.validateRtpHeader(packetWithoutTag);
     const ssrc = packetWithoutTag.readUInt32BE(8);
     const seq = packetWithoutTag.readUInt16BE(2);
-    const state = this.getStreamState(ssrc);
+    const state = this.getInboundStreamState(ssrc);
 
     const { roc, packetIndex, isNewHighest, newHighestSeq, newRoc } = this.estimateRocAndIndex(state, seq);
 
@@ -197,9 +212,14 @@ export class SrtpSession {
     const headerLength = this.validateRtpHeader(rtpPacket);
     const ssrc = rtpPacket.readUInt32BE(8);
     const seq = rtpPacket.readUInt16BE(2);
-    const state = this.getStreamState(ssrc);
+    const state = this.getOutboundStreamState(ssrc);
 
     const { roc, packetIndex, isNewHighest, newHighestSeq, newRoc } = this.estimateRocAndIndex(state, seq);
+
+    if (this.isReplay(state, packetIndex)) {
+      throw new Error('Outbound packet index reuse rejected');
+    }
+
     const header = rtpPacket.subarray(0, headerLength);
     const payload = rtpPacket.subarray(headerLength);
 

@@ -10,6 +10,7 @@ export interface IRtpSubscriber {
 export interface RtpForwarderStats {
   totalForwarded: number;
   bytesForwarded: number;
+  failedForwarded: number;
   activeSubscribers: number;
 }
 
@@ -18,6 +19,7 @@ export class RtpForwarder {
   private subscribers: Map<string, IRtpSubscriber> = new Map();
   private totalForwarded: number = 0;
   private bytesForwarded: number = 0;
+  private failedForwarded: number = 0;
   private isClosed: boolean = false;
 
   private onRtpHandler = (packet: Buffer) => {
@@ -60,10 +62,16 @@ export class RtpForwarder {
       }
 
       try {
-        subscriber.sendRtp(packet);
+        const subscriberPacket = Buffer.from(packet);
+        const result = subscriber.sendRtp(subscriberPacket);
+        if (result === false) {
+          this.failedForwarded++;
+          continue;
+        }
         this.totalForwarded++;
         this.bytesForwarded += packet.length;
       } catch {
+        this.failedForwarded++;
         continue;
       }
     }
@@ -73,6 +81,7 @@ export class RtpForwarder {
     return {
       totalForwarded: this.totalForwarded,
       bytesForwarded: this.bytesForwarded,
+      failedForwarded: this.failedForwarded,
       activeSubscribers: this.subscribers.size
     };
   }
