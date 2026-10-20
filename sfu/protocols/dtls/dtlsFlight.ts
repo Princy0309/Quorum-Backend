@@ -40,7 +40,7 @@ export const buildHelloVerifyRequest = (
   cookie: Buffer,
   handshakeSeq: number,
   recordSeq: bigint
-): { record: Buffer; nextHandshakeSeq: number; nextRecordSeq: bigint } => {
+): { record: Buffer; handshakeMessage: Buffer; nextHandshakeSeq: number; nextRecordSeq: bigint } => {
   const body = Buffer.alloc(3 + 1 + cookie.length);
   body.writeUInt16BE(0xfefd, 0);
   body[2] = cookie.length;
@@ -55,6 +55,7 @@ export const buildHelloVerifyRequest = (
   const record = wrapDtlsRecord(DTLS_CONTENT_TYPE.HANDSHAKE, handshakeMsg, 0, recordSeq);
   return {
     record,
+    handshakeMessage: handshakeMsg,
     nextHandshakeSeq: handshakeSeq + 1,
     nextRecordSeq: recordSeq + 1n
   };
