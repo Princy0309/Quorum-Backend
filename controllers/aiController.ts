@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { sendSuccess } from '../utils/ApiResponse.js';
 import { ApiError } from '../utils/ApiError.js';
 import {
   askAiAssistant,
@@ -15,6 +14,16 @@ import {
   getUserAiHistory,
   deleteUserAiHistory
 } from '../services/aiHistoryService.js';
+
+const sendAiSuccess = (res: Response, statusCode: number, message: string, data: any) => {
+  return res.status(statusCode).json({
+    statusCode,
+    success: statusCode < 400,
+    message,
+    data,
+    ...(data && typeof data === 'object' && !Array.isArray(data) ? data : {})
+  });
+};
 
 export const chatController = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.id;
@@ -31,7 +40,7 @@ export const chatController = asyncHandler(async (req: Request, res: Response) =
     });
   }
 
-  return sendSuccess(res, 200, 'AI response generated successfully', result);
+  return sendAiSuccess(res, 200, 'AI response generated successfully', result);
 });
 
 export const summarizeChatController = asyncHandler(async (req: Request, res: Response) => {
@@ -60,7 +69,7 @@ export const summarizeChatController = asyncHandler(async (req: Request, res: Re
     tokensUsed: result.metadata?.tokenUsage?.totalTokenCount
   });
 
-  return sendSuccess(res, 200, 'Conversation summarized successfully', result);
+  return sendAiSuccess(res, 200, 'Conversation summarized successfully', result);
 });
 
 export const searchWorkspaceController = asyncHandler(async (req: Request, res: Response) => {
@@ -82,7 +91,7 @@ export const searchWorkspaceController = asyncHandler(async (req: Request, res: 
     tokensUsed: result.metadata?.tokenUsage?.totalTokenCount
   });
 
-  return sendSuccess(res, 200, 'Workspace search completed successfully', result);
+  return sendAiSuccess(res, 200, 'Workspace search completed successfully', result);
 });
 
 export const projectAssistanceController = asyncHandler(async (req: Request, res: Response) => {
@@ -106,7 +115,7 @@ export const projectAssistanceController = asyncHandler(async (req: Request, res
     tokensUsed: result.metadata?.tokenUsage?.totalTokenCount
   });
 
-  return sendSuccess(res, 200, 'Project assistance generated successfully', result);
+  return sendAiSuccess(res, 200, 'Project assistance generated successfully', result);
 });
 
 export const quickRepliesController = asyncHandler(async (req: Request, res: Response) => {
@@ -132,7 +141,7 @@ export const quickRepliesController = asyncHandler(async (req: Request, res: Res
     tokensUsed: result.metadata?.tokenUsage?.totalTokenCount
   });
 
-  return sendSuccess(res, 200, 'Quick response suggestions generated successfully', result);
+  return sendAiSuccess(res, 200, 'Quick response suggestions generated successfully', result);
 });
 
 export const projectUpdateController = asyncHandler(async (req: Request, res: Response) => {
@@ -157,7 +166,7 @@ export const projectUpdateController = asyncHandler(async (req: Request, res: Re
     tokensUsed: result.metadata?.tokenUsage?.totalTokenCount
   });
 
-  return sendSuccess(res, 200, 'Project update generated successfully', result);
+  return sendAiSuccess(res, 200, 'Project update generated successfully', result);
 });
 
 export const getHistoryController = asyncHandler(async (req: Request, res: Response) => {
@@ -174,7 +183,7 @@ export const getHistoryController = asyncHandler(async (req: Request, res: Respo
     conversationId: typeof conversationId === 'string' ? conversationId : undefined
   });
 
-  return sendSuccess(res, 200, 'AI assistant history retrieved successfully', result);
+  return sendAiSuccess(res, 200, 'AI assistant history retrieved successfully', result);
 });
 
 export const deleteHistoryController = asyncHandler(async (req: Request, res: Response) => {
@@ -187,5 +196,5 @@ export const deleteHistoryController = asyncHandler(async (req: Request, res: Re
   const interactionId = typeof rawId === 'string' ? rawId : undefined;
   const result = await deleteUserAiHistory(userId, interactionId);
 
-  return sendSuccess(res, 200, 'AI assistant history deleted successfully', result);
+  return sendAiSuccess(res, 200, 'AI assistant history deleted successfully', result);
 });
