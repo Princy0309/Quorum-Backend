@@ -28,10 +28,19 @@ export interface ServerFlight6Result {
   nextRecordSeq: bigint;
 }
 
-export const generateDtlsCookie = (clientRandom: Buffer, secret: Buffer): Buffer => {
+export const generateDtlsCookie = (
+  clientRandom: Buffer,
+  peerAddress: string = '127.0.0.1',
+  peerPort: number = 0,
+  secret: Buffer
+): Buffer => {
+  const addrBuf = Buffer.from(peerAddress, 'utf8');
+  const portBuf = Buffer.alloc(2);
+  portBuf.writeUInt16BE(peerPort & 0xffff, 0);
+
   return crypto
     .createHmac('sha256', secret)
-    .update(clientRandom)
+    .update(Buffer.concat([clientRandom, addrBuf, portBuf]))
     .digest()
     .subarray(0, 16);
 };
