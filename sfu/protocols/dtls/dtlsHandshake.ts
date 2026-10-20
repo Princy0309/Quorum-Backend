@@ -332,6 +332,11 @@ export class DtlsServerHandshake extends EventEmitter {
     const clientVersion = body.readUInt16BE(offset);
     offset += 2;
 
+    if (clientVersion !== 0xfefd && clientVersion !== 0xfeff) {
+      this.emit('error', new Error('Unsupported DTLS client version: 0x' + clientVersion.toString(16)));
+      return;
+    }
+
     const clientRandom = Buffer.from(body.subarray(offset, offset + 32));
     offset += 32;
 
@@ -403,8 +408,21 @@ export class DtlsServerHandshake extends EventEmitter {
       this.emit('error', new Error('ClientHello invalid cipher suites length'));
       return;
     }
-    const cipherSuites = body.subarray(offset, offset + cipherSuitesLength);
+    let supportedCipherOffered = false;
+    for (let c = offset; c < offset + cipherSuitesLength; c += 2) {
+      const suite = body.readUInt16BE(c);
+      if (suite === 0xc02b) {
+        supportedCipherOffered = true;
+        break;
+      }
+    }
     offset += cipherSuitesLength;
+
+    if (!supportedCipherOffered) {
+      this.emit('error', new Error('ClientHello did not offer supported cipher suite 0xC02B'));
+      this.close();
+      return;
+    }
 
     if (offset >= body.length) {
       this.emit('error', new Error('ClientHello truncated before compression methods length'));
@@ -448,13 +466,19 @@ export class DtlsServerHandshake extends EventEmitter {
         }
 
         if (extType === 14) {
-          if (extLen < 2) {
+          if (extLen < 3) {
             this.emit('error', new Error('Malformed use_srtp extension'));
             return;
           }
           const profilesLength = body.readUInt16BE(offset);
-          if (profilesLength % 2 !== 0 || offset + 2 + profilesLength > offset + extLen) {
+          if (profilesLength % 2 !== 0 || 2 + profilesLength + 1 > extLen) {
             this.emit('error', new Error('Malformed SRTP profiles length'));
+            return;
+          }
+          const mkiOffset = offset + 2 + profilesLength;
+          const mkiLength = body[mkiOffset];
+          if (2 + profilesLength + 1 + mkiLength !== extLen) {
+            this.emit('error', new Error('Malformed use_srtp MKI structure'));
             return;
           }
           let pOffset = offset + 2;

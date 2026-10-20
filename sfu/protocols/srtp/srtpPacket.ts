@@ -331,7 +331,9 @@ export class SrtpSession {
       this.inboundRtcpStreams.set(ssrc, state);
     } else {
       const diff = state.highestIndex - srtcpIndex;
-      if (diff > 0) {
+      if (diff === 0) {
+        throw new Error('SRTCP replay check failed');
+      } else if (diff > 0) {
         if (diff >= 64) {
           throw new Error('SRTCP replay check failed');
         }

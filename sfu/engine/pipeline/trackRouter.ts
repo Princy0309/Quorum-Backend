@@ -30,7 +30,7 @@ export class TrackRouter extends EventEmitter {
   private peerPublishedTracks: Map<string, Set<string>> = new Map();
   private subscriptions: PeerSubscriptionRegistry = new PeerSubscriptionRegistry();
   private publisherListeners: Map<string, () => void> = new Map();
-  private subscriberListeners: Map<string, () => void> = new Map();
+  private subscriberListeners: Map<string, { subscriber: Subscriber; listener: () => void }> = new Map();
   private isClosed: boolean = false;
 
   constructor(roomCode: string) {
@@ -127,9 +127,9 @@ export class TrackRouter extends EventEmitter {
     const removedSubs = this.subscriptions.removeTrackSubscriptions(trackId);
     for (const sub of removedSubs) {
       const subKey = `${trackId}:${sub.id}`;
-      const subListener = this.subscriberListeners.get(subKey);
-      if (subListener) {
-        sub.removeListener('close', subListener);
+      const entry = this.subscriberListeners.get(subKey);
+      if (entry) {
+        entry.subscriber.removeListener('close', entry.listener);
         this.subscriberListeners.delete(subKey);
       }
       sub.close();
@@ -162,9 +162,9 @@ export class TrackRouter extends EventEmitter {
         return true;
       }
       const existingKey = `${trackId}:${existingSub.id}`;
-      const existingListener = this.subscriberListeners.get(existingKey);
-      if (existingListener) {
-        existingSub.removeListener('close', existingListener);
+      const existingEntry = this.subscriberListeners.get(existingKey);
+      if (existingEntry) {
+        existingEntry.subscriber.removeListener('close', existingEntry.listener);
         this.subscriberListeners.delete(existingKey);
       }
       forwarder.removeSubscriber(existingSub.id);
@@ -179,7 +179,7 @@ export class TrackRouter extends EventEmitter {
       this.removeSubscription(trackId, subscriber.id, subscriber.peerId);
     };
     subscriber.once('close', onSubscriberClose);
-    this.subscriberListeners.set(subKey, onSubscriberClose);
+    this.subscriberListeners.set(subKey, { subscriber, listener: onSubscriberClose });
 
     const event: SubscriptionEvent = {
       roomCode: this.roomCode,
@@ -199,9 +199,9 @@ export class TrackRouter extends EventEmitter {
     }
 
     const subKey = `${trackId}:${subscriberId}`;
-    const closeListener = this.subscriberListeners.get(subKey);
-    if (closeListener) {
-      sub.removeListener('close', closeListener);
+    const entry = this.subscriberListeners.get(subKey);
+    if (entry) {
+      entry.subscriber.removeListener('close', entry.listener);
       this.subscriberListeners.delete(subKey);
     }
 
@@ -283,9 +283,9 @@ export class TrackRouter extends EventEmitter {
     const removedSubs = this.subscriptions.removePeer(peerId);
     for (const { trackId, subscriber } of removedSubs) {
       const subKey = `${trackId}:${subscriber.id}`;
-      const closeListener = this.subscriberListeners.get(subKey);
-      if (closeListener) {
-        subscriber.removeListener('close', closeListener);
+      const entry = this.subscriberListeners.get(subKey);
+      if (entry) {
+        entry.subscriber.removeListener('close', entry.listener);
         this.subscriberListeners.delete(subKey);
       }
       const forwarder = this.forwarders.get(trackId);
@@ -334,10 +334,10 @@ export class TrackRouter extends EventEmitter {
     }
     this.isClosed = true;
 
-    for (const forwarder of this.forwarders.values()) {
-      forwarder.close();
+    for (const { subscriber, listener } of this.subscriberListeners.values()) {
+      subscriber.removeListener('close', listener);
     }
-    this.forwarders.clear();
+    this.subscriberListeners.clear();
 
     for (const [trackId, publisher] of this.publishers.entries()) {
       const closeListener = this.publisherListeners.get(trackId);
@@ -349,9 +349,10 @@ export class TrackRouter extends EventEmitter {
     this.publisherListeners.clear();
     this.publishers.clear();
 
-    for (const [subKey, closeListener] of this.subscriberListeners.entries()) {
-      this.subscriberListeners.delete(subKey);
+    for (const forwarder of this.forwarders.values()) {
+      forwarder.close();
     }
+    this.forwarders.clear();
 
     this.subscriptions.clear();
     this.trackOwners.clear();

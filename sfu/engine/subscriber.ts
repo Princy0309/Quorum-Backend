@@ -73,14 +73,18 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
 
   public setExtensionMap(map: Map<number, number> | Record<number, number>): void {
     this.extensionMap.clear();
-    if (map instanceof Map) {
-      for (const [key, value] of map.entries()) {
-        this.extensionMap.set(key, value);
+    const entries: [number, number][] = map instanceof Map
+      ? Array.from(map.entries())
+      : Object.entries(map).map(([k, v]) => [Number(k), Number(v)]);
+
+    for (const [key, value] of entries) {
+      if (!Number.isInteger(key) || key < 1 || key > 255) {
+        throw new Error(`Invalid source RTP extension ID: ${key}`);
       }
-    } else if (typeof map === 'object') {
-      for (const [key, value] of Object.entries(map)) {
-        this.extensionMap.set(Number(key), Number(value));
+      if (!Number.isInteger(value) || value < 1 || value > 255) {
+        throw new Error(`Invalid target RTP extension ID: ${value}`);
       }
+      this.extensionMap.set(key, value);
     }
   }
 
@@ -102,28 +106,36 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
     this.emit('resume');
   }
 
-  private rewriteHeaderExtensions(packet: Buffer): void {
+  private rewriteHeaderExtensions(packet: Buffer): Buffer {
     if (this.extensionMap.size === 0 || packet.length < 16) {
-      return;
+      return packet;
     }
     const hasExtension = (packet[0] & 0x10) !== 0;
     if (!hasExtension) {
-      return;
+      return packet;
     }
     const csrcCount = packet[0] & 0x0f;
     const extOffset = 12 + csrcCount * 4;
     if (packet.length < extOffset + 4) {
-      return;
+      return packet;
     }
     const profile = packet.readUInt16BE(extOffset);
     const lengthWords = packet.readUInt16BE(extOffset + 2);
     const extEnd = extOffset + 4 + lengthWords * 4;
     if (packet.length < extEnd) {
-      return;
+      return packet;
     }
 
+    const isOneByte = profile === 0xbede;
+    const isTwoByte = (profile & 0xfff0) === 0x1000;
+    if (!isOneByte && !isTwoByte) {
+      return packet;
+    }
+
+    const items: { id: number; data: Buffer }[] = [];
     let cursor = extOffset + 4;
-    if (profile === 0xbede) {
+
+    if (isOneByte) {
       while (cursor < extEnd) {
         const byte = packet[cursor];
         if (byte === 0x00) {
@@ -138,13 +150,10 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
         if (cursor + 1 + len > extEnd) {
           break;
         }
-        const mappedId = this.extensionMap.get(id);
-        if (mappedId !== undefined && mappedId >= 1 && mappedId <= 14) {
-          packet[cursor] = ((mappedId & 0x0f) << 4) | (byte & 0x0f);
-        }
+        items.push({ id, data: packet.subarray(cursor + 1, cursor + 1 + len) });
         cursor += 1 + len;
       }
-    } else if ((profile & 0xfff0) === 0x1000) {
+    } else {
       while (cursor + 2 <= extEnd) {
         const id = packet[cursor];
         if (id === 0x00) {
@@ -155,12 +164,64 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
         if (cursor + 2 + len > extEnd) {
           break;
         }
-        const mappedId = this.extensionMap.get(id);
-        if (mappedId !== undefined && mappedId >= 1 && mappedId <= 255) {
-          packet[cursor] = mappedId & 0xff;
-        }
+        items.push({ id, data: packet.subarray(cursor + 2, cursor + 2 + len) });
         cursor += 2 + len;
       }
+    }
+
+    let anyIdChanged = false;
+    for (const item of items) {
+      const mappedId = this.extensionMap.get(item.id);
+      if (mappedId !== undefined && mappedId !== item.id) {
+        item.id = mappedId;
+        anyIdChanged = true;
+      }
+    }
+
+    if (!anyIdChanged) {
+      return packet;
+    }
+
+    const mustUseTwoByte = isTwoByte || items.some((item) => item.id > 14 || item.data.length > 16 || item.data.length === 0);
+
+    const chunks: Buffer[] = [];
+    if (mustUseTwoByte) {
+      for (const item of items) {
+        chunks.push(Buffer.from([item.id & 0xff, item.data.length & 0xff]), item.data);
+      }
+      let body = Buffer.concat(chunks);
+      const padLen = (4 - (body.length % 4)) % 4;
+      if (padLen > 0) {
+        body = Buffer.concat([body, Buffer.alloc(padLen, 0)]);
+      }
+      const extHeader = Buffer.alloc(4);
+      extHeader.writeUInt16BE(0x1000, 0);
+      extHeader.writeUInt16BE(body.length / 4, 2);
+      return Buffer.concat([
+        packet.subarray(0, extOffset),
+        extHeader,
+        body,
+        packet.subarray(extEnd)
+      ]);
+    } else {
+      for (const item of items) {
+        const headerByte = ((item.id & 0x0f) << 4) | ((item.data.length - 1) & 0x0f);
+        chunks.push(Buffer.from([headerByte]), item.data);
+      }
+      let body = Buffer.concat(chunks);
+      const padLen = (4 - (body.length % 4)) % 4;
+      if (padLen > 0) {
+        body = Buffer.concat([body, Buffer.alloc(padLen, 0)]);
+      }
+      const extHeader = Buffer.alloc(4);
+      extHeader.writeUInt16BE(0xbede, 0);
+      extHeader.writeUInt16BE(body.length / 4, 2);
+      return Buffer.concat([
+        packet.subarray(0, extOffset),
+        extHeader,
+        body,
+        packet.subarray(extEnd)
+      ]);
     }
   }
 
@@ -181,7 +242,7 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
       return false;
     }
 
-    const outgoing = Buffer.from(packet);
+    let outgoing = Buffer.from(packet);
 
     if (this.payloadType !== undefined) {
       const marker = outgoing[1] & 0x80;
@@ -197,7 +258,7 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
       this.nextSeqNum = (this.nextSeqNum + 1) & 0xffff;
     }
 
-    this.rewriteHeaderExtensions(outgoing);
+    outgoing = this.rewriteHeaderExtensions(outgoing);
 
     let dispatchPacket: Buffer;
     try {
