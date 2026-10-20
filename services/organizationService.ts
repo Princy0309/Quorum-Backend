@@ -3,6 +3,11 @@ import { ApiError } from "../utils/ApiError.js";
 import { OrgRole } from '@prisma/client';
 import crypto from 'crypto';
 import type { CreateOrgInput, UpdateOrgInput, CreateInviteInput } from '../types/organization.js';
+import {queueNotification} from '../queues/notificationQueue.js';
+import logger from "../utils/logger.js";
+import { addOrgInviteEmailToQueue } from '../queues/emailQueue.js';
+import env from '../config/env.js';
+
 
 
 function slugify(text: string): string{
@@ -413,7 +418,49 @@ export const createOrganizationInvite = async (
     },
   });
 
+    if (normalizedEmail) {
+    const inviteLink = `${env.CLIENT_URL}/join/${invite.token}`;
+
+    try {
+      await addOrgInviteEmailToQueue({
+        email: normalizedEmail,
+        inviterName: invite.inviter.name,
+        orgName: invite.organization.name,
+        role: invite.role,
+        inviteLink,
+        expiresInDays: days,
+      });
+    } catch (err: any) {
+      logger.warn('[OrganizationInvite] Email queue failed', { error: err.message });
+    }
+
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { id: true },
+    });
+
+    if (existingUser) {
+      try {
+        await queueNotification({
+          recipientId: existingUser.id,
+          actorId: inviterId,
+          type: 'ORG_INVITE',
+          title: 'Organization Invitation',
+          body: `${invite.inviter.name} invited you to join ${invite.organization.name}`,
+          data: {
+            organizationId: orgId,
+            token: invite.token,
+            role: invite.role,
+          },
+        });
+      } catch (err: any) {
+        logger.warn('[OrganizationInvite] Notification trigger failed', { error: err.message });
+      }
+    }
+  }
+
   return invite;
+
 };
 
 export const getInvitePreview = async (token: string) => {

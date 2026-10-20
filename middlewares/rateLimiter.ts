@@ -256,42 +256,36 @@ const aiMemoryFallbackLimiter = new RateLimiterMemory({
   blockDuration: 60
 });
 
-export const aiUserRateLimiter = new RateLimiterRedis({
+export const aiRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
-  keyPrefix: 'ai_user_req_v1',
+  keyPrefix: 'ai_api_v1',
   points: 20,
   duration: 60,
   blockDuration: 60,
   insuranceLimiter: aiMemoryFallbackLimiter
 });
 
-export const aiRateLimiterMiddleware = async (req: Request, res: Response, next: NextFunction): Promise<any> => {
-  try {
-    const key = req.user?.id || req.ip || '127.0.0.1';
-    await aiUserRateLimiter.consume(key);
-    next();
-  } catch (err: any) {
-    if (err && typeof err.msBeforeNext === 'number') {
-      const retryAfterSec = Math.ceil(err.msBeforeNext / 1000);
-      res.set('Retry-After', String(retryAfterSec));
-      return res.status(429).json({
-        success: false,
-        message: 'Too many AI requests. Please wait a moment before trying again.',
-        retryAfter: retryAfterSec
-      });
-    }
+export const aiUserRateLimiter = aiRateLimiter;
 
-    logger.error('AI rate limiter infrastructure failure', {
-      error: err instanceof Error ? err.message : String(err),
-      userId: req.user?.id,
-      ip: req.ip
+export const aiRateLimiterMiddleware = (req: Request, res: Response, next: NextFunction): void => {
+  const key = req.user?.id || req.ip || '127.0.0.1';
+  aiRateLimiter.consume(key)
+    .then((rateLimiterRes) => {
+      res.setHeader('X-RateLimit-Limit', '20');
+      res.setHeader('X-RateLimit-Remaining', String(rateLimiterRes.remainingPoints));
+      res.setHeader('X-RateLimit-Reset', String(Math.ceil(Date.now() / 1000) + Math.ceil(rateLimiterRes.msBeforeNext / 1000)));
+      next();
+    })
+    .catch((err) => {
+      if (err instanceof Error) {
+        return next();
+      }
+      res.setHeader('X-RateLimit-Limit', '20');
+      res.setHeader('X-RateLimit-Remaining', '0');
+      res.setHeader('X-RateLimit-Reset', String(Math.ceil(Date.now() / 1000) + Math.ceil(err.msBeforeNext / 1000)));
+      res.status(429).json({ success: false, statusCode: 429, message: 'Too many AI requests. Please slow down and try again shortly.' });
     });
-
-    return res.status(503).json({
-      success: false,
-      message: 'Rate limiting service temporarily unavailable. Please retry shortly.'
-    });
-  }
 };
+
 
 

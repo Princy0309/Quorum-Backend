@@ -1,6 +1,8 @@
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import { CommunityRole } from './communityService.js';
+import { queueNotification } from '../queues/notificationQueue.js';
+import logger from '../utils/logger.js';
 
 export const createPostComment = async (
   userId: string,
@@ -9,7 +11,7 @@ export const createPostComment = async (
 ) => {
   const post = await prisma.communityPost.findUnique({
     where: { id: postId },
-    select: { id: true, communityId: true }
+    select: { id: true, communityId: true, authorId: true }
   });
 
   if (!post) {
@@ -45,6 +47,25 @@ export const createPostComment = async (
       }
     }
   });
+
+  if (post.authorId !== userId) {
+    try {
+      await queueNotification({
+        recipientId: post.authorId,
+        actorId: userId,
+        type: 'COMMUNITY_POST_COMMENT',
+        title: 'New Comment on Your Post',
+        body: `${comment.author.name} commented: "${content.trim().slice(0, 50)}${content.trim().length > 50 ? '...' : ''}"`,
+        data: {
+          communityId: post.communityId,
+          postId: post.id,
+          commentId: comment.id
+        }
+      });
+    } catch (err: any) {
+      logger.warn('[CommunityComment] Notification trigger failed', { error: err.message });
+    }
+  }
 
   return comment;
 };

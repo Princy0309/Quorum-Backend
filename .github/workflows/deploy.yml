@@ -27,6 +27,7 @@ jobs:
              sudo rm -rf ~/.npm ~/.cache /tmp/* /var/tmp/* || true
              sudo journalctl --vacuum-time=1h || true
              sudo apt-get clean || true
+             sudo pm2 kill || true
              sudo fuser -k 5000/tcp || true
 
              cd ~/Quorum-Backend
@@ -34,9 +35,10 @@ jobs:
              git fetch origin dev
              git reset --hard origin/dev
 
-             sudo docker compose down || true
-             sudo docker compose build app
-             sudo docker compose up -d
+             sudo docker compose down --remove-orphans || true
+             sudo docker compose build --no-cache app
+             sudo docker compose up -d --force-recreate
+
 
              sudo docker compose exec -T app npx prisma migrate deploy
              sudo docker compose logs --tail=50 app

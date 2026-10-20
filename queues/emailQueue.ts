@@ -1,7 +1,8 @@
 import { Queue, Worker, Job } from 'bullmq';
 import { Redis as IORedis } from 'ioredis';
+import { OrgInviteEmailJobData } from '../types/organization.js';
 
-import { sendOTPEmail } from '../services/emailService.js';
+import { sendOTPEmail, sendOrgInviteEmail } from '../services/emailService.js';
 
 export const queueRedisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
   maxRetriesPerRequest: null,
@@ -31,9 +32,37 @@ export const addEmailToQueue = async (
   );
 };
 
+
+export const addOrgInviteEmailToQueue = async (data: OrgInviteEmailJobData) => {
+  return await emailQueue.add(
+    'sendOrgInviteEmail',
+    data,
+    {
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 2000,
+      },
+      removeOnComplete: true,
+      removeOnFail: 100,
+    }
+  );
+};
+
+
 export const emailWorker = new Worker(
   'emailQueue',
   async (job: Job) => {
+    if (job.name === 'sendOrgInviteEmail') {
+      const { email, inviterName, orgName, role, inviteLink, expiresInDays } = job.data;
+      console.log(`[EmailWorker] Processing job #${job.id}: Sending org invite email to ${email}`);
+
+      await sendOrgInviteEmail(email, inviterName, orgName, role, inviteLink, expiresInDays);
+
+      console.log(`[EmailWorker] Job #${job.id} completed: Org invite sent to ${email}`);
+      return;
+    }
+
     const { email, otp, purpose } = job.data;
     console.log(`[EmailWorker] Processing job #${job.id}: Sending ${purpose} OTP to ${email}`);
 
@@ -46,6 +75,7 @@ export const emailWorker = new Worker(
     concurrency: 5,
   }
 );
+
 
 emailWorker.on('completed', (job) => {
   console.log(`[EmailWorker] Email job ${job.id} has finished sending.`);
