@@ -48,7 +48,7 @@ export class HandshakeReassembler {
     length: number;
     buffer: Buffer;
     receivedBytes: number;
-    offsets: Set<number>;
+    receivedMask: Uint8Array;
   }> = new Map();
 
   public processFragment(
@@ -81,15 +81,25 @@ export class HandshakeReassembler {
         length,
         buffer: Buffer.alloc(length),
         receivedBytes: 0,
-        offsets: new Set()
+        receivedMask: new Uint8Array(length)
       };
       this.fragments.set(messageSeq, item);
+    } else if (item.length !== length || item.msgType !== msgType) {
+      return null;
     }
 
-    if (!item.offsets.has(fragmentOffset)) {
-      fragmentBody.copy(item.buffer, fragmentOffset, 0, fragmentLength);
-      item.receivedBytes += fragmentLength;
-      item.offsets.add(fragmentOffset);
+    for (let i = 0; i < fragmentLength; i++) {
+      const targetIndex = fragmentOffset + i;
+      const incomingByte = fragmentBody[i];
+      if (item.receivedMask[targetIndex] === 1) {
+        if (item.buffer[targetIndex] !== incomingByte) {
+          return null;
+        }
+      } else {
+        item.buffer[targetIndex] = incomingByte;
+        item.receivedMask[targetIndex] = 1;
+        item.receivedBytes++;
+      }
     }
 
     if (item.receivedBytes >= item.length) {

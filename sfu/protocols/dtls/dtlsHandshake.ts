@@ -3,9 +3,12 @@ import { EventEmitter } from 'events';
 import { DtlsCertificate } from './dtlsCertificate.js';
 import {
   computeMasterSecret,
+  deriveDtlsRecordKeys,
+  DtlsRecordKeyMaterial,
   exportSrtpKeyMaterial,
   pseudoRandomFunction,
-  SrtpKeyMaterial
+  SrtpKeyMaterial,
+  unprotectDtlsRecord
 } from './dtlsKeys.js';
 import { SrtpContext } from '../srtp/srtpContext.js';
 import { SrtpSession } from '../srtp/srtpPacket.js';
@@ -63,6 +66,7 @@ export class DtlsServerHandshake extends EventEmitter {
   private selectedProfile: number = SRTP_PROFILE.SRTP_AES128_CM_HMAC_SHA1_80;
 
   private masterSecret: Buffer | null = null;
+  private recordKeys: DtlsRecordKeyMaterial | null = null;
   private srtpKeyMaterial: SrtpKeyMaterial | null = null;
   private inboundSession: SrtpSession | null = null;
   private outboundSession: SrtpSession | null = null;
@@ -113,7 +117,19 @@ export class DtlsServerHandshake extends EventEmitter {
     const records = parseDtlsRecords(datagram);
     for (const record of records) {
       if (record.contentType === DTLS_CONTENT_TYPE.HANDSHAKE) {
-        this.processHandshakeRecord(record.fragment);
+        if (record.epoch === 0) {
+          this.processHandshakeRecord(record.fragment, 0);
+        } else if (record.epoch === 1) {
+          if (!this.recordKeys) {
+            continue;
+          }
+          try {
+            const decrypted = unprotectDtlsRecord(record, this.recordKeys.clientWriteKey, this.recordKeys.clientWriteIv);
+            this.processHandshakeRecord(decrypted, 1);
+          } catch (err: any) {
+            this.emit('error', new Error('DTLS record decryption failed: ' + err.message));
+          }
+        }
       } else if (record.contentType === DTLS_CONTENT_TYPE.CHANGE_CIPHER_SPEC) {
         if (record.fragment.length >= 1 && record.fragment[0] === 0x01) {
           this.receivedChangeCipherSpec = true;
@@ -124,7 +140,7 @@ export class DtlsServerHandshake extends EventEmitter {
     }
   }
 
-  private processHandshakeRecord(fragment: Buffer): void {
+  private processHandshakeRecord(fragment: Buffer, epoch: number): void {
     const messages = parseHandshakeMessages(fragment, this.reassembler);
     for (const msg of messages) {
       if (msg.msgType === DTLS_HANDSHAKE_TYPE.CLIENT_HELLO) {
@@ -132,7 +148,7 @@ export class DtlsServerHandshake extends EventEmitter {
       } else if (msg.msgType === DTLS_HANDSHAKE_TYPE.CLIENT_KEY_EXCHANGE) {
         this.onClientKeyExchange(msg);
       } else if (msg.msgType === DTLS_HANDSHAKE_TYPE.FINISHED) {
-        this.onClientFinished(msg);
+        this.onClientFinished(msg, epoch);
       }
     }
   }
@@ -218,7 +234,9 @@ export class DtlsServerHandshake extends EventEmitter {
     }
 
     if (!profileSelected) {
-      this.selectedProfile = SRTP_PROFILE.SRTP_AES128_CM_HMAC_SHA1_80;
+      this.emit('error', new Error('No supported DTLS-SRTP profile offered by client'));
+      this.close();
+      return;
     }
 
     const rawClientHelloMsg = wrapHandshakeMessage(msg.msgType, msg.body, msg.messageSeq);
@@ -259,6 +277,7 @@ export class DtlsServerHandshake extends EventEmitter {
     try {
       const preMasterSecret = this.ecdh.computeSecret(clientPublicKey);
       this.masterSecret = computeMasterSecret(preMasterSecret, this.clientRandom, this.serverRandom);
+      this.recordKeys = deriveDtlsRecordKeys(this.masterSecret, this.clientRandom, this.serverRandom);
     } catch (err: any) {
       this.emit('error', err);
       return;
@@ -270,8 +289,16 @@ export class DtlsServerHandshake extends EventEmitter {
     this.state = 'WAIT_FINISHED';
   }
 
-  private onClientFinished(msg: DtlsHandshakeMessage): void {
-    if (this.state !== 'WAIT_FINISHED' || !this.masterSecret || !this.clientRandom || !this.serverRandom) {
+  private onClientFinished(msg: DtlsHandshakeMessage, epoch: number): void {
+    if (
+      this.state !== 'WAIT_FINISHED' ||
+      !this.receivedChangeCipherSpec ||
+      epoch !== 1 ||
+      !this.masterSecret ||
+      !this.recordKeys ||
+      !this.clientRandom ||
+      !this.serverRandom
+    ) {
       return;
     }
 
@@ -294,6 +321,7 @@ export class DtlsServerHandshake extends EventEmitter {
 
     const flight6 = buildServerFlight6(
       this.masterSecret,
+      this.recordKeys,
       Buffer.concat(this.handshakeTranscript),
       this.serverHandshakeSeq,
       this.serverRecordSeq
@@ -346,6 +374,8 @@ export class DtlsServerHandshake extends EventEmitter {
     this.transportSender = null;
     this.ecdh = null;
     this.cachedFlight4 = null;
+    this.recordKeys = null;
+    this.masterSecret = null;
     this.handshakeTranscript = [];
     this.reassembler.clear();
     this.emit('close');
