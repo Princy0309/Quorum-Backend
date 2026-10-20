@@ -12,16 +12,14 @@ import {
 
 const router = Router();
 
-router.use(authMiddleware);
-
-router.get('/', getNotificationsController);
-router.get('', getNotificationsController);
-router.get('/unread-count', getUnreadCountController);
-router.patch('/read-all', markAllAsReadController);
-router.patch('/:id/read', markAsReadController);
-router.delete('/:id', deleteNotificationController);
-router.get('/preferences', getPreferencesController);
-router.put('/preferences', updatePreferenceController);
+router.get('/',authMiddleware, getNotificationsController);
+router.get('', authMiddleware, getNotificationsController);
+router.get('/unread-count', authMiddleware, getUnreadCountController);
+router.patch('/read-all', authMiddleware, markAllAsReadController);
+router.patch('/:id/read', authMiddleware, markAsReadController);
+router.delete('/:id', authMiddleware, deleteNotificationController);
+router.get('/preferences', authMiddleware, getPreferencesController);
+router.put('/preferences', authMiddleware, updatePreferenceController);
 
 
 export default router;
