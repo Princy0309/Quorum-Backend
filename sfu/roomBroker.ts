@@ -1,11 +1,15 @@
 import { EventEmitter } from 'events';
-import type { MediaStreamTrack, RTCRtpSender, RtpPacket } from 'werift';
+import { MediaStreamTrack, RTCRtpSender, RtpPacket } from 'werift';
 import type { SfuRoom, Peer, PublishedTrack, TrackSubscriber } from './types.js';
+import { TrackRouter } from './engine/pipeline/trackRouter.js';
+import { Publisher } from './engine/publisher.js';
+import { Subscriber } from './engine/subscriber.js';
 import logger from '../utils/logger.js';
 
 export class RoomBroker extends EventEmitter {
   private static instance: RoomBroker;
   private rooms: Map<string, SfuRoom> = new Map();
+  private routers: Map<string, TrackRouter> = new Map();
 
   private constructor() {
     super();
@@ -18,6 +22,19 @@ export class RoomBroker extends EventEmitter {
     return RoomBroker.instance;
   }
 
+  public getOrCreateRouter(roomCode: string): TrackRouter {
+    let router = this.routers.get(roomCode);
+    if (!router) {
+      router = new TrackRouter(roomCode);
+      this.routers.set(roomCode, router);
+    }
+    return router;
+  }
+
+  public getRouter(roomCode: string): TrackRouter | undefined {
+    return this.routers.get(roomCode);
+  }
+
   public getOrCreateRoom(roomCode: string): SfuRoom {
     let room = this.rooms.get(roomCode);
 
@@ -28,6 +45,7 @@ export class RoomBroker extends EventEmitter {
         channels: new Map(),
       };
       this.rooms.set(roomCode, room);
+      this.getOrCreateRouter(roomCode);
       logger.info(`[SFU Broker] Created room: ${roomCode}`);
     }
 
@@ -76,29 +94,37 @@ export class RoomBroker extends EventEmitter {
 
     peer.publishedTracks.set(trackId, publishedTrack);
 
-        if (!room.channels.has(trackId)) {
+    if (!room.channels.has(trackId)) {
       room.channels.set(trackId, []);
     }
+
+    const router = this.getOrCreateRouter(roomCode);
+    const publisher = new Publisher({
+      id: trackId,
+      peerId,
+      kind: track.kind as 'audio' | 'video',
+      ssrc: publishedTrack.ssrc || 0,
+      payloadType: (track as any).payloadType || (track.kind === 'video' ? 96 : 111)
+    });
+
+    publisher.on('rtcp-feedback', () => {
+      this.requestKeyframe(roomCode, peerId, trackId);
+    });
+
+    router.addPublisher(publisher, trackId);
 
     track.onReceiveRtp.subscribe((packet: RtpPacket) => {
       if (!publishedTrack.ssrc && packet.header?.ssrc) {
         publishedTrack.ssrc = packet.header.ssrc;
         (track as any).ssrc = packet.header.ssrc;
+        (publisher as any).ssrc = packet.header.ssrc;
         logger.info(
           `[SFU Broker] Captured SSRC ${packet.header.ssrc} for track ${trackId} (${track.kind})`
         );
       }
 
-      const subscribers = room.channels.get(trackId);
-      if (subscribers && subscribers.length > 0) {
-        for (const sub of subscribers) {
-          try {
-            sub.sender.sendRtp(packet);
-          } catch (err) {
-            logger.error(`[SFU Broker] Packet forward error:`, err);
-          }
-        }
-      }
+      const rtpBuffer = packet.serialize ? packet.serialize() : (Buffer.isBuffer(packet) ? packet : Buffer.from((packet as any).buffer));
+      publisher.emit('rtp', rtpBuffer, publisher);
     });
 
     logger.info(
@@ -130,6 +156,35 @@ export class RoomBroker extends EventEmitter {
       room.channels.set(trackId, subscribers);
     }
 
+    const publishedTrack = this.getRoomTracks(roomCode).find((t) => t.trackId === trackId);
+    const kind = publishedTrack?.kind || 'video';
+
+    const router = this.getOrCreateRouter(roomCode);
+    const subId = `${subscriberPeerId}:${trackId}`;
+
+    const subscriber = new Subscriber({
+      id: subId,
+      peerId: subscriberPeerId,
+      kind,
+      trackId,
+      transportSender: (buf: Buffer) => {
+        try {
+          const rtpPkt = RtpPacket.deSerialize(buf);
+          sender.sendRtp(rtpPkt);
+          return true;
+        } catch {
+          try {
+            (sender as any).sendRtp(buf);
+            return true;
+          } catch {
+            return false;
+          }
+        }
+      }
+    });
+
+    router.addSubscription(trackId, subscriber);
+
     const existingIndex = subscribers.findIndex(
       (s) => s.subscriberPeerId === subscriberPeerId
     );
@@ -147,9 +202,22 @@ export class RoomBroker extends EventEmitter {
     }
   }
 
-  public requestKeyframe(roomCode: string, publisherPeerId: string): void {
+  public requestKeyframe(roomCode: string, publisherPeerId: string, trackId?: string): void {
     const room = this.rooms.get(roomCode);
     if (!room) return;
+
+    const router = this.routers.get(roomCode);
+    if (trackId && router) {
+      const pub = router.getPublisher(trackId);
+      const pli = Buffer.alloc(12);
+      pli[0] = 0x81;
+      pli[1] = 206;
+      pli.writeUInt16BE(1, 2);
+      pli.writeUInt32BE(0, 4);
+      pli.writeUInt32BE(pub?.ssrc || 0, 8);
+      router.sendRtcpFeedback(trackId, pli);
+    }
+
     const peer = room.peers.get(publisherPeerId);
     if (!peer?.peerConnection) return;
 
@@ -178,7 +246,6 @@ export class RoomBroker extends EventEmitter {
     }
   }
 
-
   public getRoomTracks(roomCode: string): PublishedTrack[] {
     const room = this.rooms.get(roomCode);
     if (!room) return [];
@@ -198,6 +265,11 @@ export class RoomBroker extends EventEmitter {
 
     const peer = room.peers.get(peerId);
     if (!peer) return;
+
+    const router = this.routers.get(roomCode);
+    if (router) {
+      router.removePeer(peerId);
+    }
 
     for (const trackId of peer.publishedTracks.keys()) {
       room.channels.delete(trackId);
@@ -223,6 +295,10 @@ export class RoomBroker extends EventEmitter {
     logger.info(`[SFU Broker] Peer ${peerId} removed from room ${roomCode}`);
 
     if (room.peers.size === 0) {
+      if (router) {
+        router.close();
+        this.routers.delete(roomCode);
+      }
       this.rooms.delete(roomCode);
       logger.info(`[SFU Broker] Disposed empty room ${roomCode}`);
     }
@@ -241,6 +317,13 @@ export class RoomBroker extends EventEmitter {
   public closeRoom(roomCode: string): void {
     const room = this.rooms.get(roomCode);
     if (!room) return;
+
+    const router = this.routers.get(roomCode);
+    if (router) {
+      router.close();
+      this.routers.delete(roomCode);
+    }
+
     for (const peerId of Array.from(room.peers.keys())) {
       this.removePeer(roomCode, peerId);
     }

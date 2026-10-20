@@ -222,9 +222,6 @@ export class DtlsServerHandshake extends EventEmitter {
             }
             try {
               const decrypted = unprotectDtlsRecord(record, this.recordKeys.clientWriteKey, this.recordKeys.clientWriteIv);
-              if (this.state === 'CONNECTED') {
-                this.clearFlight6RetransmitTimer();
-              }
               this.processHandshakeRecord(decrypted, 1);
             } catch (err: any) {
               this.emit('error', new Error('DTLS record decryption failed: ' + err.message));
@@ -236,7 +233,15 @@ export class DtlsServerHandshake extends EventEmitter {
             return;
           }
           this.receivedChangeCipherSpec = true;
+        } else if (record.contentType === DTLS_CONTENT_TYPE.APPLICATION_DATA) {
+          if (this.state === 'CONNECTED') {
+            this.clearFlight6RetransmitTimer();
+          }
+          this.emit('data', record.fragment);
         } else if (record.contentType === DTLS_CONTENT_TYPE.ALERT) {
+          if (this.state === 'CONNECTED') {
+            this.clearFlight6RetransmitTimer();
+          }
           this.emit('alert', record.fragment);
         }
       }
@@ -297,11 +302,19 @@ export class DtlsServerHandshake extends EventEmitter {
           this.emit('error', new Error('Finished received in invalid epoch'));
           return;
         }
-        if (this.state === 'CONNECTED' && msg.messageSeq === (this.expectedClientHandshakeSeq - 1) && this.cachedFlight6) {
-          for (const rec of this.cachedFlight6) {
-            this.dispatch(rec);
+        if (this.state === 'CONNECTED') {
+          if (msg.messageSeq === (this.expectedClientHandshakeSeq - 1) && this.cachedFlight6) {
+            for (const rec of this.cachedFlight6) {
+              this.dispatch(rec);
+            }
+            this.startFlight6RetransmitTimer();
+            return;
           }
-          this.startFlight6RetransmitTimer();
+          if (msg.messageSeq >= this.expectedClientHandshakeSeq) {
+            this.clearFlight6RetransmitTimer();
+            return;
+          }
+          this.emit('error', new Error('Unexpected Finished sequence in CONNECTED state'));
           return;
         }
         if (this.state !== 'WAIT_FINISHED') {

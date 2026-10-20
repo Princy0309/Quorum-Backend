@@ -198,11 +198,11 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     }
   });
 
-  socket.on('sfu:request-keyframe', ({ roomCode, publisherPeerId }: { roomCode: string; publisherPeerId: string }) => {
+  socket.on('sfu:request-keyframe', ({ roomCode, publisherPeerId, trackId }: { roomCode: string; publisherPeerId: string; trackId?: string }) => {
     const rCode = roomCode || currentRoom;
     if (rCode && publisherPeerId) {
       logger.info(`[Signaling] Manual keyframe requested for publisher ${publisherPeerId} in room ${rCode}`);
-      roomBroker.requestKeyframe(rCode, publisherPeerId);
+      roomBroker.requestKeyframe(rCode, publisherPeerId, trackId);
     }
   });
 
@@ -254,7 +254,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         if (publishedTrack.kind === 'video') {
           transceiver.sender.onPictureLossIndication.subscribe(() => {
             logger.info(`[Signaling] PLI received: requesting keyframe from publisher ${publishedTrack.peerId}`);
-            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
+            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId, trackId);
           });
         }
 
@@ -280,12 +280,12 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         });
 
         if (publishedTrack.kind === 'video') {
-          roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
+          roomBroker.requestKeyframe(roomCode, publishedTrack.peerId, trackId);
           setTimeout(() => {
-            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
+            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId, trackId);
           }, 500);
           setTimeout(() => {
-            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId);
+            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId, trackId);
           }, 1200);
         }
 

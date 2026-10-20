@@ -30,7 +30,7 @@ export class TrackRouter extends EventEmitter {
   private peerPublishedTracks: Map<string, Set<string>> = new Map();
   private subscriptions: PeerSubscriptionRegistry = new PeerSubscriptionRegistry();
   private publisherListeners: Map<string, () => void> = new Map();
-  private subscriberListeners: Map<string, { subscriber: Subscriber; listener: () => void }> = new Map();
+  private subscriberListeners: Map<string, { subscriber: Subscriber; closeListener: () => void; rtcpListener: (packet: Buffer) => void }> = new Map();
   private isClosed: boolean = false;
 
   constructor(roomCode: string) {
@@ -129,7 +129,8 @@ export class TrackRouter extends EventEmitter {
       const subKey = `${trackId}:${sub.id}`;
       const entry = this.subscriberListeners.get(subKey);
       if (entry) {
-        entry.subscriber.removeListener('close', entry.listener);
+        entry.subscriber.removeListener('close', entry.closeListener);
+        entry.subscriber.removeListener('rtcp', entry.rtcpListener);
         this.subscriberListeners.delete(subKey);
       }
       sub.close();
@@ -164,7 +165,8 @@ export class TrackRouter extends EventEmitter {
       const existingKey = `${trackId}:${existingSub.id}`;
       const existingEntry = this.subscriberListeners.get(existingKey);
       if (existingEntry) {
-        existingEntry.subscriber.removeListener('close', existingEntry.listener);
+        existingEntry.subscriber.removeListener('close', existingEntry.closeListener);
+        existingEntry.subscriber.removeListener('rtcp', existingEntry.rtcpListener);
         this.subscriberListeners.delete(existingKey);
       }
       forwarder.removeSubscriber(existingSub.id);
@@ -178,8 +180,16 @@ export class TrackRouter extends EventEmitter {
     const onSubscriberClose = () => {
       this.removeSubscription(trackId, subscriber.id, subscriber.peerId);
     };
+    const onSubscriberRtcp = (packet: Buffer) => {
+      this.sendRtcpFeedback(trackId, packet);
+    };
     subscriber.once('close', onSubscriberClose);
-    this.subscriberListeners.set(subKey, { subscriber, listener: onSubscriberClose });
+    subscriber.on('rtcp', onSubscriberRtcp);
+    this.subscriberListeners.set(subKey, {
+      subscriber,
+      closeListener: onSubscriberClose,
+      rtcpListener: onSubscriberRtcp
+    });
 
     const event: SubscriptionEvent = {
       roomCode: this.roomCode,
@@ -201,7 +211,8 @@ export class TrackRouter extends EventEmitter {
     const subKey = `${trackId}:${subscriberId}`;
     const entry = this.subscriberListeners.get(subKey);
     if (entry) {
-      entry.subscriber.removeListener('close', entry.listener);
+      entry.subscriber.removeListener('close', entry.closeListener);
+      entry.subscriber.removeListener('rtcp', entry.rtcpListener);
       this.subscriberListeners.delete(subKey);
     }
 
@@ -285,7 +296,8 @@ export class TrackRouter extends EventEmitter {
       const subKey = `${trackId}:${subscriber.id}`;
       const entry = this.subscriberListeners.get(subKey);
       if (entry) {
-        entry.subscriber.removeListener('close', entry.listener);
+        entry.subscriber.removeListener('close', entry.closeListener);
+        entry.subscriber.removeListener('rtcp', entry.rtcpListener);
         this.subscriberListeners.delete(subKey);
       }
       const forwarder = this.forwarders.get(trackId);
@@ -305,6 +317,13 @@ export class TrackRouter extends EventEmitter {
     const forwarder = this.forwarders.get(trackId);
     if (!forwarder) {
       return false;
+    }
+    const publisher = this.publishers.get(trackId);
+    if (publisher && publisher.ssrc && packet.length >= 12) {
+      const pt = packet[1];
+      if (pt === 205 || pt === 206) {
+        packet.writeUInt32BE(publisher.ssrc >>> 0, 8);
+      }
     }
     return forwarder.sendRtcpFeedback(packet);
   }
@@ -334,8 +353,9 @@ export class TrackRouter extends EventEmitter {
     }
     this.isClosed = true;
 
-    for (const { subscriber, listener } of this.subscriberListeners.values()) {
-      subscriber.removeListener('close', listener);
+    for (const { subscriber, closeListener, rtcpListener } of this.subscriberListeners.values()) {
+      subscriber.removeListener('close', closeListener);
+      subscriber.removeListener('rtcp', rtcpListener);
     }
     this.subscriberListeners.clear();
 

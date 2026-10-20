@@ -266,7 +266,7 @@ export class SrtpSession {
     const ssrc = rtcpPacket.readUInt32BE(4);
     let index = (this.outboundRtcpIndices.get(ssrc) ?? 0) + 1;
     if (index > 0x7fffffff) {
-      index = 1;
+      throw new Error('SRTCP index exhausted: rekeying required before sending further packets');
     }
     this.outboundRtcpIndices.set(ssrc, index);
 
