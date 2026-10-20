@@ -8,11 +8,19 @@ interface StreamState {
   initialized: boolean;
 }
 
+interface RtcpStreamState {
+  highestIndex: number;
+  replayWindow: bigint;
+  initialized: boolean;
+}
+
 export class SrtpSession {
   private context: SrtpContext;
   private isOutbound: boolean;
   private inboundStreams: Map<number, StreamState> = new Map();
   private outboundStreams: Map<number, StreamState> = new Map();
+  private inboundRtcpStreams: Map<number, RtcpStreamState> = new Map();
+  private outboundRtcpIndices: Map<number, number> = new Map();
 
   constructor(context: SrtpContext, isOutbound: boolean = false) {
     this.context = context;
@@ -241,5 +249,118 @@ export class SrtpSession {
     this.commitState(state, packetIndex, isNewHighest, newHighestSeq, newRoc);
 
     return Buffer.concat([protectedWithoutTag, authTag]);
+  }
+
+  public validateRtcpHeader(packet: Buffer): void {
+    if (packet.length < 8) {
+      throw new Error('Packet smaller than minimum RTCP header size');
+    }
+    const version = (packet[0] >> 6) & 0x03;
+    if (version !== 2) {
+      throw new Error('Invalid RTCP version');
+    }
+  }
+
+  public protectRtcp(rtcpPacket: Buffer): Buffer {
+    this.validateRtcpHeader(rtcpPacket);
+    const ssrc = rtcpPacket.readUInt32BE(4);
+    let index = (this.outboundRtcpIndices.get(ssrc) ?? 0) + 1;
+    if (index > 0x7fffffff) {
+      index = 1;
+    }
+    this.outboundRtcpIndices.set(ssrc, index);
+
+    const header = rtcpPacket.subarray(0, 8);
+    const payload = rtcpPacket.subarray(8);
+
+    const keys: SrtpSessionKeys = this.context.getRtcpKeys();
+    let encryptedPayload: Buffer;
+    if (payload.length > 0) {
+      const iv = this.context.computeRtcpPacketIv(ssrc, index);
+      const cipher = crypto.createCipheriv('aes-128-ctr', keys.encryptionKey, iv);
+      encryptedPayload = Buffer.concat([cipher.update(payload), cipher.final()]);
+    } else {
+      encryptedPayload = Buffer.alloc(0);
+    }
+
+    const indexBuffer = Buffer.alloc(4);
+    indexBuffer.writeUInt32BE((0x80000000 | index) >>> 0, 0);
+
+    const authenticatedData = Buffer.concat([header, encryptedPayload, indexBuffer]);
+    const authTag = crypto
+      .createHmac('sha1', keys.authKey)
+      .update(authenticatedData)
+      .digest()
+      .subarray(0, 10);
+
+    return Buffer.concat([authenticatedData, authTag]);
+  }
+
+  public unprotectRtcp(srtcpPacket: Buffer): Buffer {
+    if (srtcpPacket.length < 22) {
+      throw new Error('SRTCP packet too short');
+    }
+
+    const receivedTag = srtcpPacket.subarray(srtcpPacket.length - 10);
+    const authenticatedPortion = srtcpPacket.subarray(0, srtcpPacket.length - 10);
+
+    const keys: SrtpSessionKeys = this.context.getRtcpKeys();
+    const expectedTag = crypto
+      .createHmac('sha1', keys.authKey)
+      .update(authenticatedPortion)
+      .digest()
+      .subarray(0, 10);
+
+    if (!crypto.timingSafeEqual(receivedTag, expectedTag)) {
+      throw new Error('SRTCP authentication tag mismatch');
+    }
+
+    this.validateRtcpHeader(authenticatedPortion);
+    const ssrc = authenticatedPortion.readUInt32BE(4);
+    const indexWord = authenticatedPortion.readUInt32BE(authenticatedPortion.length - 4);
+    const eFlag = (indexWord >>> 31) === 1;
+    const srtcpIndex = indexWord & 0x7fffffff;
+
+    let state = this.inboundRtcpStreams.get(ssrc);
+    if (!state) {
+      state = {
+        highestIndex: srtcpIndex,
+        replayWindow: 1n,
+        initialized: true
+      };
+      this.inboundRtcpStreams.set(ssrc, state);
+    } else {
+      const diff = state.highestIndex - srtcpIndex;
+      if (diff > 0) {
+        if (diff >= 64) {
+          throw new Error('SRTCP replay check failed');
+        }
+        const mask = 1n << BigInt(diff);
+        if ((state.replayWindow & mask) !== 0n) {
+          throw new Error('SRTCP replay check failed');
+        }
+        state.replayWindow |= mask;
+      } else {
+        const shift = BigInt(-diff);
+        state.replayWindow = shift >= 64n ? 1n : (state.replayWindow << shift) | 1n;
+        state.highestIndex = srtcpIndex;
+      }
+    }
+
+    const header = authenticatedPortion.subarray(0, 8);
+    const encryptedPayload = authenticatedPortion.subarray(8, authenticatedPortion.length - 4);
+    if (encryptedPayload.length === 0) {
+      return header;
+    }
+
+    if (!eFlag) {
+      return Buffer.concat([header, encryptedPayload]);
+    }
+
+    const iv = this.context.computeRtcpPacketIv(ssrc, srtcpIndex);
+    const decipher = crypto.createCipheriv('aes-128-ctr', keys.encryptionKey, iv);
+    const decryptedPayload = Buffer.concat([decipher.update(encryptedPayload), decipher.final()]);
+
+    return Buffer.concat([header, decryptedPayload]);
   }
 }
