@@ -26,6 +26,12 @@ router.use('/otp', otpRoutes);
 router.use('/user', userRoutes);
 router.use('/users', userRoutes);
 
+router.use('/notifications', notificationRoutes);
+router.use('/notification', notificationRoutes);
+router.use('/v1/notifications', notificationRoutes);
+router.use('/ai', aiRoutes);
+router.use('/v1/ai', aiRoutes);
+
 router.use('/meetings', meetingRoutes);
 router.use('/organizations', organizationRoutes);
 
@@ -41,11 +47,6 @@ router.use('/v1/chat/conversations', conversationRoutes);
 
 router.use('/uploads', uploadRoutes);
 router.use('/devices', deviceRoutes);
-router.use('/notifications', notificationRoutes);
-router.use('/notification', notificationRoutes);
-router.use('/v1/notifications', notificationRoutes);
-router.use('/ai', aiRoutes);
-router.use('/v1/ai', aiRoutes);
 
 
 export default router;
