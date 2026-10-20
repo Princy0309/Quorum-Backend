@@ -11,7 +11,10 @@ const errorHandler = (err: Error | ApiError, req: Request, res: Response, next: 
     : 'Internal Server Error';
 
   const anyErr = err as any;
-  if (anyErr?.code === 'P2002') {
+  if (err instanceof SyntaxError && anyErr?.status === 400 && 'body' in anyErr) {
+    statusCode = 400;
+    message = 'Invalid JSON in request body.';
+  } else if (anyErr?.code === 'P2002') {
     statusCode = 409;
     message = 'A record with this information already exists.';
   } else if (anyErr?.code === 'P2025') {

@@ -39,57 +39,75 @@ export const generateRawCompletion = async (
 ): Promise<RawAiCompletionResult> => {
   const ai = getGenAIClient();
   const requestId = crypto.randomUUID();
-  const model = String(env.GEMINI_MODEL || 'gemini-1.5-flash');
+  const primaryModel = String(env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
+  const candidateModels = Array.from(new Set([
+    primaryModel,
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3.1-flash-lite-preview',
+    'gemini-3.5-flash'
+  ]));
 
   const sanitizedPrompt = sanitizeAiInput(prompt);
   const sanitizedInstruction = systemInstruction ? sanitizeAiInput(systemInstruction) : undefined;
 
-  const abortController = new AbortController();
-  const timer = setTimeout(() => {
-    abortController.abort();
-  }, 25000);
+  let lastError: any = null;
 
-  try {
-    const response = await ai.models.generateContent({
-      model,
-      contents: sanitizedPrompt,
-      config: {
-        httpOptions: { timeout: 25000 },
-        abortSignal: abortController.signal,
-        systemInstruction: sanitizedInstruction ? {
-          parts: [{ text: sanitizedInstruction }]
-        } : undefined
+  for (const model of candidateModels) {
+    const abortController = new AbortController();
+    const timer = setTimeout(() => {
+      abortController.abort();
+    }, 25000);
+
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: sanitizedPrompt,
+        config: {
+          httpOptions: { timeout: 25000 },
+          abortSignal: abortController.signal,
+          systemInstruction: sanitizedInstruction ? {
+            parts: [{ text: sanitizedInstruction }]
+          } : undefined
+        }
+      });
+
+      clearTimeout(timer);
+
+      const text = response.text || '';
+
+      return {
+        text,
+        model,
+        requestId,
+        usage: response.usageMetadata || undefined
+      };
+    } catch (err: any) {
+      clearTimeout(timer);
+      if (abortController.signal.aborted || err?.name === 'AbortError') {
+        lastError = new ApiError(504, 'AI model provider request timed out. Please try again.');
+        continue;
       }
-    });
+      if (err instanceof ApiError) {
+        lastError = err;
+        continue;
+      }
 
-    clearTimeout(timer);
+      const msg = String(err?.message || '');
+      logger.warn('AI model execution failed, attempting fallback if available', {
+        requestId,
+        model,
+        error: msg
+      });
 
-    const text = response.text || '';
+      if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('Quota')) {
+        lastError = new ApiError(429, 'AI provider quota limit reached. Please wait a moment before retrying.');
+        continue;
+      }
 
-    return {
-      text,
-      model,
-      requestId,
-      usage: response.usageMetadata || undefined
-    };
-  } catch (err: any) {
-    clearTimeout(timer);
-    if (abortController.signal.aborted || err?.name === 'AbortError') {
-      throw new ApiError(504, 'AI model provider request timed out. Please try again.');
+      lastError = new ApiError(502, 'AI service provider failed to process the request. Please try again later.');
     }
-    if (err instanceof ApiError) throw err;
-
-    const msg = String(err?.message || '');
-    logger.error('AI provider execution error', {
-      requestId,
-      model,
-      error: msg
-    });
-
-    if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('Quota')) {
-      throw new ApiError(429, 'AI provider quota limit reached. Please wait a moment before retrying.');
-    }
-
-    throw new ApiError(502, 'AI service provider failed to process the request. Please try again later.');
   }
+
+  throw lastError || new ApiError(502, 'AI service provider failed to process the request. Please try again later.');
 };

@@ -1,8 +1,12 @@
 import { z } from 'zod';
 
 export const aiChatSchema = z.object({
-  prompt: z.string().trim().min(1, 'Prompt cannot be empty').max(10000),
+  prompt: z.string().trim().min(1, 'Prompt cannot be empty').max(10000).optional(),
+  message: z.string().trim().min(1, 'Message cannot be empty').max(10000).optional(),
   context: z.string().trim().max(10000).optional(),
+}).refine((data) => Boolean(data.prompt || data.message), {
+  message: 'Prompt or message cannot be empty',
+  path: ['prompt']
 });
 
 export const aiSummarySchema = z.object({

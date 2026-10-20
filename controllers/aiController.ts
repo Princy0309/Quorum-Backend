@@ -27,7 +27,8 @@ const sendAiSuccess = (res: Response, statusCode: number, message: string, data:
 
 export const chatController = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.id;
-  const { prompt, context } = req.body;
+  const prompt = String(req.body?.prompt || req.body?.message || '').trim();
+  const context = req.body?.context;
   const result = await askAiAssistant(prompt, context);
 
   if (userId) {

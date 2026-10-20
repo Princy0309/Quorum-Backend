@@ -65,7 +65,7 @@ export const env = {
   allowedOrigins,
   REDIS_URL: data?.REDIS_URL,
   GEMINI_API_KEY: data?.GEMINI_API_KEY || process.env.GEMINI_API_KEY || '',
-  GEMINI_MODEL: data?.GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-3.5-flash',
+  GEMINI_MODEL: data?.GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
   AI_HISTORY_RETENTION_DAYS: Number(process.env.AI_HISTORY_RETENTION_DAYS || 30),
 };
 
