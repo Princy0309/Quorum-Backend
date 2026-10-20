@@ -43,6 +43,9 @@ export interface DtlsHandshakeMessage {
 }
 
 export class HandshakeReassembler {
+  private static readonly MAX_REASSEMBLY_SESSIONS = 16;
+  private static readonly MAX_HANDSHAKE_MESSAGE_LENGTH = 16384;
+
   private fragments: Map<number, {
     msgType: number;
     length: number;
@@ -59,7 +62,12 @@ export class HandshakeReassembler {
     fragmentLength: number,
     fragmentBody: Buffer
   ): DtlsHandshakeMessage | null {
-    if (fragmentOffset + fragmentLength > length || fragmentBody.length < fragmentLength) {
+    if (
+      length <= 0 ||
+      length > HandshakeReassembler.MAX_HANDSHAKE_MESSAGE_LENGTH ||
+      fragmentOffset + fragmentLength > length ||
+      fragmentBody.length < fragmentLength
+    ) {
       return null;
     }
 
@@ -76,6 +84,12 @@ export class HandshakeReassembler {
 
     let item = this.fragments.get(messageSeq);
     if (!item) {
+      if (this.fragments.size >= HandshakeReassembler.MAX_REASSEMBLY_SESSIONS) {
+        const oldestKey = this.fragments.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.fragments.delete(oldestKey);
+        }
+      }
       item = {
         msgType,
         length,
@@ -138,6 +152,10 @@ export const parseDtlsRecords = (buffer: Buffer): DtlsRecord[] => {
     }
 
     const protocolVersion = buffer.readUInt16BE(offset + 1);
+    if (protocolVersion !== 0xfefd && protocolVersion !== 0xfeff) {
+      break;
+    }
+
     const epoch = buffer.readUInt16BE(offset + 3);
 
     const seqHigh = BigInt(buffer.readUInt16BE(offset + 5));
@@ -145,7 +163,7 @@ export const parseDtlsRecords = (buffer: Buffer): DtlsRecord[] => {
     const sequenceNumber = (seqHigh << 32n) | seqLow;
 
     const length = buffer.readUInt16BE(offset + 11);
-    if (length > 16384) {
+    if (length <= 0 || length > 16384) {
       break;
     }
 
@@ -184,7 +202,12 @@ export const parseHandshakeMessages = (
     const fragmentOffset = (fragment[offset + 6] << 16) | (fragment[offset + 7] << 8) | fragment[offset + 8];
     const fragmentLength = (fragment[offset + 9] << 16) | (fragment[offset + 10] << 8) | fragment[offset + 11];
 
-    if (fragmentOffset + fragmentLength > length || length > 65535) {
+    if (
+      fragmentOffset + fragmentLength > length ||
+      length <= 0 ||
+      length > 16384 ||
+      fragmentLength < 0
+    ) {
       break;
     }
 

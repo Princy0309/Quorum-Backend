@@ -71,9 +71,15 @@ export class DtlsServerHandshake extends EventEmitter {
   private inboundSession: SrtpSession | null = null;
   private outboundSession: SrtpSession | null = null;
   private cachedFlight4: Buffer | null = null;
+  private cachedFlight6: Buffer[] | null = null;
   private handshakeTranscript: Buffer[] = [];
   private reassembler: HandshakeReassembler = new HandshakeReassembler();
   private receivedChangeCipherSpec: boolean = false;
+  private expectedClientHandshakeSeq: number = 0;
+  private retransmitTimer: NodeJS.Timeout | null = null;
+  private retransmitAttempts: number = 0;
+  private readonly maxRetransmitAttempts: number = 5;
+  private retransmitTimeoutMs: number = 1000;
 
   constructor(options: DtlsHandshakeOptions) {
     super();
@@ -109,6 +115,40 @@ export class DtlsServerHandshake extends EventEmitter {
     return this.selectedProfile;
   }
 
+  private startRetransmitTimer(): void {
+    this.clearRetransmitTimer();
+    this.retransmitAttempts = 0;
+    this.retransmitTimeoutMs = 1000;
+
+    const schedule = () => {
+      this.retransmitTimer = setTimeout(() => {
+        if (this.state === 'CLOSED' || this.state === 'CONNECTED') {
+          return;
+        }
+        this.retransmitAttempts++;
+        if (this.retransmitAttempts > this.maxRetransmitAttempts) {
+          this.emit('error', new Error('DTLS handshake retransmission limit exceeded'));
+          this.close();
+          return;
+        }
+        if (this.state === 'WAIT_CLIENT_KEY_EXCHANGE' && this.cachedFlight4) {
+          this.dispatch(this.cachedFlight4);
+        }
+        this.retransmitTimeoutMs = Math.min(this.retransmitTimeoutMs * 2, 8000);
+        schedule();
+      }, this.retransmitTimeoutMs);
+    };
+
+    schedule();
+  }
+
+  private clearRetransmitTimer(): void {
+    if (this.retransmitTimer) {
+      clearTimeout(this.retransmitTimer);
+      this.retransmitTimer = null;
+    }
+  }
+
   public handleIncomingDatagram(datagram: Buffer): void {
     if (this.state === 'CLOSED' || datagram.length < 13) {
       return;
@@ -120,7 +160,7 @@ export class DtlsServerHandshake extends EventEmitter {
         if (record.epoch === 0) {
           this.processHandshakeRecord(record.fragment, 0);
         } else if (record.epoch === 1) {
-          if (!this.recordKeys) {
+          if (!this.recordKeys || (this.state !== 'WAIT_FINISHED' && this.state !== 'CONNECTED')) {
             continue;
           }
           try {
@@ -131,9 +171,11 @@ export class DtlsServerHandshake extends EventEmitter {
           }
         }
       } else if (record.contentType === DTLS_CONTENT_TYPE.CHANGE_CIPHER_SPEC) {
-        if (record.fragment.length >= 1 && record.fragment[0] === 0x01) {
-          this.receivedChangeCipherSpec = true;
+        if (record.epoch !== 0 || record.fragment.length !== 1 || record.fragment[0] !== 0x01 || this.state !== 'WAIT_FINISHED') {
+          this.emit('error', new Error('Invalid ChangeCipherSpec record, epoch, or state'));
+          return;
         }
+        this.receivedChangeCipherSpec = true;
       } else if (record.contentType === DTLS_CONTENT_TYPE.ALERT) {
         this.emit('alert', record.fragment);
       }
@@ -144,10 +186,64 @@ export class DtlsServerHandshake extends EventEmitter {
     const messages = parseHandshakeMessages(fragment, this.reassembler);
     for (const msg of messages) {
       if (msg.msgType === DTLS_HANDSHAKE_TYPE.CLIENT_HELLO) {
+        if (epoch !== 0) {
+          this.emit('error', new Error('ClientHello received in invalid epoch'));
+          return;
+        }
+        if (this.state === 'WAIT_CLIENT_KEY_EXCHANGE' && this.cachedFlight4 && msg.messageSeq === 0) {
+          this.dispatch(this.cachedFlight4);
+          this.startRetransmitTimer();
+          return;
+        }
+        if (this.state !== 'INITIAL' && this.state !== 'VERIFY_REQUESTED') {
+          this.emit('error', new Error('Unexpected ClientHello in state ' + this.state));
+          return;
+        }
+        if (msg.messageSeq !== 0) {
+          this.emit('error', new Error('Invalid ClientHello messageSeq: ' + msg.messageSeq));
+          return;
+        }
         this.onClientHello(msg);
       } else if (msg.msgType === DTLS_HANDSHAKE_TYPE.CLIENT_KEY_EXCHANGE) {
+        if (epoch !== 0) {
+          this.emit('error', new Error('ClientKeyExchange received in invalid epoch'));
+          return;
+        }
+        if (this.state === 'WAIT_FINISHED' && msg.messageSeq === 1) {
+          return;
+        }
+        if (this.state !== 'WAIT_CLIENT_KEY_EXCHANGE') {
+          this.emit('error', new Error('Unexpected ClientKeyExchange in state ' + this.state));
+          return;
+        }
+        if (msg.messageSeq !== this.expectedClientHandshakeSeq) {
+          this.emit('error', new Error('Invalid ClientKeyExchange messageSeq: ' + msg.messageSeq + ', expected ' + this.expectedClientHandshakeSeq));
+          return;
+        }
         this.onClientKeyExchange(msg);
       } else if (msg.msgType === DTLS_HANDSHAKE_TYPE.FINISHED) {
+        if (epoch !== 1) {
+          this.emit('error', new Error('Finished received in invalid epoch'));
+          return;
+        }
+        if (this.state === 'CONNECTED' && msg.messageSeq === 2 && this.cachedFlight6) {
+          for (const rec of this.cachedFlight6) {
+            this.dispatch(rec);
+          }
+          return;
+        }
+        if (this.state !== 'WAIT_FINISHED') {
+          this.emit('error', new Error('Unexpected Finished in state ' + this.state));
+          return;
+        }
+        if (!this.receivedChangeCipherSpec) {
+          this.emit('error', new Error('Finished received before ChangeCipherSpec'));
+          return;
+        }
+        if (msg.messageSeq !== this.expectedClientHandshakeSeq) {
+          this.emit('error', new Error('Invalid Finished messageSeq: ' + msg.messageSeq + ', expected ' + this.expectedClientHandshakeSeq));
+          return;
+        }
         this.onClientFinished(msg, epoch);
       }
     }
@@ -258,7 +354,9 @@ export class DtlsServerHandshake extends EventEmitter {
     this.handshakeTranscript.push(flight4.handshakeMessages);
 
     this.dispatch(flight4.record);
+    this.expectedClientHandshakeSeq = 1;
     this.state = 'WAIT_CLIENT_KEY_EXCHANGE';
+    this.startRetransmitTimer();
   }
 
   private onClientKeyExchange(msg: DtlsHandshakeMessage): void {
@@ -286,6 +384,8 @@ export class DtlsServerHandshake extends EventEmitter {
     const rawClientKeyExchangeMsg = wrapHandshakeMessage(msg.msgType, msg.body, msg.messageSeq);
     this.handshakeTranscript.push(rawClientKeyExchangeMsg);
 
+    this.clearRetransmitTimer();
+    this.expectedClientHandshakeSeq = 2;
     this.state = 'WAIT_FINISHED';
   }
 
@@ -347,6 +447,9 @@ export class DtlsServerHandshake extends EventEmitter {
     this.inboundSession = new SrtpSession(inboundContext, false);
     this.outboundSession = new SrtpSession(outboundContext, true);
 
+    this.clearRetransmitTimer();
+    this.cachedFlight6 = [flight6.changeCipherSpecRecord, flight6.finishedRecord];
+    this.expectedClientHandshakeSeq = 3;
     this.state = 'CONNECTED';
 
     const connectedEvent: DtlsConnectedEvent = {
@@ -370,10 +473,12 @@ export class DtlsServerHandshake extends EventEmitter {
   }
 
   public close(): void {
+    this.clearRetransmitTimer();
     this.state = 'CLOSED';
     this.transportSender = null;
     this.ecdh = null;
     this.cachedFlight4 = null;
+    this.cachedFlight6 = null;
     this.recordKeys = null;
     this.masterSecret = null;
     this.handshakeTranscript = [];
