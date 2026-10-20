@@ -150,6 +150,9 @@ export const getUserAiHistory = async (
 
   return {
     history: records,
+    interactions: records,
+    hasMore: hasNextPage,
+    nextCursor,
     pagination: {
       limit,
       hasNextPage,
