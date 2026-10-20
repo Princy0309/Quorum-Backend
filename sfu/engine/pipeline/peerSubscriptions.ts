@@ -1,15 +1,22 @@
 import { Subscriber } from '../subscriber.js';
 
+export interface RemovedSubscriptionEntry {
+  trackId: string;
+  subscriber: Subscriber;
+}
+
 export class PeerSubscriptionRegistry {
   private peerSubscriptions: Map<string, Map<string, Subscriber>> = new Map();
 
-  public addSubscriber(peerId: string, trackId: string, subscriber: Subscriber): void {
+  public addSubscriber(peerId: string, trackId: string, subscriber: Subscriber): Subscriber | undefined {
     let peerSubs = this.peerSubscriptions.get(peerId);
     if (!peerSubs) {
       peerSubs = new Map();
       this.peerSubscriptions.set(peerId, peerSubs);
     }
+    const previous = peerSubs.get(trackId);
     peerSubs.set(trackId, subscriber);
+    return previous;
   }
 
   public removeSubscriber(trackId: string, subscriberId: string, peerId?: string): Subscriber | undefined {
@@ -56,12 +63,15 @@ export class PeerSubscriptionRegistry {
     return removed;
   }
 
-  public removePeer(peerId: string): Subscriber[] {
+  public removePeer(peerId: string): RemovedSubscriptionEntry[] {
     const subs = this.peerSubscriptions.get(peerId);
     if (!subs) {
       return [];
     }
-    const removed = Array.from(subs.values());
+    const removed: RemovedSubscriptionEntry[] = [];
+    for (const [trackId, subscriber] of subs.entries()) {
+      removed.push({ trackId, subscriber });
+    }
     this.peerSubscriptions.delete(peerId);
     return removed;
   }

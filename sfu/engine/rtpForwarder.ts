@@ -77,6 +77,17 @@ export class RtpForwarder {
     }
   }
 
+  public sendRtcpFeedback(packet: Buffer): boolean {
+    if (this.isClosed || packet.length < 8) {
+      return false;
+    }
+    this.publisher.emit('rtcp-feedback', packet, this);
+    if (typeof (this.publisher as any).sendRtcp === 'function') {
+      return (this.publisher as any).sendRtcp(packet);
+    }
+    return true;
+  }
+
   public getStats(): RtpForwarderStats {
     return {
       totalForwarded: this.totalForwarded,

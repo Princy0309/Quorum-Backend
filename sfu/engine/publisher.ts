@@ -3,6 +3,8 @@ import { SrtpSession } from '../protocols/srtp/srtpPacket.js';
 
 export type MediaKind = 'audio' | 'video';
 
+export type PacketTransportSender = (packet: Buffer) => boolean | void;
+
 export interface PublisherOptions {
   id: string;
   peerId: string;
@@ -10,12 +12,15 @@ export interface PublisherOptions {
   ssrc: number;
   payloadType: number;
   srtpSession?: SrtpSession;
+  transportSender?: PacketTransportSender;
 }
 
 export interface PublisherStats {
   packetsReceived: number;
   bytesReceived: number;
   packetsDropped: number;
+  rtcpPacketsReceived: number;
+  rtcpPacketsSent: number;
   lastPacketTimestamp: number;
 }
 
@@ -26,11 +31,14 @@ export class Publisher extends EventEmitter {
   public readonly ssrc: number;
   public readonly payloadType: number;
   private srtpSession: SrtpSession | null = null;
+  private transportSender: PacketTransportSender | null = null;
   private isClosed: boolean = false;
   private stats: PublisherStats = {
     packetsReceived: 0,
     bytesReceived: 0,
     packetsDropped: 0,
+    rtcpPacketsReceived: 0,
+    rtcpPacketsSent: 0,
     lastPacketTimestamp: 0
   };
 
@@ -44,10 +52,17 @@ export class Publisher extends EventEmitter {
     if (options.srtpSession) {
       this.srtpSession = options.srtpSession;
     }
+    if (options.transportSender) {
+      this.transportSender = options.transportSender;
+    }
   }
 
   public setSrtpSession(session: SrtpSession): void {
     this.srtpSession = session;
+  }
+
+  public setTransportSender(sender: PacketTransportSender): void {
+    this.transportSender = sender;
   }
 
   private validateAndIngestRtp(rtpBuffer: Buffer): boolean {
@@ -101,6 +116,60 @@ export class Publisher extends EventEmitter {
     }
   }
 
+  public pushSrtcp(encryptedBuffer: Buffer): boolean {
+    if (this.isClosed || encryptedBuffer.length < 22) {
+      this.stats.packetsDropped++;
+      return false;
+    }
+
+    if (!this.srtpSession) {
+      this.stats.packetsDropped++;
+      return false;
+    }
+
+    try {
+      const plaintextRtcp = this.srtpSession.unprotectRtcp(encryptedBuffer);
+      this.stats.rtcpPacketsReceived++;
+      this.emit('rtcp', plaintextRtcp, this);
+      return true;
+    } catch {
+      this.stats.packetsDropped++;
+      return false;
+    }
+  }
+
+  public sendRtcp(packet: Buffer): boolean {
+    if (this.isClosed || packet.length < 8) {
+      return false;
+    }
+
+    if (!this.srtpSession || !this.transportSender) {
+      return false;
+    }
+
+    let dispatchPacket: Buffer;
+    try {
+      dispatchPacket = this.srtpSession.protectRtcp(packet);
+    } catch (err: any) {
+      this.emit('error', err);
+      return false;
+    }
+
+    try {
+      const result = this.transportSender(dispatchPacket);
+      if (result === false) {
+        return false;
+      }
+    } catch (err: any) {
+      this.emit('error', err);
+      return false;
+    }
+
+    this.stats.rtcpPacketsSent++;
+    this.emit('rtcp-sent', packet);
+    return true;
+  }
+
   public getStats(): PublisherStats {
     return { ...this.stats };
   }
@@ -110,6 +179,8 @@ export class Publisher extends EventEmitter {
       return;
     }
     this.isClosed = true;
+    this.srtpSession = null;
+    this.transportSender = null;
     this.emit('close', this);
     this.removeAllListeners();
   }

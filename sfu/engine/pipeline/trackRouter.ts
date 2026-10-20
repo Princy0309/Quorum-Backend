@@ -29,6 +29,8 @@ export class TrackRouter extends EventEmitter {
   private trackOwners: Map<string, string> = new Map();
   private peerPublishedTracks: Map<string, Set<string>> = new Map();
   private subscriptions: PeerSubscriptionRegistry = new PeerSubscriptionRegistry();
+  private publisherListeners: Map<string, () => void> = new Map();
+  private subscriberListeners: Map<string, () => void> = new Map();
   private isClosed: boolean = false;
 
   constructor(roomCode: string) {
@@ -42,8 +44,12 @@ export class TrackRouter extends EventEmitter {
     }
 
     const effectiveTrackId = trackId || publisher.id;
-    if (this.forwarders.has(effectiveTrackId)) {
-      return this.forwarders.get(effectiveTrackId)!;
+    const existingPublisher = this.publishers.get(effectiveTrackId);
+    if (existingPublisher) {
+      if (existingPublisher === publisher || (existingPublisher.id === publisher.id && existingPublisher.peerId === publisher.peerId)) {
+        return this.forwarders.get(effectiveTrackId)!;
+      }
+      throw new Error(`Track ${effectiveTrackId} already registered by peer ${existingPublisher.peerId}`);
     }
 
     const forwarder = new RtpForwarder(publisher);
@@ -59,9 +65,13 @@ export class TrackRouter extends EventEmitter {
     peerTracks.add(effectiveTrackId);
 
     const onPublisherClose = () => {
-      this.removePublisher(effectiveTrackId);
+      const currentPub = this.publishers.get(effectiveTrackId);
+      if (currentPub === publisher) {
+        this.removePublisher(effectiveTrackId, publisher);
+      }
     };
     publisher.once('close', onPublisherClose);
+    this.publisherListeners.set(effectiveTrackId, onPublisherClose);
 
     const event: TrackPublishedEvent = {
       roomCode: this.roomCode,
@@ -76,13 +86,27 @@ export class TrackRouter extends EventEmitter {
     return forwarder;
   }
 
-  public removePublisher(trackId: string): boolean {
+  public removePublisher(trackId: string, expectedPublisher?: Publisher): boolean {
     const forwarder = this.forwarders.get(trackId);
     if (!forwarder) {
       return false;
     }
 
     const publisher = this.publishers.get(trackId);
+    if (!publisher) {
+      return false;
+    }
+
+    if (expectedPublisher && publisher !== expectedPublisher) {
+      return false;
+    }
+
+    const closeListener = this.publisherListeners.get(trackId);
+    if (closeListener) {
+      publisher.removeListener('close', closeListener);
+      this.publisherListeners.delete(trackId);
+    }
+
     const peerId = this.trackOwners.get(trackId);
 
     forwarder.close();
@@ -102,6 +126,12 @@ export class TrackRouter extends EventEmitter {
 
     const removedSubs = this.subscriptions.removeTrackSubscriptions(trackId);
     for (const sub of removedSubs) {
+      const subKey = `${trackId}:${sub.id}`;
+      const subListener = this.subscriberListeners.get(subKey);
+      if (subListener) {
+        sub.removeListener('close', subListener);
+        this.subscriberListeners.delete(subKey);
+      }
       sub.close();
     }
 
@@ -126,13 +156,30 @@ export class TrackRouter extends EventEmitter {
       return false;
     }
 
+    const existingSub = this.subscriptions.getSubscriber(subscriber.peerId, trackId);
+    if (existingSub) {
+      if (existingSub.id === subscriber.id) {
+        return true;
+      }
+      const existingKey = `${trackId}:${existingSub.id}`;
+      const existingListener = this.subscriberListeners.get(existingKey);
+      if (existingListener) {
+        existingSub.removeListener('close', existingListener);
+        this.subscriberListeners.delete(existingKey);
+      }
+      forwarder.removeSubscriber(existingSub.id);
+      existingSub.close();
+    }
+
     forwarder.addSubscriber(subscriber);
     this.subscriptions.addSubscriber(subscriber.peerId, trackId, subscriber);
 
+    const subKey = `${trackId}:${subscriber.id}`;
     const onSubscriberClose = () => {
       this.removeSubscription(trackId, subscriber.id, subscriber.peerId);
     };
     subscriber.once('close', onSubscriberClose);
+    this.subscriberListeners.set(subKey, onSubscriberClose);
 
     const event: SubscriptionEvent = {
       roomCode: this.roomCode,
@@ -146,15 +193,24 @@ export class TrackRouter extends EventEmitter {
   }
 
   public removeSubscription(trackId: string, subscriberId: string, peerId?: string): boolean {
+    const sub = this.subscriptions.removeSubscriber(trackId, subscriberId, peerId);
+    if (!sub) {
+      return false;
+    }
+
+    const subKey = `${trackId}:${subscriberId}`;
+    const closeListener = this.subscriberListeners.get(subKey);
+    if (closeListener) {
+      sub.removeListener('close', closeListener);
+      this.subscriberListeners.delete(subKey);
+    }
+
     const forwarder = this.forwarders.get(trackId);
     if (forwarder) {
       forwarder.removeSubscriber(subscriberId);
     }
 
-    const sub = this.subscriptions.removeSubscriber(trackId, subscriberId, peerId);
-    if (sub) {
-      sub.close();
-    }
+    sub.close();
 
     const event: UnsubscriptionEvent = {
       roomCode: this.roomCode,
@@ -225,18 +281,32 @@ export class TrackRouter extends EventEmitter {
     }
 
     const removedSubs = this.subscriptions.removePeer(peerId);
-    for (const sub of removedSubs) {
-      const forwarder = this.forwarders.get(sub.id);
-      if (forwarder) {
-        forwarder.removeSubscriber(sub.id);
+    for (const { trackId, subscriber } of removedSubs) {
+      const subKey = `${trackId}:${subscriber.id}`;
+      const closeListener = this.subscriberListeners.get(subKey);
+      if (closeListener) {
+        subscriber.removeListener('close', closeListener);
+        this.subscriberListeners.delete(subKey);
       }
-      sub.close();
+      const forwarder = this.forwarders.get(trackId);
+      if (forwarder) {
+        forwarder.removeSubscriber(subscriber.id);
+      }
+      subscriber.close();
     }
 
     this.emit('peer-removed', {
       roomCode: this.roomCode,
       peerId
     });
+  }
+
+  public sendRtcpFeedback(trackId: string, packet: Buffer): boolean {
+    const forwarder = this.forwarders.get(trackId);
+    if (!forwarder) {
+      return false;
+    }
+    return forwarder.sendRtcpFeedback(packet);
   }
 
   public getStats(): TrackRouterStats {
@@ -269,10 +339,19 @@ export class TrackRouter extends EventEmitter {
     }
     this.forwarders.clear();
 
-    for (const publisher of this.publishers.values()) {
+    for (const [trackId, publisher] of this.publishers.entries()) {
+      const closeListener = this.publisherListeners.get(trackId);
+      if (closeListener) {
+        publisher.removeListener('close', closeListener);
+      }
       publisher.close();
     }
+    this.publisherListeners.clear();
     this.publishers.clear();
+
+    for (const [subKey, closeListener] of this.subscriberListeners.entries()) {
+      this.subscriberListeners.delete(subKey);
+    }
 
     this.subscriptions.clear();
     this.trackOwners.clear();
