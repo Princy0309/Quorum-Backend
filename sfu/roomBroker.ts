@@ -106,12 +106,17 @@ export class RoomBroker extends EventEmitter {
       kind: track.kind as 'audio' | 'video',
       ssrc: publishedTrack.ssrc || 0,
       payloadType: (track as any).payloadType || (track.kind === 'video' ? 96 : 111),
-      srtpSession: peer.inboundSrtpSession || (peer as any).srtpSession || (peer.peerConnection as any)?.srtpSession
+      srtpSession: peer.inboundSrtpSession
     });
 
     publisher.setTransportSender((packet: Buffer) => {
       try {
         const pc = peer.peerConnection as any;
+        const iceConn = pc?.iceTransports?.[0]?.connection;
+        if (iceConn && typeof iceConn.send === 'function') {
+          iceConn.send(packet).catch(() => {});
+          return true;
+        }
         if (pc && typeof pc.sendRtcp === 'function') {
           pc.sendRtcp(packet);
           return true;
@@ -127,6 +132,20 @@ export class RoomBroker extends EventEmitter {
     });
 
     router.addPublisher(publisher, trackId);
+
+    const iceConn = (peer.peerConnection as any)?.iceTransports?.[0]?.connection;
+    if (iceConn && typeof iceConn.onData?.subscribe === 'function') {
+      iceConn.onData.subscribe((data: Buffer) => {
+        if (data.length >= 12 && data[0] >= 128 && data[0] <= 191) {
+          const pt = data[1] & 0x7f;
+          if (pt >= 200 && pt <= 207) {
+            publisher.pushSrtcp(data);
+          } else {
+            publisher.pushSrtp(data);
+          }
+        }
+      });
+    }
 
     track.onReceiveRtp.subscribe((packet: RtpPacket) => {
       if (!publishedTrack.ssrc && packet.header?.ssrc) {
@@ -194,28 +213,35 @@ export class RoomBroker extends EventEmitter {
       peerId: subscriberPeerId,
       kind,
       trackId,
-      srtpSession: peer.outboundSrtpSession || (peer as any).srtpSession || (peer.peerConnection as any)?.srtpSession,
+      requireSrtp: true,
+      srtpSession: peer.outboundSrtpSession,
       transportSender: (buf: Buffer) => {
         try {
+          const pc = (sender as any).peerConnection || (peer?.peerConnection as any);
+          const iceConn = pc?.iceTransports?.[0]?.connection;
+          if (iceConn && typeof iceConn.send === 'function') {
+            iceConn.send(buf).catch(() => {});
+            return true;
+          }
           const rtpPkt = RtpPacket.deSerialize(buf);
           sender.sendRtp(rtpPkt);
           return true;
         } catch {
-          try {
-            (sender as any).sendRtp(buf);
-            return true;
-          } catch {
-            return false;
-          }
+          return false;
         }
       },
       rtcpTransportSender: (buf: Buffer) => {
         try {
+          const pc = (sender as any).peerConnection || (peer?.peerConnection as any);
+          const iceConn = pc?.iceTransports?.[0]?.connection;
+          if (iceConn && typeof iceConn.send === 'function') {
+            iceConn.send(buf).catch(() => {});
+            return true;
+          }
           if (typeof (sender as any).sendRtcp === 'function') {
             (sender as any).sendRtcp(buf);
             return true;
           }
-          const pc = (sender as any).peerConnection || (peer?.peerConnection as any);
           if (pc && typeof pc.sendRtcp === 'function') {
             pc.sendRtcp(buf);
             return true;

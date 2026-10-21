@@ -2,6 +2,8 @@ import { Server, Socket } from 'socket.io';
 import { RTCSessionDescription, RTCPeerConnection } from 'werift';
 import { roomBroker } from '../sfu/roomBroker.js';
 import { createPeerConnection } from '../sfu/peerConnection.js';
+import { SrtpContext } from '../sfu/protocols/srtp/srtpContext.js';
+import { SrtpSession } from '../sfu/protocols/srtp/srtpPacket.js';
 import logger from '../utils/logger.js';
 
 interface JoinPayload {
@@ -104,6 +106,35 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
 
       const pc = createPeerConnection();
       peer.peerConnection = pc;
+
+      for (const dtlsTransport of (pc as any).dtlsTransports || []) {
+        const onPublisherDtlsConnected = () => {
+          try {
+            const dtls = (dtlsTransport as any).dtls;
+            if (dtls && typeof dtls.extractSessionKeys === 'function') {
+              const { localKey, localSalt, remoteKey, remoteSalt } = dtls.extractSessionKeys(16, 14);
+              const inboundContext = new SrtpContext(remoteKey, remoteSalt);
+              const outboundContext = new SrtpContext(localKey, localSalt);
+              const inboundSession = new SrtpSession(inboundContext, false);
+              const outboundSession = new SrtpSession(outboundContext, true);
+              roomBroker.attachPeerSrtpSessions(roomCode, peerId, inboundSession, outboundSession);
+              logger.info(`[Signaling] Publisher DTLS connected and SRTP sessions attached for peer ${peerId}`);
+            }
+          } catch (err) {
+            logger.error(`[Signaling] Failed to extract publisher SRTP session keys:`, err);
+          }
+        };
+
+        if (dtlsTransport.state === 'connected') {
+          onPublisherDtlsConnected();
+        } else {
+          dtlsTransport.onStateChange.subscribe((state: string) => {
+            if (state === 'connected') {
+              onPublisherDtlsConnected();
+            }
+          });
+        }
+      }
 
       pc.onTrack.subscribe((track) => {
         const publishedTrack = roomBroker.publishTrack(roomCode, peerId, track);
@@ -291,7 +322,38 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         const answer = await consumerPc.createAnswer();
         await consumerPc.setLocalDescription(answer);
 
-        roomBroker.markSubscriberReady(roomCode, subscriberPeerId, trackId);
+        for (const dtlsTransport of (consumerPc as any).dtlsTransports || []) {
+          const onSubscriberDtlsConnected = () => {
+            try {
+              const dtls = (dtlsTransport as any).dtls;
+              if (dtls && typeof dtls.extractSessionKeys === 'function') {
+                const { localKey, localSalt, remoteKey, remoteSalt } = dtls.extractSessionKeys(16, 14);
+                const inboundContext = new SrtpContext(remoteKey, remoteSalt);
+                const outboundContext = new SrtpContext(localKey, localSalt);
+                const inboundSession = new SrtpSession(inboundContext, false);
+                const outboundSession = new SrtpSession(outboundContext, true);
+                roomBroker.attachPeerSrtpSessions(roomCode, subscriberPeerId, inboundSession, outboundSession);
+                roomBroker.markSubscriberReady(roomCode, subscriberPeerId, trackId);
+                if (publishedTrack.kind === 'video') {
+                  roomBroker.requestKeyframe(roomCode, publishedTrack.peerId, trackId);
+                }
+                logger.info(`[Signaling] Subscriber DTLS connected and SRTP sessions attached for peer ${subscriberPeerId} on track ${trackId}`);
+              }
+            } catch (err) {
+              logger.error(`[Signaling] Failed to extract subscriber SRTP session keys:`, err);
+            }
+          };
+
+          if (dtlsTransport.state === 'connected') {
+            onSubscriberDtlsConnected();
+          } else {
+            dtlsTransport.onStateChange.subscribe((state: string) => {
+              if (state === 'connected') {
+                onSubscriberDtlsConnected();
+              }
+            });
+          }
+        }
 
         socket.emit('sfu:subscribed', {
           trackId,
@@ -300,16 +362,6 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
             sdp: answer.sdp,
           },
         });
-
-        if (publishedTrack.kind === 'video') {
-          roomBroker.requestKeyframe(roomCode, publishedTrack.peerId, trackId);
-          setTimeout(() => {
-            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId, trackId);
-          }, 500);
-          setTimeout(() => {
-            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId, trackId);
-          }, 1200);
-        }
 
         logger.info(
           `[Signaling] Peer ${subscriberPeerId} subscribed to track ${trackId}`
