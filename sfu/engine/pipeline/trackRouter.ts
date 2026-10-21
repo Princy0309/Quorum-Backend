@@ -50,7 +50,7 @@ export class TrackRouter extends EventEmitter {
     const effectiveTrackId = trackId || publisher.id;
     const existingPublisher = this.publishers.get(effectiveTrackId);
     if (existingPublisher) {
-      if (existingPublisher === publisher || (existingPublisher.id === publisher.id && existingPublisher.peerId === publisher.peerId)) {
+      if (existingPublisher === publisher) {
         return this.forwarders.get(effectiveTrackId)!;
       }
       throw new Error(`Track ${effectiveTrackId} already registered by peer ${existingPublisher.peerId}`);

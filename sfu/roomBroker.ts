@@ -90,14 +90,26 @@ export class RoomBroker extends EventEmitter {
 
     const trackId = track.id || track.uuid;
 
+    const existingPublishedTrack = peer.publishedTracks.get(trackId);
+    if (existingPublishedTrack) {
+      logger.info(
+        `[SFU Broker] Track ${trackId} already published by peer ${peerId} in room ${roomCode}`
+      );
+      return existingPublishedTrack;
+    }
+
+    const router = this.getOrCreateRouter(roomCode);
+    const existingPublisher = router.getPublisher(trackId);
+    if (existingPublisher) {
+      throw new Error(`Track ${trackId} already registered by peer ${existingPublisher.peerId} in room ${roomCode}`);
+    }
+
     const publishedTrack: PublishedTrack = {
       trackId,
       kind: track.kind as 'audio' | 'video',
       peerId,
       mediaStreamTrack: track,
     };
-
-    const router = this.getOrCreateRouter(roomCode);
     const publisher = new Publisher({
       id: trackId,
       peerId,
