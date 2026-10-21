@@ -47,17 +47,15 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
 
   const findSubscriberPc = (rCode?: string, pId?: string, tId?: string): RTCPeerConnection | undefined => {
     if (!tId) return undefined;
-    if (rCode && pId) {
-      const pc = subscriberPeerConnections.get(`${rCode}:${pId}:${tId}`);
+    const targetRoom = rCode || currentRoom;
+    const targetPeer = pId || currentPeerId;
+    if (targetRoom && targetPeer) {
+      const pc = subscriberPeerConnections.get(`${targetRoom}:${targetPeer}:${tId}`);
       if (pc) return pc;
     }
-    if (rCode && currentPeerId) {
-      const pc = subscriberPeerConnections.get(`${rCode}:${currentPeerId}:${tId}`);
-      if (pc) return pc;
-    }
-    for (const [key, pc] of subscriberPeerConnections.entries()) {
-      if (key.endsWith(`:${tId}`)) {
-        if (!rCode || key.startsWith(`${rCode}:`)) {
+    if (targetRoom) {
+      for (const [key, pc] of subscriberPeerConnections.entries()) {
+        if (key.startsWith(`${targetRoom}:`) && key.endsWith(`:${tId}`)) {
           return pc;
         }
       }
@@ -65,12 +63,68 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     return undefined;
   };
 
+  const handleLeave = () => {
+    const activeRoom = currentRoom;
+    const activePeerId = currentPeerId;
+    if (activeRoom && activePeerId) {
+      const room = roomBroker.getOrCreateRoom(activeRoom);
+      const peer = room.peers.get(activePeerId);
+      const publishedTrackIds = peer ? Array.from(peer.publishedTracks.keys()) : [];
+
+      if (peer?.peerConnection) {
+        try {
+          (peer.peerConnection as any).close();
+        } catch {}
+        peer.peerConnection = undefined;
+      }
+
+      for (const [key, pc] of subscriberPeerConnections.entries()) {
+        const isSubscriberForPeer = key.startsWith(`${activeRoom}:${activePeerId}:`);
+        const isTrackPublishedByPeer = publishedTrackIds.some((tId) => key.startsWith(`${activeRoom}:`) && key.endsWith(`:${tId}`));
+        if (isSubscriberForPeer || isTrackPublishedByPeer) {
+          try {
+            pc.close();
+          } catch {}
+          subscriberPeerConnections.delete(key);
+        }
+      }
+
+      for (const tId of publishedTrackIds) {
+        socket.to(activeRoom).emit('sfu:track-unpublished', {
+          peerId: activePeerId,
+          trackId: tId,
+        });
+      }
+
+      roomBroker.removePeer(activeRoom, activePeerId);
+      socket.to(activeRoom).emit('sfu:peer-left', { peerId: activePeerId });
+      socket.leave(activeRoom);
+      logger.info(`[Signaling] Peer ${activePeerId} left room ${activeRoom}`);
+      currentRoom = null;
+      currentPeerId = null;
+    }
+  };
+
   socket.on('sfu:join', ({ roomCode, peerId, name }: JoinPayload) => {
+    if (!roomCode) {
+      socket.emit('sfu:error', { message: 'roomCode is required' });
+      return;
+    }
+
+    const effectivePeerId = socket.data.user?.isAuthenticated
+      ? socket.data.user.id
+      : (peerId || socket.id);
+    const effectiveName = name || socket.data.user?.name || 'Participant';
+
+    if (currentRoom && (currentRoom !== roomCode || currentPeerId !== effectivePeerId)) {
+      handleLeave();
+    }
+
     currentRoom = roomCode;
-    currentPeerId = peerId;
+    currentPeerId = effectivePeerId;
 
     socket.join(roomCode);
-    roomBroker.addPeer(roomCode, peerId, socket.id, name);
+    roomBroker.addPeer(roomCode, effectivePeerId, socket.id, effectiveName);
 
     const existingTracks = roomBroker.getRoomTracks(roomCode).map((t) => ({
       trackId: t.trackId,
@@ -78,11 +132,11 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       peerId: t.peerId,
     }));
 
-    socket.emit('sfu:joined', { existingTracks });
-    socket.to(roomCode).emit('sfu:peer-joined', { peerId, name });
+    socket.emit('sfu:joined', { existingTracks, peerId: effectivePeerId });
+    socket.to(roomCode).emit('sfu:peer-joined', { peerId: effectivePeerId, name: effectiveName });
 
     for (const t of existingTracks) {
-      if (t.peerId !== peerId) {
+      if (t.peerId !== effectivePeerId) {
         socket.emit('sfu:new-producer', {
           peerId: t.peerId,
           trackId: t.trackId,
@@ -91,17 +145,51 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       }
     }
 
-    logger.info(`[Signaling] Peer ${peerId} joined SFU room ${roomCode}`);
+    logger.info(`[Signaling] Peer ${effectivePeerId} joined SFU room ${roomCode}`);
   });
 
   socket.on('sfu:offer', async ({ roomCode, peerId, sdp }: OfferPayload) => {
     try {
-      const room = roomBroker.getOrCreateRoom(roomCode);
-      const peer = room.peers.get(peerId);
+      const activeRoom = currentRoom;
+      const activePeerId = currentPeerId;
+      const rCode = roomCode || activeRoom;
+      const pId = peerId || activePeerId;
+      if (!activeRoom || rCode !== activeRoom || !activePeerId || pId !== activePeerId) {
+        logger.warn(`[Signaling] Unauthorized sfu:offer from socket ${socket.id} for room ${rCode} peer ${pId}`);
+        socket.emit('sfu:error', { message: 'Unauthorized room or peer for offer' });
+        return;
+      }
+
+      const room = roomBroker.getOrCreateRoom(activeRoom);
+      const peer = room.peers.get(activePeerId);
 
       if (!peer) {
-        logger.error(`[Signaling] Peer ${peerId} not found in room ${roomCode}`);
+        logger.error(`[Signaling] Peer ${activePeerId} not found in room ${activeRoom}`);
         return;
+      }
+
+      if (peer.peerConnection) {
+        try {
+          const oldTrackIds = Array.from(peer.publishedTracks.keys());
+          for (const oldTrackId of oldTrackIds) {
+            for (const [key, subPc] of subscriberPeerConnections.entries()) {
+              if (key.startsWith(`${activeRoom}:`) && key.endsWith(`:${oldTrackId}`)) {
+                try {
+                  subPc.close();
+                } catch {}
+                subscriberPeerConnections.delete(key);
+              }
+            }
+            roomBroker.unpublishTrack(activeRoom, activePeerId, oldTrackId);
+            socket.to(activeRoom).emit('sfu:track-unpublished', { peerId: activePeerId, trackId: oldTrackId });
+          }
+          (peer.peerConnection as any).close();
+        } catch (err) {
+          logger.warn(`[Signaling] Error cleaning up previous publisher peerConnection for ${activePeerId}:`, err);
+        }
+        peer.peerConnection = undefined;
+        peer.inboundSrtpSession = undefined;
+        peer.outboundSrtpSession = undefined;
       }
 
       const pc = createPeerConnection();
@@ -117,8 +205,8 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
               const outboundContext = new SrtpContext(localKey, localSalt);
               const inboundSession = new SrtpSession(inboundContext, false);
               const outboundSession = new SrtpSession(outboundContext, true);
-              roomBroker.attachPublisherSrtpSessions(roomCode, peerId, inboundSession, outboundSession);
-              logger.info(`[Signaling] Publisher DTLS connected and SRTP sessions attached for peer ${peerId}`);
+              roomBroker.attachPublisherSrtpSessions(activeRoom, activePeerId, inboundSession, outboundSession);
+              logger.info(`[Signaling] Publisher DTLS connected and SRTP sessions attached for peer ${activePeerId}`);
             }
           } catch (err) {
             logger.error(`[Signaling] Failed to extract publisher SRTP session keys:`, err);
@@ -137,10 +225,10 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       }
 
       pc.onTrack.subscribe((track) => {
-        const publishedTrack = roomBroker.publishTrack(roomCode, peerId, track);
+        const publishedTrack = roomBroker.publishTrack(activeRoom, activePeerId, track);
 
-        socket.to(roomCode).emit('sfu:new-producer', {
-          peerId,
+        socket.to(activeRoom).emit('sfu:new-producer', {
+          peerId: activePeerId,
           trackId: publishedTrack.trackId,
           kind: publishedTrack.kind,
         });
@@ -149,8 +237,8 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       pc.onIceCandidate.subscribe((candidate) => {
         if (candidate) {
           socket.emit('sfu:ice-candidate', {
-            roomCode,
-            peerId,
+            roomCode: activeRoom,
+            peerId: activePeerId,
             target: 'publisher',
             candidate: candidate.toJSON ? candidate.toJSON() : candidate,
           });
@@ -168,9 +256,9 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         },
       });
 
-      logger.info(`[Signaling] Negotiated publishing offer/answer for peer ${peerId}`);
+      logger.info(`[Signaling] Negotiated publishing offer/answer for peer ${activePeerId}`);
     } catch (err) {
-      logger.error(`[Signaling] Error handling offer from peer ${peerId}:`, err);
+      logger.error(`[Signaling] Error handling offer from peer ${currentPeerId}:`, err);
       socket.emit('sfu:error', { message: 'Failed to process SDP offer' });
     }
   });
@@ -178,11 +266,16 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
   socket.on('sfu:ice-candidate', async ({ roomCode, peerId, candidate, target, trackId }: CandidatePayload) => {
     try {
       if (!candidate) return;
-      const rCode = roomCode || currentRoom;
-      const pId = peerId || currentPeerId;
+      const activeRoom = currentRoom;
+      const activePeerId = currentPeerId;
+      const rCode = roomCode || activeRoom;
+      const pId = peerId || activePeerId;
+      if (!activeRoom || rCode !== activeRoom || !activePeerId || pId !== activePeerId) {
+        return;
+      }
 
       if (target === 'subscriber' || trackId) {
-        const consumerPc = findSubscriberPc(rCode || undefined, pId || undefined, trackId);
+        const consumerPc = findSubscriberPc(activeRoom, activePeerId, trackId);
         if (consumerPc) {
           await consumerPc.addIceCandidate(candidate);
           logger.debug(`[Signaling] Added subscriber ICE candidate for track ${trackId}`);
@@ -191,22 +284,18 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       }
 
       if (target === 'publisher' || !target) {
-        if (rCode && pId) {
-          const room = roomBroker.getOrCreateRoom(rCode);
-          const peer = room.peers.get(pId);
-          if (peer?.peerConnection) {
-            await peer.peerConnection.addIceCandidate(candidate);
-            logger.debug(`[Signaling] Added publisher ICE candidate for peer ${pId}`);
-            return;
-          }
+        const room = roomBroker.getOrCreateRoom(activeRoom);
+        const peer = room.peers.get(activePeerId);
+        if (peer?.peerConnection) {
+          await peer.peerConnection.addIceCandidate(candidate);
+          logger.debug(`[Signaling] Added publisher ICE candidate for peer ${activePeerId}`);
+          return;
         }
       }
 
-      if (rCode && pId) {
-        for (const [key, pc] of subscriberPeerConnections.entries()) {
-          if (key.startsWith(`${rCode}:${pId}:`)) {
-            pc.addIceCandidate(candidate).catch(() => {});
-          }
+      for (const [key, pc] of subscriberPeerConnections.entries()) {
+        if (key.startsWith(`${activeRoom}:${activePeerId}:`)) {
+          pc.addIceCandidate(candidate).catch(() => {});
         }
       }
     } catch (err) {
@@ -217,9 +306,14 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
   socket.on('sfu:subscribe-ice-candidate', async ({ roomCode, peerId, trackId, candidate }: any) => {
     try {
       if (!candidate || !trackId) return;
-      const rCode = roomCode || currentRoom;
-      const pId = peerId || currentPeerId;
-      const consumerPc = findSubscriberPc(rCode || undefined, pId || undefined, trackId);
+      const activeRoom = currentRoom;
+      const activePeerId = currentPeerId;
+      const rCode = roomCode || activeRoom;
+      const pId = peerId || activePeerId;
+      if (!activeRoom || rCode !== activeRoom || !activePeerId || pId !== activePeerId) {
+        return;
+      }
+      const consumerPc = findSubscriberPc(activeRoom, activePeerId, trackId);
       if (consumerPc) {
         await consumerPc.addIceCandidate(candidate);
         logger.debug(`[Signaling] Added subscriber ICE candidate via sfu:subscribe-ice-candidate for track ${trackId}`);
@@ -230,33 +324,46 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
   });
 
   socket.on('sfu:request-keyframe', ({ roomCode, publisherPeerId, trackId }: { roomCode: string; publisherPeerId: string; trackId?: string }) => {
-    const rCode = roomCode || currentRoom;
-    if (rCode && publisherPeerId) {
-      logger.info(`[Signaling] Manual keyframe requested for publisher ${publisherPeerId} in room ${rCode}`);
-      roomBroker.requestKeyframe(rCode, publisherPeerId, trackId);
+    const activeRoom = currentRoom;
+    const activePeerId = currentPeerId;
+    const rCode = roomCode || activeRoom;
+    if (!activeRoom || rCode !== activeRoom || !activePeerId || !publisherPeerId) {
+      return;
     }
+    logger.info(`[Signaling] Manual keyframe requested by ${activePeerId} for publisher ${publisherPeerId} in room ${activeRoom}`);
+    roomBroker.requestKeyframe(activeRoom, publisherPeerId, trackId);
   });
 
   socket.on(
     'sfu:subscribe',
     async ({ roomCode, subscriberPeerId, trackId, sdp }: SubscribePayload) => {
-      const subKey = `${roomCode}:${subscriberPeerId}:${trackId}`;
+      const activeRoom = currentRoom;
+      const activePeerId = currentPeerId;
+      const rCode = roomCode || activeRoom;
+      const subPeerId = subscriberPeerId || activePeerId;
+      if (!activeRoom || rCode !== activeRoom || !activePeerId || subPeerId !== activePeerId) {
+        logger.warn(`[Signaling] Unauthorized sfu:subscribe from socket ${socket.id} for room ${rCode} peer ${subPeerId}`);
+        socket.emit('sfu:error', { message: 'Unauthorized room or peer for subscription' });
+        return;
+      }
+
+      const subKey = `${activeRoom}:${activePeerId}:${trackId}`;
       let consumerPc: RTCPeerConnection | null = null;
       try {
-        const room = roomBroker.getOrCreateRoom(roomCode);
-        const peer = room.peers.get(subscriberPeerId);
+        const room = roomBroker.getOrCreateRoom(activeRoom);
+        const peer = room.peers.get(activePeerId);
 
         if (!peer) {
-          logger.error(`[Signaling] Subscriber peer ${subscriberPeerId} not found`);
+          logger.error(`[Signaling] Subscriber peer ${activePeerId} not found`);
           return;
         }
 
         const publishedTrack = roomBroker
-          .getRoomTracks(roomCode)
+          .getRoomTracks(activeRoom)
           .find((t) => t.trackId === trackId);
 
         if (!publishedTrack) {
-          logger.error(`[Signaling] Track ${trackId} not found in room ${roomCode}`);
+          logger.error(`[Signaling] Track ${trackId} not found in room ${activeRoom}`);
           return;
         }
 
@@ -274,8 +381,8 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         consumerPc.onIceCandidate.subscribe((candidate) => {
           if (candidate) {
             socket.emit('sfu:ice-candidate', {
-              roomCode,
-              peerId: subscriberPeerId,
+              roomCode: activeRoom,
+              peerId: activePeerId,
               target: 'subscriber',
               trackId,
               candidate: candidate.toJSON ? candidate.toJSON() : candidate,
@@ -294,25 +401,25 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         if (publishedTrack.kind === 'video') {
           transceiver.sender.onPictureLossIndication.subscribe(() => {
             logger.info(`[Signaling] PLI received: requesting keyframe from publisher ${publishedTrack.peerId}`);
-            roomBroker.requestKeyframe(roomCode, publishedTrack.peerId, trackId);
+            roomBroker.requestKeyframe(activeRoom, publishedTrack.peerId, trackId);
           });
         }
 
         const subscribed = roomBroker.subscribeToTrack(
-          roomCode,
-          subscriberPeerId,
+          activeRoom,
+          activePeerId,
           trackId,
           transceiver.sender,
           consumerPc
         );
 
         if (!subscribed) {
-          logger.error(`[Signaling] Failed to subscribe peer ${subscriberPeerId} to track ${trackId}`);
+          logger.error(`[Signaling] Failed to subscribe peer ${activePeerId} to track ${trackId}`);
           try {
             consumerPc.close();
           } catch {}
           subscriberPeerConnections.delete(subKey);
-          roomBroker.unsubscribeFromTrack(roomCode, subscriberPeerId, trackId);
+          roomBroker.unsubscribeFromTrack(activeRoom, activePeerId, trackId);
           socket.emit('sfu:error', { message: 'Failed to subscribe to track' });
           return;
         }
@@ -331,12 +438,12 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
                 const { localKey, localSalt } = dtls.extractSessionKeys(16, 14);
                 const outboundContext = new SrtpContext(localKey, localSalt);
                 const outboundSession = new SrtpSession(outboundContext, true);
-                roomBroker.attachSubscriberSrtpSession(roomCode, subscriberPeerId, trackId, outboundSession);
-                roomBroker.markSubscriberReady(roomCode, subscriberPeerId, trackId);
+                roomBroker.attachSubscriberSrtpSession(activeRoom, activePeerId, trackId, outboundSession);
+                roomBroker.markSubscriberReady(activeRoom, activePeerId, trackId);
                 if (publishedTrack.kind === 'video') {
-                  roomBroker.requestKeyframe(roomCode, publishedTrack.peerId, trackId);
+                  roomBroker.requestKeyframe(activeRoom, publishedTrack.peerId, trackId);
                 }
-                logger.info(`[Signaling] Subscriber DTLS connected and track-specific SRTP session attached for peer ${subscriberPeerId} on track ${trackId}`);
+                logger.info(`[Signaling] Subscriber DTLS connected and track-specific SRTP session attached for peer ${activePeerId} on track ${trackId}`);
               }
             } catch (err) {
               logger.error(`[Signaling] Failed to extract subscriber SRTP session keys:`, err);
@@ -363,7 +470,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         });
 
         logger.info(
-          `[Signaling] Peer ${subscriberPeerId} subscribed to track ${trackId}`
+          `[Signaling] Peer ${activePeerId} subscribed to track ${trackId}`
         );
 
       } catch (err) {
@@ -374,17 +481,21 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           } catch {}
         }
         subscriberPeerConnections.delete(subKey);
-        roomBroker.unsubscribeFromTrack(roomCode, subscriberPeerId, trackId);
+        roomBroker.unsubscribeFromTrack(activeRoom, activePeerId, trackId);
         socket.emit('sfu:error', { message: 'Failed to subscribe to track' });
       }
     }
   );
 
   socket.on('sfu:unsubscribe', ({ roomCode, subscriberPeerId, trackId }: { roomCode: string; subscriberPeerId: string; trackId: string }) => {
-    const rCode = roomCode || currentRoom;
-    const pId = subscriberPeerId || currentPeerId;
-    if (!rCode || !pId || !trackId) return;
-    const subKey = `${rCode}:${pId}:${trackId}`;
+    const activeRoom = currentRoom;
+    const activePeerId = currentPeerId;
+    const rCode = roomCode || activeRoom;
+    const subPeerId = subscriberPeerId || activePeerId;
+    if (!activeRoom || rCode !== activeRoom || !activePeerId || subPeerId !== activePeerId || !trackId) {
+      return;
+    }
+    const subKey = `${activeRoom}:${activePeerId}:${trackId}`;
     const pc = subscriberPeerConnections.get(subKey);
     if (pc) {
       try {
@@ -392,17 +503,21 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       } catch {}
       subscriberPeerConnections.delete(subKey);
     }
-    roomBroker.unsubscribeFromTrack(rCode, pId, trackId);
-    logger.info(`[Signaling] Peer ${pId} unsubscribed from track ${trackId}`);
+    roomBroker.unsubscribeFromTrack(activeRoom, activePeerId, trackId);
+    logger.info(`[Signaling] Peer ${activePeerId} unsubscribed from track ${trackId}`);
   });
 
   socket.on('sfu:unpublish', ({ roomCode, peerId, trackId }: { roomCode: string; peerId: string; trackId: string }) => {
-    const rCode = roomCode || currentRoom;
-    const pId = peerId || currentPeerId;
-    if (!rCode || !pId || !trackId) return;
+    const activeRoom = currentRoom;
+    const activePeerId = currentPeerId;
+    const rCode = roomCode || activeRoom;
+    const pId = peerId || activePeerId;
+    if (!activeRoom || rCode !== activeRoom || !activePeerId || pId !== activePeerId || !trackId) {
+      return;
+    }
 
     for (const [key, pc] of subscriberPeerConnections.entries()) {
-      if (key.endsWith(`:${trackId}`)) {
+      if (key.startsWith(`${activeRoom}:`) && key.endsWith(`:${trackId}`)) {
         try {
           pc.close();
         } catch {}
@@ -410,44 +525,12 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       }
     }
 
-    const unpublished = roomBroker.unpublishTrack(rCode, pId, trackId);
+    const unpublished = roomBroker.unpublishTrack(activeRoom, activePeerId, trackId);
     if (unpublished) {
-      socket.to(rCode).emit('sfu:track-unpublished', { peerId: pId, trackId });
-      logger.info(`[Signaling] Peer ${pId} unpublished track ${trackId}`);
+      socket.to(activeRoom).emit('sfu:track-unpublished', { peerId: activePeerId, trackId });
+      logger.info(`[Signaling] Peer ${activePeerId} unpublished track ${trackId}`);
     }
   });
-
-  const handleLeave = () => {
-    if (currentRoom && currentPeerId) {
-      const room = roomBroker.getOrCreateRoom(currentRoom);
-      const peer = room.peers.get(currentPeerId);
-      const publishedTrackIds = peer ? Array.from(peer.publishedTracks.keys()) : [];
-
-      for (const [key, pc] of subscriberPeerConnections.entries()) {
-        const isSubscriberForPeer = key.includes(`:${currentPeerId}:`);
-        const isTrackPublishedByPeer = publishedTrackIds.some((tId) => key.endsWith(`:${tId}`));
-        if (isSubscriberForPeer || isTrackPublishedByPeer) {
-          try {
-            pc.close();
-          } catch {}
-          subscriberPeerConnections.delete(key);
-        }
-      }
-
-      for (const tId of publishedTrackIds) {
-        socket.to(currentRoom).emit('sfu:track-unpublished', {
-          peerId: currentPeerId,
-          trackId: tId,
-        });
-      }
-
-      roomBroker.removePeer(currentRoom, currentPeerId);
-      socket.to(currentRoom).emit('sfu:peer-left', { peerId: currentPeerId });
-      logger.info(`[Signaling] Peer ${currentPeerId} left room ${currentRoom}`);
-      currentRoom = null;
-      currentPeerId = null;
-    }
-  };
 
   socket.on('sfu:leave', handleLeave);
   socket.on('disconnect', handleLeave);

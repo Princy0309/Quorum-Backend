@@ -10,7 +10,8 @@ import type {
   TrackUnpublishedEvent,
   SubscriptionEvent,
   UnsubscriptionEvent,
-  SubscriberErrorEvent
+  SubscriberErrorEvent,
+  PublisherErrorEvent
 } from './trackTypes.js';
 import { PeerSubscriptionRegistry } from './peerSubscriptions.js';
 
@@ -21,7 +22,8 @@ export type {
   TrackUnpublishedEvent,
   SubscriptionEvent,
   UnsubscriptionEvent,
-  SubscriberErrorEvent
+  SubscriberErrorEvent,
+  PublisherErrorEvent
 };
 
 export class TrackRouter extends EventEmitter {
@@ -31,7 +33,7 @@ export class TrackRouter extends EventEmitter {
   private trackOwners: Map<string, string> = new Map();
   private peerPublishedTracks: Map<string, Set<string>> = new Map();
   private subscriptions: PeerSubscriptionRegistry = new PeerSubscriptionRegistry();
-  private publisherListeners: Map<string, () => void> = new Map();
+  private publisherListeners: Map<string, { closeListener: () => void; errorListener: (err: any) => void }> = new Map();
   private subscriberListeners: Map<string, { subscriber: Subscriber; closeListener: () => void; rtcpListener: (packet: Buffer) => void; errorListener: (err: any) => void }> = new Map();
   private isClosed: boolean = false;
 
@@ -72,8 +74,21 @@ export class TrackRouter extends EventEmitter {
         this.removePublisher(effectiveTrackId, publisher);
       }
     };
+    const onPublisherError = (err: any) => {
+      logger.warn(`Publisher error in room ${this.roomCode} for peer ${publisher.peerId} track ${effectiveTrackId}:`, err);
+      this.emit('publisher-error', {
+        roomCode: this.roomCode,
+        trackId: effectiveTrackId,
+        peerId: publisher.peerId,
+        error: err
+      });
+    };
     publisher.once('close', onPublisherClose);
-    this.publisherListeners.set(effectiveTrackId, onPublisherClose);
+    publisher.on('error', onPublisherError);
+    this.publisherListeners.set(effectiveTrackId, {
+      closeListener: onPublisherClose,
+      errorListener: onPublisherError
+    });
 
     const event: TrackPublishedEvent = {
       roomCode: this.roomCode,
@@ -103,9 +118,10 @@ export class TrackRouter extends EventEmitter {
       return false;
     }
 
-    const closeListener = this.publisherListeners.get(trackId);
-    if (closeListener) {
-      publisher.removeListener('close', closeListener);
+    const listeners = this.publisherListeners.get(trackId);
+    if (listeners) {
+      publisher.removeListener('close', listeners.closeListener);
+      publisher.removeListener('error', listeners.errorListener);
       this.publisherListeners.delete(trackId);
     }
 
@@ -379,9 +395,10 @@ export class TrackRouter extends EventEmitter {
     this.subscriberListeners.clear();
 
     for (const [trackId, publisher] of this.publishers.entries()) {
-      const closeListener = this.publisherListeners.get(trackId);
-      if (closeListener) {
-        publisher.removeListener('close', closeListener);
+      const listeners = this.publisherListeners.get(trackId);
+      if (listeners) {
+        publisher.removeListener('close', listeners.closeListener);
+        publisher.removeListener('error', listeners.errorListener);
       }
       publisher.close();
     }

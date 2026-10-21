@@ -127,6 +127,10 @@ export class RoomBroker extends EventEmitter {
       return false;
     });
 
+    publisher.on('error', (err) => {
+      logger.warn(`[SFU Broker] Publisher error for peer ${peerId} track ${trackId}:`, err);
+    });
+
     publisher.on('rtcp-feedback', () => {
       this.requestKeyframe(roomCode, peerId, trackId);
     });

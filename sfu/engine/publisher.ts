@@ -3,7 +3,7 @@ import { SrtpSession } from '../protocols/srtp/srtpPacket.js';
 
 export type MediaKind = 'audio' | 'video';
 
-export type PacketTransportSender = (packet: Buffer) => boolean | void;
+export type PacketTransportSender = (packet: Buffer) => boolean | void | Promise<any>;
 
 export interface PublisherOptions {
   id: string;
@@ -169,18 +169,34 @@ export class Publisher extends EventEmitter {
       try {
         dispatchPacket = this.srtpSession.protectRtcp(packet);
       } catch (err: any) {
-        this.emit('error', err);
+        if (this.listenerCount('error') > 0) {
+          this.emit('error', err);
+        }
         return false;
       }
     }
 
     try {
       const result = this.transportSender(dispatchPacket);
-      if (result === false) {
+      if (result instanceof Promise) {
+        result
+          .then(() => {
+            this.stats.rtcpPacketsSent++;
+            this.emit('rtcp-sent', packet);
+          })
+          .catch((err: any) => {
+            if (this.listenerCount('error') > 0) {
+              this.emit('error', err);
+            }
+          });
+        return true;
+      } else if (result === false) {
         return false;
       }
     } catch (err: any) {
-      this.emit('error', err);
+      if (this.listenerCount('error') > 0) {
+        this.emit('error', err);
+      }
       return false;
     }
 

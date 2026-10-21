@@ -52,3 +52,11 @@ export interface SubscriberErrorEvent {
   subscriberId: string;
   error: any;
 }
+
+export interface PublisherErrorEvent {
+  roomCode: string;
+  trackId: string;
+  peerId: string;
+  error: any;
+}
+
