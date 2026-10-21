@@ -431,23 +431,33 @@ export class RoomBroker extends EventEmitter {
     const room = this.rooms.get(roomCode);
     if (!room) return;
 
-    const peer = room.peers.get(peerId);
+    let peer = room.peers.get(peerId);
+    let resolvedPeerId = peerId;
+    if (!peer) {
+      for (const [id, p] of room.peers.entries()) {
+        if (p.socketId === peerId) {
+          peer = p;
+          resolvedPeerId = id;
+          break;
+        }
+      }
+    }
     if (!peer) return;
 
     const router = this.routers.get(roomCode);
     if (router) {
-      router.removePeer(peerId);
+      router.removePeer(resolvedPeerId);
     }
 
     for (const trackId of peer.publishedTracks.keys()) {
       room.channels.delete(trackId);
-      this.emit('track-unpublished', { roomCode, peerId, trackId });
+      this.emit('track-unpublished', { roomCode, peerId: resolvedPeerId, trackId });
     }
 
     for (const [trackId, subscribers] of room.channels.entries()) {
       room.channels.set(
         trackId,
-        subscribers.filter((s) => s.subscriberPeerId !== peerId)
+        subscribers.filter((s) => s.subscriberPeerId !== resolvedPeerId)
       );
     }
 
@@ -455,12 +465,12 @@ export class RoomBroker extends EventEmitter {
       try {
         peer.peerConnection.close();
       } catch (err) {
-        logger.error(`[SFU Broker] Error closing connection for ${peerId}:`, err);
+        logger.error(`[SFU Broker] Error closing connection for ${resolvedPeerId}:`, err);
       }
     }
 
-    room.peers.delete(peerId);
-    logger.info(`[SFU Broker] Peer ${peerId} removed from room ${roomCode}`);
+    room.peers.delete(resolvedPeerId);
+    logger.info(`[SFU Broker] Peer ${resolvedPeerId} removed from room ${roomCode}`);
 
     if (room.peers.size === 0) {
       if (router) {

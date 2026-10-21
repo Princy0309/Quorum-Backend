@@ -62,7 +62,13 @@ class PeerConnectionManager {
   }
 
   closeConnection(roomCode: string, peerId: string): void {
-    
+    const room = this.muteStates.get(roomCode);
+    if (room) {
+      room.delete(peerId);
+      if (room.size === 0) {
+        this.muteStates.delete(roomCode);
+      }
+    }
   }
 
   closeRoomConnections(roomCode: string): void {
