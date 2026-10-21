@@ -14,6 +14,7 @@ model Community {
   owner       User              @relation("CommunityOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members     CommunityMember[]
   invites     CommunityInvite[]
+  channels    CommunityChannel[]
   posts       CommunityPost[]
 
   @@index([ownerId])
@@ -56,9 +57,25 @@ model CommunityInvite {
   @@index([status])
 }
 
+model CommunityChannel {
+  id          String          @id @default(uuid())
+  communityId String
+  name        String
+  description String?
+  isDefault   Boolean         @default(false)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  community   Community       @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  posts       CommunityPost[]
+
+  @@unique([communityId, name])
+  @@index([communityId])
+}
+
 model CommunityPost {
   id          String             @id @default(uuid())
   communityId String
+  channelId   String?
   authorId    String
   content     String
   fileUrl     String?
@@ -68,10 +85,12 @@ model CommunityPost {
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
   community   Community          @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  channel     CommunityChannel?  @relation(fields: [channelId], references: [id], onDelete: SetNull)
   author      User               @relation(fields: [authorId], references: [id], onDelete: Cascade)
   comments    CommunityComment[]
 
   @@index([communityId])
+  @@index([channelId])
   @@index([authorId])
   @@index([createdAt])
 }
