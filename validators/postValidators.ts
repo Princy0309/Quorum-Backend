@@ -48,6 +48,7 @@ export const signCommunityUploadSchema = z.object({
 });
 
 export const createPostSchema = z.object({
+  channelId: z.string().trim().min(1).optional().nullable(),
   content: z.string().trim().max(10000).optional().nullable(),
   fileUrl: trustedMediaUrlSchema.optional().nullable(),
   fileType: z.enum(['image', 'file']).optional().nullable(),
