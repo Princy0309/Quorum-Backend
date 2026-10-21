@@ -1,6 +1,6 @@
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
-import { CommunityRole } from './communityService.js';
+import { CommunityRole, ensureDefaultGeneralChannel } from './communityService.js';
 
 export interface CommunityPostInput {
   content?: string;
@@ -8,6 +8,7 @@ export interface CommunityPostInput {
   fileType?: string | null;
   fileName?: string | null;
   fileSize?: number | null;
+  channelId?: string | null;
 }
 
 export const createCommunityPost = async (
@@ -34,9 +35,24 @@ export const createCommunityPost = async (
   const fileName = typeof postData === 'object' && postData.fileName ? postData.fileName.trim() : null;
   const fileSize = typeof postData === 'object' && typeof postData.fileSize === 'number' ? postData.fileSize : null;
 
+  let targetChannelId: string | null = null;
+  if (typeof postData === 'object' && postData.channelId) {
+    const channel = await prisma.communityChannel.findUnique({
+      where: { id: postData.channelId }
+    });
+    if (!channel || channel.communityId !== communityId) {
+      throw new ApiError(400, 'Invalid channel for this community');
+    }
+    targetChannelId = channel.id;
+  } else {
+    const defaultGeneral = await ensureDefaultGeneralChannel(communityId);
+    targetChannelId = defaultGeneral ? defaultGeneral.id : null;
+  }
+
   const post = await prisma.communityPost.create({
     data: {
       communityId,
+      channelId: targetChannelId,
       authorId: userId,
       content: content.trim(),
       fileUrl,
@@ -50,6 +66,13 @@ export const createCommunityPost = async (
           id: true,
           name: true,
           avatar: true
+        }
+      },
+      channel: {
+        select: {
+          id: true,
+          name: true,
+          isDefault: true
         }
       },
       _count: {
@@ -67,7 +90,9 @@ export const getCommunityPosts = async (
   userId: string,
   communityId: string,
   cursor?: string,
-  limit: number = 20
+  limit: number = 20,
+  channelId?: string,
+  search?: string
 ) => {
   const membership = await prisma.communityMember.findUnique({
     where: {
@@ -80,6 +105,15 @@ export const getCommunityPosts = async (
 
   if (!membership) {
     throw new ApiError(403, 'Access denied. You are not a member of this community');
+  }
+
+  if (channelId) {
+    const channel = await prisma.communityChannel.findUnique({
+      where: { id: channelId }
+    });
+    if (!channel || channel.communityId !== communityId) {
+      throw new ApiError(404, 'Channel not found in this community');
+    }
   }
 
   const take = Math.min(Math.max(limit, 1), 50);
@@ -97,8 +131,19 @@ export const getCommunityPosts = async (
     }
   }
 
+  const whereClause: any = {
+    communityId,
+    ...(channelId ? { channelId } : {}),
+    ...(search && search.trim() ? {
+      content: {
+        contains: search.trim(),
+        mode: 'insensitive'
+      }
+    } : {})
+  };
+
   const posts = await prisma.communityPost.findMany({
-    where: { communityId },
+    where: whereClause,
     take: take + 1,
     skip: cursor ? 1 : 0,
     cursor: cursor ? { id: cursor } : undefined,
@@ -109,6 +154,13 @@ export const getCommunityPosts = async (
           id: true,
           name: true,
           avatar: true
+        }
+      },
+      channel: {
+        select: {
+          id: true,
+          name: true,
+          isDefault: true
         }
       },
       _count: {
@@ -171,6 +223,13 @@ export const getCommunityFeed = async (
           id: true,
           name: true,
           description: true
+        }
+      },
+      channel: {
+        select: {
+          id: true,
+          name: true,
+          isDefault: true
         }
       },
       author: {
@@ -259,6 +318,13 @@ export const updateCommunityPost = async (
           id: true,
           name: true,
           avatar: true
+        }
+      },
+      channel: {
+        select: {
+          id: true,
+          name: true,
+          isDefault: true
         }
       },
       _count: {

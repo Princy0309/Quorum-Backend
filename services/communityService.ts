@@ -33,6 +33,13 @@ export const createCommunity = async (userId: string, data: CreateCommunityInput
             userId,
             role: CommunityRole.OWNER
           }
+        },
+        channels: {
+          create: {
+            name: 'General',
+            description: 'Announcements and general discussions',
+            isDefault: true
+          }
         }
       },
       include: {
@@ -43,6 +50,7 @@ export const createCommunity = async (userId: string, data: CreateCommunityInput
             avatar: true
           }
         },
+        channels: true,
         _count: {
           select: {
             members: true
@@ -59,6 +67,7 @@ export const createCommunity = async (userId: string, data: CreateCommunityInput
       owner: community.owner,
       role: CommunityRole.OWNER,
       memberCount: community._count.members,
+      channels: community.channels,
       createdAt: community.createdAt,
       updatedAt: community.updatedAt
     };
@@ -123,6 +132,12 @@ export const getCommunityDetails = async (userId: string, communityId: string) =
           joinedAt: true
         }
       },
+      channels: {
+        orderBy: [
+          { isDefault: 'desc' },
+          { createdAt: 'asc' }
+        ]
+      },
       _count: {
         select: {
           members: true
@@ -140,6 +155,14 @@ export const getCommunityDetails = async (userId: string, communityId: string) =
     throw new ApiError(403, 'Access denied. You are not a member of this community');
   }
 
+  let channels = community.channels;
+  if (!channels || channels.length === 0) {
+    const general = await ensureDefaultGeneralChannel(communityId);
+    if (general) {
+      channels = [general];
+    }
+  }
+
   return {
     id: community.id,
     name: community.name,
@@ -148,6 +171,7 @@ export const getCommunityDetails = async (userId: string, communityId: string) =
     owner: community.owner,
     role: membership.role,
     memberCount: community._count.members,
+    channels,
     joinedAt: membership.joinedAt,
     createdAt: community.createdAt,
     updatedAt: community.updatedAt
@@ -1352,4 +1376,254 @@ export const searchCommunities = async (
     hasNextPage
   };
 };
+
+export interface CreateChannelInput {
+  name: string;
+  description?: string | null;
+}
+
+export interface UpdateChannelInput {
+  name?: string;
+  description?: string | null;
+}
+
+export const ensureDefaultGeneralChannel = async (communityId: string, tx?: any) => {
+  const client = tx || prisma;
+  let general = await client.communityChannel.findFirst({
+    where: { communityId, isDefault: true }
+  });
+  if (!general) {
+    general = await client.communityChannel.findFirst({
+      where: { communityId, name: 'General' }
+    });
+  }
+  if (!general) {
+    try {
+      general = await client.communityChannel.create({
+        data: {
+          communityId,
+          name: 'General',
+          description: 'Announcements and general discussions',
+          isDefault: true
+        }
+      });
+    } catch {
+      general = await client.communityChannel.findFirst({
+        where: { communityId, name: 'General' }
+      });
+    }
+  }
+  return general;
+};
+
+export const createCommunityChannel = async (userId: string, communityId: string, data: CreateChannelInput) => {
+  const membership = await prisma.communityMember.findUnique({
+    where: {
+      communityId_userId: {
+        communityId,
+        userId
+      }
+    }
+  });
+
+  if (!membership) {
+    throw new ApiError(403, 'Access denied. You are not a member of this community');
+  }
+
+  if (membership.role !== CommunityRole.OWNER && membership.role !== CommunityRole.ADMIN) {
+    throw new ApiError(403, 'Only community owners and admins can create channels');
+  }
+
+  const cleanName = data.name.trim();
+
+  const existing = await prisma.communityChannel.findUnique({
+    where: {
+      communityId_name: {
+        communityId,
+        name: cleanName
+      }
+    }
+  });
+
+  if (existing) {
+    throw new ApiError(409, 'A channel with this name already exists in this community');
+  }
+
+  return await prisma.communityChannel.create({
+    data: {
+      communityId,
+      name: cleanName,
+      description: data.description?.trim() || null,
+      isDefault: false
+    }
+  });
+};
+
+export const getCommunityChannels = async (userId: string, communityId: string) => {
+  const membership = await prisma.communityMember.findUnique({
+    where: {
+      communityId_userId: {
+        communityId,
+        userId
+      }
+    }
+  });
+
+  if (!membership) {
+    throw new ApiError(403, 'Access denied. You are not a member of this community');
+  }
+
+  let channels = await prisma.communityChannel.findMany({
+    where: { communityId },
+    orderBy: [
+      { isDefault: 'desc' },
+      { createdAt: 'asc' }
+    ]
+  });
+
+  if (channels.length === 0) {
+    const general = await ensureDefaultGeneralChannel(communityId);
+    if (general) {
+      channels = [general];
+    }
+  }
+
+  return channels;
+};
+
+export const getCommunityChannelById = async (userId: string, communityId: string, channelId: string) => {
+  const membership = await prisma.communityMember.findUnique({
+    where: {
+      communityId_userId: {
+        communityId,
+        userId
+      }
+    }
+  });
+
+  if (!membership) {
+    throw new ApiError(403, 'Access denied. You are not a member of this community');
+  }
+
+  const channel = await prisma.communityChannel.findUnique({
+    where: { id: channelId }
+  });
+
+  if (!channel || channel.communityId !== communityId) {
+    throw new ApiError(404, 'Channel not found');
+  }
+
+  return channel;
+};
+
+export const updateCommunityChannel = async (
+  userId: string,
+  communityId: string,
+  channelId: string,
+  data: UpdateChannelInput
+) => {
+  const membership = await prisma.communityMember.findUnique({
+    where: {
+      communityId_userId: {
+        communityId,
+        userId
+      }
+    }
+  });
+
+  if (!membership) {
+    throw new ApiError(403, 'Access denied. You are not a member of this community');
+  }
+
+  if (membership.role !== CommunityRole.OWNER && membership.role !== CommunityRole.ADMIN) {
+    throw new ApiError(403, 'Only community owners and admins can update channels');
+  }
+
+  const channel = await prisma.communityChannel.findUnique({
+    where: { id: channelId }
+  });
+
+  if (!channel || channel.communityId !== communityId) {
+    throw new ApiError(404, 'Channel not found');
+  }
+
+  if (data.name !== undefined) {
+    const cleanName = data.name.trim();
+    if (channel.isDefault || channel.name.toLowerCase() === 'general') {
+      if (cleanName.toLowerCase() !== channel.name.toLowerCase()) {
+        throw new ApiError(400, 'The default General channel cannot be renamed');
+      }
+    }
+
+    if (cleanName !== channel.name) {
+      const existing = await prisma.communityChannel.findUnique({
+        where: {
+          communityId_name: {
+            communityId,
+            name: cleanName
+          }
+        }
+      });
+
+      if (existing && existing.id !== channelId) {
+        throw new ApiError(409, 'A channel with this name already exists in this community');
+      }
+    }
+  }
+
+  return await prisma.communityChannel.update({
+    where: { id: channelId },
+    data: {
+      ...(data.name !== undefined ? { name: data.name.trim() } : {}),
+      ...(data.description !== undefined ? { description: data.description?.trim() || null } : {})
+    }
+  });
+};
+
+export const deleteCommunityChannel = async (userId: string, communityId: string, channelId: string) => {
+  return await prisma.$transaction(async (tx) => {
+    const membership = await tx.communityMember.findUnique({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId
+        }
+      }
+    });
+
+    if (!membership) {
+      throw new ApiError(403, 'Access denied. You are not a member of this community');
+    }
+
+    if (membership.role !== CommunityRole.OWNER && membership.role !== CommunityRole.ADMIN) {
+      throw new ApiError(403, 'Only community owners and admins can delete channels');
+    }
+
+    const channel = await tx.communityChannel.findUnique({
+      where: { id: channelId }
+    });
+
+    if (!channel || channel.communityId !== communityId) {
+      throw new ApiError(404, 'Channel not found');
+    }
+
+    if (channel.isDefault || channel.name.toLowerCase() === 'general') {
+      throw new ApiError(400, 'The default General channel cannot be deleted');
+    }
+
+    const general = await ensureDefaultGeneralChannel(communityId, tx);
+
+    await tx.communityPost.updateMany({
+      where: { channelId },
+      data: { channelId: general?.id }
+    });
+
+    await tx.communityChannel.delete({
+      where: { id: channelId }
+    });
+
+    return { message: 'Channel deleted successfully' };
+  });
+};
+
 
