@@ -17,7 +17,6 @@ import { createPostSchema } from '../validators/postValidators.js';
 import {
   createCommunityController,
   getUserCommunitiesController,
-  searchCommunitiesController,
   getCommunityDetailsController,
   updateCommunityController,
   deleteCommunityController,
@@ -53,7 +52,6 @@ const router = Router();
 
 router.post('/', authMiddleware, validate(createCommunitySchema), createCommunityController);
 router.get('/', authMiddleware, getUserCommunitiesController);
-router.get('/search', authMiddleware, searchCommunitiesController);
 router.get('/feed', authMiddleware, getCommunityFeedController);
 
 router.get('/invitations/pending', authMiddleware, getUserPendingInvitesController);
