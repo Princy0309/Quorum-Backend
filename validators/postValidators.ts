@@ -68,12 +68,6 @@ export const updatePostSchema = z.object({
   fileType: z.enum(['image', 'file']).optional().nullable(),
   fileName: z.string().trim().max(255).optional().nullable(),
   fileSize: z.number().int().min(1).max(26214400).optional().nullable()
-}).refine((data) => {
-  const hasContent = typeof data.content === 'string' && data.content.trim().length > 0;
-  const hasFile = typeof data.fileUrl === 'string' && data.fileUrl.trim().length > 0;
-  return hasContent || hasFile;
-}, {
-  message: 'Post must contain either non-empty content or a file attachment'
 });
 
 export const createCommentSchema = z.object({

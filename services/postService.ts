@@ -307,6 +307,11 @@ export const updateCommunityPost = async (
     }
     if (postData.fileUrl !== undefined) {
       dataToUpdate.fileUrl = postData.fileUrl ? postData.fileUrl.trim() : null;
+      if (!dataToUpdate.fileUrl) {
+        if (postData.fileType === undefined) dataToUpdate.fileType = null;
+        if (postData.fileName === undefined) dataToUpdate.fileName = null;
+        if (postData.fileSize === undefined) dataToUpdate.fileSize = null;
+      }
     }
     if (postData.fileType !== undefined) {
       dataToUpdate.fileType = postData.fileType ? postData.fileType.trim() : null;
@@ -317,6 +322,16 @@ export const updateCommunityPost = async (
     if (postData.fileSize !== undefined) {
       dataToUpdate.fileSize = typeof postData.fileSize === 'number' ? postData.fileSize : null;
     }
+  }
+
+  const finalContent = dataToUpdate.content !== undefined ? dataToUpdate.content : post.content;
+  const finalFileUrl = dataToUpdate.fileUrl !== undefined ? dataToUpdate.fileUrl : post.fileUrl;
+
+  const hasContent = typeof finalContent === 'string' && finalContent.trim().length > 0;
+  const hasFile = typeof finalFileUrl === 'string' && finalFileUrl.trim().length > 0;
+
+  if (!hasContent && !hasFile) {
+    throw new ApiError(400, 'Post cannot be empty. It must contain either text content or a file attachment');
   }
 
   const updated = await prisma.communityPost.update({
