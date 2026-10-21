@@ -587,7 +587,7 @@ export const inviteUserToCommunity = async (
   communityId: string,
   input: InviteUserToCommunityInput
 ) => {
-  return await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Community" WHERE id = ${communityId} FOR UPDATE`;
 
     const community = await tx.community.findUnique({
@@ -712,38 +712,46 @@ export const inviteUserToCommunity = async (
     const cleanBase = baseUrl.replace(/\/$/, '');
     const inviteUrl = `${cleanBase}/communities/invites/${invite.token}`;
 
-    try {
-      await queueNotification({
-        recipientId: targetUser.id,
-        actorId: inviterUserId,
-        type: 'COMMUNITY_INVITE',
-        title: 'Community Invitation',
-        body: `${inviterMembership.user?.name || 'Someone'} invited you to join the community "${community.name}"`,
-        data: {
-          communityId: community.id,
-          communityName: community.name,
-          inviteId: invite.id,
-          token: invite.token,
-          role: invite.role
-        }
-      });
-    } catch {
-    }
-
     return {
-      id: invite.id,
-      communityId: invite.communityId,
-      communityName: invite.community.name,
-      role: invite.role,
-      status: invite.status,
-      token: invite.token,
+      invite,
       inviteUrl,
-      expiresAt: invite.expiresAt,
-      createdAt: invite.createdAt,
-      inviter: invite.inviter,
-      invitee: invite.invitee
+      inviterName: inviterMembership.user?.name,
+      targetUserId: targetUser.id,
+      communityName: community.name
     };
   });
+
+  try {
+    await queueNotification({
+      recipientId: result.targetUserId,
+      actorId: inviterUserId,
+      type: 'COMMUNITY_INVITE',
+      title: 'Community Invitation',
+      body: `${result.inviterName || 'Someone'} invited you to join the community "${result.communityName}"`,
+      data: {
+        communityId: result.invite.communityId,
+        communityName: result.communityName,
+        inviteId: result.invite.id,
+        token: result.invite.token,
+        role: result.invite.role
+      }
+    });
+  } catch {
+  }
+
+  return {
+    id: result.invite.id,
+    communityId: result.invite.communityId,
+    communityName: result.invite.community.name,
+    role: result.invite.role,
+    status: result.invite.status,
+    token: result.invite.token,
+    inviteUrl: result.inviteUrl,
+    expiresAt: result.invite.expiresAt,
+    createdAt: result.invite.createdAt,
+    inviter: result.invite.inviter,
+    invitee: result.invite.invitee
+  };
 };
 
 export const getCommunityInvites = async (userId: string, communityId: string) => {
