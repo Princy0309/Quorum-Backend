@@ -19,7 +19,12 @@ import {
   leaveCommunity,
   removeCommunityMember,
   changeMemberRole,
-  transferCommunityOwnership
+  transferCommunityOwnership,
+  createCommunityChannel,
+  getCommunityChannels,
+  getCommunityChannelById,
+  updateCommunityChannel,
+  deleteCommunityChannel
 } from '../services/communityService.js';
 import { ApiError } from '../utils/ApiError.js';
 
@@ -35,6 +40,13 @@ const validateCommunityId = (id: unknown): string => {
 const validateUserId = (id: unknown): string => {
   if (!id || typeof id !== 'string' || !UUID_REGEX.test(id.trim())) {
     throw new ApiError(400, 'Invalid user ID format');
+  }
+  return id.trim();
+};
+
+const validateChannelId = (id: unknown): string => {
+  if (!id || typeof id !== 'string' || !UUID_REGEX.test(id.trim())) {
+    throw new ApiError(400, 'Invalid channel ID format');
   }
   return id.trim();
 };
@@ -494,5 +506,99 @@ export const transferCommunityOwnershipController = async (req: Request, res: Re
     next(err);
   }
 };
+
+export const createChannelController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const result = await createCommunityChannel(userId, id, req.body);
+    res.status(201).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getCommunityChannelsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const result = await getCommunityChannels(userId, id);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getChannelDetailsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const channelId = validateChannelId(req.params.channelId);
+    const result = await getCommunityChannelById(userId, id, channelId);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateChannelController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const channelId = validateChannelId(req.params.channelId);
+    const result = await updateCommunityChannel(userId, id, channelId, req.body);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteChannelController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const channelId = validateChannelId(req.params.channelId);
+    const result = await deleteCommunityChannel(userId, id, channelId);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 
 
