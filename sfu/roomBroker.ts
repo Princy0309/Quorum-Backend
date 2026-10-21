@@ -36,6 +36,10 @@ export class RoomBroker extends EventEmitter {
     return this.routers.get(roomCode);
   }
 
+  public getRoom(roomCode: string): SfuRoom | undefined {
+    return this.rooms.get(roomCode);
+  }
+
   public getOrCreateRoom(roomCode: string): SfuRoom {
     let room = this.rooms.get(roomCode);
 
@@ -114,12 +118,10 @@ export class RoomBroker extends EventEmitter {
         const pc = peer.peerConnection as any;
         const iceConn = pc?.iceTransports?.[0]?.connection;
         if (iceConn && typeof iceConn.send === 'function') {
-          iceConn.send(packet).catch(() => {});
-          return true;
+          return iceConn.send(packet);
         }
         if (pc && typeof pc.sendRtcp === 'function') {
-          pc.sendRtcp(packet);
-          return true;
+          return pc.sendRtcp(packet);
         }
       } catch {
         return false;
