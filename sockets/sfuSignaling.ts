@@ -3,6 +3,8 @@ import { RTCSessionDescription, RTCPeerConnection } from 'werift';
 import { roomBroker } from '../sfu/roomBroker.js';
 import { createPeerConnection } from '../sfu/peerConnection.js';
 import logger from '../utils/logger.js';
+import { RoomSharder } from '../sfu/roomSharder.js';
+
 
 interface JoinPayload {
   roomCode: string;
@@ -63,9 +65,16 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     return undefined;
   };
 
-  socket.on('sfu:join', ({ roomCode, peerId, name }: JoinPayload) => {
+    socket.on('sfu:join', async ({ roomCode, peerId, name }: JoinPayload) => {
     currentRoom = roomCode;
     currentPeerId = peerId;
+
+    try {
+      const assignedWorker = await RoomSharder.getInstance().getOrAssignWorker(roomCode);
+      logger.info(`[Signaling] Room ${roomCode} coordinated on ${assignedWorker} for peer ${peerId}`);
+    } catch (shardingErr) {
+      logger.warn(`[Signaling] Room sharder coordination warning:`, shardingErr);
+    }
 
     socket.join(roomCode);
     roomBroker.addPeer(roomCode, peerId, socket.id, name);
@@ -91,6 +100,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
 
     logger.info(`[Signaling] Peer ${peerId} joined SFU room ${roomCode}`);
   });
+
 
   socket.on('sfu:offer', async ({ roomCode, peerId, sdp }: OfferPayload) => {
     try {

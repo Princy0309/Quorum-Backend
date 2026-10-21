@@ -24,6 +24,10 @@ export class RoomSharder {
     this.workers = workers;
   }
 
+  public static getInstance(): RoomSharder {
+    return roomSharder;
+  }
+
   public getDeterministicWorker(roomCode: string): string {
     const hash = hashRoomCode(roomCode);
     const index = hash % this.workers.length;
