@@ -44,3 +44,11 @@ export interface UnsubscriptionEvent {
   trackId: string;
   subscriberId: string;
 }
+
+export interface SubscriberErrorEvent {
+  roomCode: string;
+  trackId: string;
+  subscriberPeerId: string;
+  subscriberId: string;
+  error: any;
+}

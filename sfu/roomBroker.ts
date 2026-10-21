@@ -212,9 +212,7 @@ export class RoomBroker extends EventEmitter {
               throw err;
             });
           }
-          const rtpPkt = RtpPacket.deSerialize(buf);
-          sender.sendRtp(rtpPkt);
-          return true;
+          return false;
         } catch {
           return false;
         }
@@ -228,12 +226,6 @@ export class RoomBroker extends EventEmitter {
               logger.debug(`[SFU Broker] UDP RTCP send failed for subscriber ${subscriberPeerId}:`, err);
               throw err;
             });
-          }
-          if (typeof (sender as any).sendRtcp === 'function') {
-            return (sender as any).sendRtcp(buf);
-          }
-          if (pc && typeof (pc as any).sendRtcp === 'function') {
-            return (pc as any).sendRtcp(buf);
           }
           return false;
         } catch {

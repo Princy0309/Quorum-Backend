@@ -25,6 +25,8 @@ export interface SubscriberOptions {
 
 export interface SubscriberStats {
   packetsSent: number;
+  packetsAttempted: number;
+  packetsQueued: number;
   bytesSent: number;
   packetsDropped: number;
   rtcpPacketsSent: number;
@@ -50,6 +52,8 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
   private isClosed: boolean = false;
   private stats: SubscriberStats = {
     packetsSent: 0,
+    packetsAttempted: 0,
+    packetsQueued: 0,
     bytesSent: 0,
     packetsDropped: 0,
     rtcpPacketsSent: 0,
@@ -263,7 +267,9 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
 
     if (this.requireSrtp && !this.srtpSession) {
       this.stats.packetsDropped++;
-      this.emit('error', new Error('SRTP session required for subscriber transport'));
+      if (this.listenerCount('error') > 0) {
+        this.emit('error', new Error('SRTP session required for subscriber transport'));
+      }
       return false;
     }
 
@@ -302,31 +308,52 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
         dispatchPacket = this.srtpSession.protect(outgoing);
       } catch (err: any) {
         this.stats.packetsDropped++;
-        this.emit('error', err);
+        if (this.listenerCount('error') > 0) {
+          this.emit('error', err);
+        }
         return false;
       }
     }
+
+    this.stats.packetsAttempted++;
 
     try {
       const result = this.transportSender(dispatchPacket);
       if (result instanceof Promise) {
-        result.catch((err: any) => {
-          this.stats.packetsDropped++;
-          this.emit('error', err);
-        });
+        this.stats.packetsQueued++;
+        result
+          .then(() => {
+            if (this.stats.packetsQueued > 0) {
+              this.stats.packetsQueued--;
+            }
+            this.stats.packetsSent++;
+            this.stats.bytesSent += dispatchPacket.length;
+            this.stats.lastPacketTimestamp = Date.now();
+          })
+          .catch((err: any) => {
+            if (this.stats.packetsQueued > 0) {
+              this.stats.packetsQueued--;
+            }
+            this.stats.packetsDropped++;
+            if (this.listenerCount('error') > 0) {
+              this.emit('error', err);
+            }
+          });
       } else if (result === false) {
         this.stats.packetsDropped++;
         return false;
+      } else {
+        this.stats.packetsSent++;
+        this.stats.bytesSent += dispatchPacket.length;
+        this.stats.lastPacketTimestamp = Date.now();
       }
     } catch (err: any) {
       this.stats.packetsDropped++;
-      this.emit('error', err);
+      if (this.listenerCount('error') > 0) {
+        this.emit('error', err);
+      }
       return false;
     }
-
-    this.stats.packetsSent++;
-    this.stats.bytesSent += dispatchPacket.length;
-    this.stats.lastPacketTimestamp = Date.now();
 
     this.emit('packet', dispatchPacket);
     return true;
@@ -338,7 +365,9 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
     }
 
     if (this.requireSrtp && !this.srtpSession) {
-      this.emit('error', new Error('SRTP session required for subscriber RTCP'));
+      if (this.listenerCount('error') > 0) {
+        this.emit('error', new Error('SRTP session required for subscriber RTCP'));
+      }
       return false;
     }
 
@@ -352,7 +381,9 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
       try {
         dispatchPacket = this.srtpSession.protectRtcp(packet);
       } catch (err: any) {
-        this.emit('error', err);
+        if (this.listenerCount('error') > 0) {
+          this.emit('error', err);
+        }
         return false;
       }
     }
@@ -360,14 +391,24 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
     try {
       const result = sender(dispatchPacket);
       if (result instanceof Promise) {
-        result.catch((err: any) => {
-          this.emit('error', err);
-        });
+        result
+          .then(() => {
+            this.stats.rtcpPacketsSent++;
+            this.emit('rtcp-sent', packet);
+          })
+          .catch((err: any) => {
+            if (this.listenerCount('error') > 0) {
+              this.emit('error', err);
+            }
+          });
+        return true;
       } else if (result === false) {
         return false;
       }
     } catch (err: any) {
-      this.emit('error', err);
+      if (this.listenerCount('error') > 0) {
+        this.emit('error', err);
+      }
       return false;
     }
 
@@ -394,7 +435,9 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
       this.emit('rtcp', plaintext, this);
       return true;
     } catch (err: any) {
-      this.emit('error', err);
+      if (this.listenerCount('error') > 0) {
+        this.emit('error', err);
+      }
       return false;
     }
   }
