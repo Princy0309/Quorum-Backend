@@ -209,6 +209,8 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
   socket.on(
     'sfu:subscribe',
     async ({ roomCode, subscriberPeerId, trackId, sdp }: SubscribePayload) => {
+      const subKey = `${roomCode}:${subscriberPeerId}:${trackId}`;
+      let consumerPc: RTCPeerConnection | null = null;
       try {
         const room = roomBroker.getOrCreateRoom(roomCode);
         const peer = room.peers.get(subscriberPeerId);
@@ -227,8 +229,15 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           return;
         }
 
-        const consumerPc = createPeerConnection();
-        const subKey = `${roomCode}:${subscriberPeerId}:${trackId}`;
+        const existingPc = subscriberPeerConnections.get(subKey);
+        if (existingPc) {
+          try {
+            existingPc.close();
+          } catch {}
+          subscriberPeerConnections.delete(subKey);
+        }
+
+        consumerPc = createPeerConnection();
         subscriberPeerConnections.set(subKey, consumerPc);
 
         consumerPc.onIceCandidate.subscribe((candidate) => {
@@ -267,6 +276,11 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
 
         if (!subscribed) {
           logger.error(`[Signaling] Failed to subscribe peer ${subscriberPeerId} to track ${trackId}`);
+          try {
+            consumerPc.close();
+          } catch {}
+          subscriberPeerConnections.delete(subKey);
+          roomBroker.unsubscribeFromTrack(roomCode, subscriberPeerId, trackId);
           socket.emit('sfu:error', { message: 'Failed to subscribe to track' });
           return;
         }
@@ -276,6 +290,8 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         );
         const answer = await consumerPc.createAnswer();
         await consumerPc.setLocalDescription(answer);
+
+        roomBroker.markSubscriberReady(roomCode, subscriberPeerId, trackId);
 
         socket.emit('sfu:subscribed', {
           trackId,
@@ -301,10 +317,33 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
 
       } catch (err) {
         logger.error(`[Signaling] Error subscribing to track:`, err);
+        if (consumerPc) {
+          try {
+            consumerPc.close();
+          } catch {}
+        }
+        subscriberPeerConnections.delete(subKey);
+        roomBroker.unsubscribeFromTrack(roomCode, subscriberPeerId, trackId);
         socket.emit('sfu:error', { message: 'Failed to subscribe to track' });
       }
     }
   );
+
+  socket.on('sfu:unsubscribe', ({ roomCode, subscriberPeerId, trackId }: { roomCode: string; subscriberPeerId: string; trackId: string }) => {
+    const rCode = roomCode || currentRoom;
+    const pId = subscriberPeerId || currentPeerId;
+    if (!rCode || !pId || !trackId) return;
+    const subKey = `${rCode}:${pId}:${trackId}`;
+    const pc = subscriberPeerConnections.get(subKey);
+    if (pc) {
+      try {
+        pc.close();
+      } catch {}
+      subscriberPeerConnections.delete(subKey);
+    }
+    roomBroker.unsubscribeFromTrack(rCode, pId, trackId);
+    logger.info(`[Signaling] Peer ${pId} unsubscribed from track ${trackId}`);
+  });
 
   const handleLeave = () => {
     if (currentRoom && currentPeerId) {

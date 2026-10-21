@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { MediaStreamTrack, RTCRtpSender, RtpPacket } from 'werift';
 import type { SfuRoom, Peer, PublishedTrack, TrackSubscriber } from './types.js';
+import type { SrtpSession } from './protocols/srtp/srtpPacket.js';
 import { TrackRouter } from './engine/pipeline/trackRouter.js';
 import { Publisher } from './engine/publisher.js';
 import { Subscriber } from './engine/subscriber.js';
@@ -104,7 +105,8 @@ export class RoomBroker extends EventEmitter {
       peerId,
       kind: track.kind as 'audio' | 'video',
       ssrc: publishedTrack.ssrc || 0,
-      payloadType: (track as any).payloadType || (track.kind === 'video' ? 96 : 111)
+      payloadType: (track as any).payloadType || (track.kind === 'video' ? 96 : 111),
+      srtpSession: peer.inboundSrtpSession || (peer as any).srtpSession || (peer.peerConnection as any)?.srtpSession
     });
 
     publisher.setTransportSender((packet: Buffer) => {
@@ -130,14 +132,14 @@ export class RoomBroker extends EventEmitter {
       if (!publishedTrack.ssrc && packet.header?.ssrc) {
         publishedTrack.ssrc = packet.header.ssrc;
         (track as any).ssrc = packet.header.ssrc;
-        (publisher as any).ssrc = packet.header.ssrc;
+        publisher.ssrc = packet.header.ssrc;
         logger.info(
           `[SFU Broker] Captured SSRC ${packet.header.ssrc} for track ${trackId} (${track.kind})`
         );
       }
 
       const rtpBuffer = packet.serialize ? packet.serialize() : (Buffer.isBuffer(packet) ? packet : Buffer.from((packet as any).buffer));
-      publisher.emit('rtp', rtpBuffer, publisher);
+      publisher.pushRtp(rtpBuffer);
     });
 
     logger.info(
@@ -192,6 +194,7 @@ export class RoomBroker extends EventEmitter {
       peerId: subscriberPeerId,
       kind,
       trackId,
+      srtpSession: peer.outboundSrtpSession || (peer as any).srtpSession || (peer.peerConnection as any)?.srtpSession,
       transportSender: (buf: Buffer) => {
         try {
           const rtpPkt = RtpPacket.deSerialize(buf);
@@ -205,13 +208,24 @@ export class RoomBroker extends EventEmitter {
             return false;
           }
         }
+      },
+      rtcpTransportSender: (buf: Buffer) => {
+        try {
+          if (typeof (sender as any).sendRtcp === 'function') {
+            (sender as any).sendRtcp(buf);
+            return true;
+          }
+          const pc = (sender as any).peerConnection || (peer?.peerConnection as any);
+          if (pc && typeof pc.sendRtcp === 'function') {
+            pc.sendRtcp(buf);
+            return true;
+          }
+          return false;
+        } catch {
+          return false;
+        }
       }
     });
-
-    const srtpSession = (peer as any).srtpSession || (peer.peerConnection as any)?.srtpSession;
-    if (srtpSession) {
-      subscriber.setSrtpSession(srtpSession);
-    }
 
     const success = router.addSubscription(trackId, subscriber);
     if (!success) {
@@ -243,6 +257,75 @@ export class RoomBroker extends EventEmitter {
     }
 
     return true;
+  }
+
+  public unsubscribeFromTrack(
+    roomCode: string,
+    subscriberPeerId: string,
+    trackId: string
+  ): boolean {
+    const room = this.rooms.get(roomCode);
+    if (!room) return false;
+
+    const router = this.routers.get(roomCode);
+    if (router) {
+      const subId = `${subscriberPeerId}:${trackId}`;
+      router.removeSubscription(trackId, subId, subscriberPeerId);
+    }
+
+    const subscribers = room.channels.get(trackId);
+    if (subscribers) {
+      room.channels.set(
+        trackId,
+        subscribers.filter((s) => s.subscriberPeerId !== subscriberPeerId)
+      );
+    }
+    return true;
+  }
+
+  public markSubscriberReady(
+    roomCode: string,
+    subscriberPeerId: string,
+    trackId: string
+  ): boolean {
+    const router = this.routers.get(roomCode);
+    if (!router) return false;
+    const sub = router.getSubscriber(subscriberPeerId, trackId);
+    if (sub) {
+      sub.markReady();
+      return true;
+    }
+    return false;
+  }
+
+  public attachPeerSrtpSessions(
+    roomCode: string,
+    peerId: string,
+    inboundSession: SrtpSession,
+    outboundSession: SrtpSession
+  ): void {
+    const room = this.rooms.get(roomCode);
+    if (!room) return;
+    const peer = room.peers.get(peerId);
+    if (!peer) return;
+    peer.inboundSrtpSession = inboundSession;
+    peer.outboundSrtpSession = outboundSession;
+
+    const router = this.routers.get(roomCode);
+    if (router) {
+      for (const trackId of peer.publishedTracks.keys()) {
+        const pub = router.getPublisher(trackId);
+        if (pub) {
+          pub.setSrtpSession(inboundSession);
+        }
+      }
+      for (const trackId of room.channels.keys()) {
+        const sub = router.getSubscriber(peerId, trackId);
+        if (sub) {
+          sub.setSrtpSession(outboundSession);
+        }
+      }
+    }
   }
 
   public requestKeyframe(roomCode: string, publisherPeerId: string, trackId?: string): void {

@@ -1,5 +1,6 @@
-import type {MediaStreamTrack, RTCRtpSender, RTCPeerConnection } from 'werift';
-
+import type { MediaStreamTrack, RTCRtpSender, RTCPeerConnection } from 'werift';
+import type { SrtpSession } from './protocols/srtp/srtpPacket.js';
+import type { DtlsServerHandshake } from './protocols/dtls/dtlsHandshake.js';
 
 export interface Peer {
     id: string;
@@ -7,7 +8,9 @@ export interface Peer {
     socketId: string;
     peerConnection?: RTCPeerConnection;
     publishedTracks: Map<string, PublishedTrack>;
-
+    inboundSrtpSession?: SrtpSession;
+    outboundSrtpSession?: SrtpSession;
+    dtlsHandshake?: DtlsServerHandshake;
 }
 
 export interface PublishedTrack {

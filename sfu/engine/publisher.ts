@@ -28,7 +28,7 @@ export class Publisher extends EventEmitter {
   public readonly id: string;
   public readonly peerId: string;
   public readonly kind: MediaKind;
-  public readonly ssrc: number;
+  public ssrc: number;
   public readonly payloadType: number;
   private srtpSession: SrtpSession | null = null;
   private transportSender: PacketTransportSender | null = null;
@@ -84,9 +84,12 @@ export class Publisher extends EventEmitter {
     }
 
     const ssrc = rtpBuffer.readUInt32BE(8);
-    if (ssrc !== this.ssrc) {
+    if (this.ssrc !== 0 && ssrc !== this.ssrc) {
       this.stats.packetsDropped++;
       return false;
+    }
+    if (this.ssrc === 0) {
+      this.ssrc = ssrc;
     }
 
     this.stats.packetsReceived++;
@@ -94,6 +97,20 @@ export class Publisher extends EventEmitter {
     this.stats.lastPacketTimestamp = Date.now();
 
     this.emit('rtp', rtpBuffer, this);
+    return true;
+  }
+
+  public pushRtp(rtpBuffer: Buffer): boolean {
+    return this.validateAndIngestRtp(rtpBuffer);
+  }
+
+  public pushRtcp(plaintextBuffer: Buffer): boolean {
+    if (this.isClosed || plaintextBuffer.length < 8) {
+      this.stats.packetsDropped++;
+      return false;
+    }
+    this.stats.rtcpPacketsReceived++;
+    this.emit('rtcp', plaintextBuffer, this);
     return true;
   }
 

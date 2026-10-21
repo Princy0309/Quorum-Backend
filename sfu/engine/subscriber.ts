@@ -6,6 +6,8 @@ export type MediaKind = 'audio' | 'video';
 
 export type PacketTransportSender = (packet: Buffer) => boolean | void;
 
+export type SubscriberLifecycleState = 'pending' | 'ready' | 'closed';
+
 export interface SubscriberOptions {
   id: string;
   peerId: string;
@@ -14,7 +16,9 @@ export interface SubscriberOptions {
   outboundSsrc?: number;
   payloadType?: number;
   srtpSession?: SrtpSession;
+  requireSrtp?: boolean;
   transportSender?: PacketTransportSender;
+  rtcpTransportSender?: PacketTransportSender;
   rewriteSeq?: boolean;
   extensionMap?: Map<number, number> | Record<number, number>;
 }
@@ -34,9 +38,12 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
   public readonly trackId?: string;
   public readonly outboundSsrc?: number;
   public readonly payloadType?: number;
+  public readonly requireSrtp: boolean;
   public isPaused: boolean = false;
+  private lifecycleState: SubscriberLifecycleState = 'pending';
   private srtpSession: SrtpSession | null = null;
   private transportSender: PacketTransportSender | null = null;
+  private rtcpTransportSender: PacketTransportSender | null = null;
   private rewriteSeq: boolean;
   private nextSeqNum: number = 0;
   private extensionMap: Map<number, number> = new Map();
@@ -57,6 +64,7 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
     this.trackId = options.trackId;
     this.outboundSsrc = options.outboundSsrc;
     this.payloadType = options.payloadType;
+    this.requireSrtp = options.requireSrtp ?? false;
     this.rewriteSeq = options.rewriteSeq ?? false;
     this.nextSeqNum = Math.floor(Math.random() * 65535);
 
@@ -68,6 +76,9 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
     }
     if (options.transportSender) {
       this.transportSender = options.transportSender;
+    }
+    if (options.rtcpTransportSender) {
+      this.rtcpTransportSender = options.rtcpTransportSender;
     }
   }
 
@@ -94,6 +105,25 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
 
   public setTransportSender(sender: PacketTransportSender): void {
     this.transportSender = sender;
+  }
+
+  public setRtcpTransportSender(sender: PacketTransportSender): void {
+    this.rtcpTransportSender = sender;
+  }
+
+  public markReady(): void {
+    if (!this.isClosed) {
+      this.lifecycleState = 'ready';
+      this.emit('ready');
+    }
+  }
+
+  public isReady(): boolean {
+    return this.lifecycleState === 'ready' && !this.isClosed;
+  }
+
+  public getLifecycleState(): SubscriberLifecycleState {
+    return this.lifecycleState;
   }
 
   public pause(): void {
@@ -226,8 +256,14 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
   }
 
   public sendRtp(packet: Buffer): boolean {
-    if (this.isClosed || this.isPaused || packet.length < 12) {
+    if (this.isClosed || this.isPaused || this.lifecycleState !== 'ready' || packet.length < 12) {
       this.stats.packetsDropped++;
+      return false;
+    }
+
+    if (this.requireSrtp && !this.srtpSession) {
+      this.stats.packetsDropped++;
+      this.emit('error', new Error('SRTP session required for subscriber transport'));
       return false;
     }
 
@@ -296,7 +332,13 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
       return false;
     }
 
-    if (!this.transportSender) {
+    if (this.requireSrtp && !this.srtpSession) {
+      this.emit('error', new Error('SRTP session required for subscriber RTCP'));
+      return false;
+    }
+
+    const sender = this.rtcpTransportSender || this.transportSender;
+    if (!sender) {
       return false;
     }
 
@@ -311,7 +353,7 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
     }
 
     try {
-      const result = this.transportSender(dispatchPacket);
+      const result = sender(dispatchPacket);
       if (result === false) {
         return false;
       }
@@ -322,6 +364,14 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
 
     this.stats.rtcpPacketsSent++;
     this.emit('rtcp-sent', packet);
+    return true;
+  }
+
+  public pushRtcp(plaintextBuffer: Buffer): boolean {
+    if (this.isClosed || plaintextBuffer.length < 8) {
+      return false;
+    }
+    this.emit('rtcp', plaintextBuffer, this);
     return true;
   }
 
@@ -360,8 +410,10 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
       return;
     }
     this.isClosed = true;
+    this.lifecycleState = 'closed';
     this.srtpSession = null;
     this.transportSender = null;
+    this.rtcpTransportSender = null;
     this.emit('close');
     this.removeAllListeners();
   }
