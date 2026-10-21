@@ -34,8 +34,8 @@ export {
   DTLS_CONTENT_TYPE,
   DTLS_HANDSHAKE_TYPE,
   SRTP_PROFILE,
-  DtlsRecord,
-  DtlsHandshakeMessage
+  type DtlsRecord,
+  type DtlsHandshakeMessage
 } from './dtlsRecords.js';
 
 export interface DtlsHandshakeOptions {

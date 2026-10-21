@@ -1,9 +1,9 @@
 import { EventEmitter } from 'events';
 import { Publisher } from '../publisher.js';
-import { RtpForwarder, RtpForwarderStats } from '../rtpForwarder.js';
+import { RtpForwarder, type RtpForwarderStats } from '../rtpForwarder.js';
 import { Subscriber } from '../subscriber.js';
 import logger from '../../../utils/logger.js';
-import {
+import type {
   PublishedTrackInfo,
   TrackRouterStats,
   TrackPublishedEvent,
@@ -13,14 +13,14 @@ import {
 } from './trackTypes.js';
 import { PeerSubscriptionRegistry } from './peerSubscriptions.js';
 
-export {
+export type {
   PublishedTrackInfo,
   TrackRouterStats,
   TrackPublishedEvent,
   TrackUnpublishedEvent,
   SubscriptionEvent,
   UnsubscriptionEvent
-} from './trackTypes.js';
+};
 
 export class TrackRouter extends EventEmitter {
   public readonly roomCode: string;
