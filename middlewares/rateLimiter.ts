@@ -11,6 +11,11 @@ export const loginIpRateLimiter = new RateLimiterRedis({
   points: 20,
   duration: 15 * 60,
   blockDuration: 15 * 60,
+  insuranceLimiter: new RateLimiterMemory({
+    points: 20,
+    duration: 15 * 60,
+    blockDuration: 15 * 60
+  })
 });
 
 export const loginAccountRateLimiter = new RateLimiterRedis({
@@ -19,6 +24,11 @@ export const loginAccountRateLimiter = new RateLimiterRedis({
   points: 10,
   duration: 15 * 60,
   blockDuration: 15 * 60,
+  insuranceLimiter: new RateLimiterMemory({
+    points: 10,
+    duration: 15 * 60,
+    blockDuration: 15 * 60
+  })
 });
 
 export const hashEmail = (email: string) => {
@@ -31,6 +41,11 @@ export const refreshRateLimiter = new RateLimiterRedis({
   points: 20,
   duration: 15 * 60,
   blockDuration: 15 * 60,
+  insuranceLimiter: new RateLimiterMemory({
+    points: 20,
+    duration: 15 * 60,
+    blockDuration: 15 * 60
+  })
 });
 
 export const registerRateLimiter = new RateLimiterRedis({
@@ -39,6 +54,11 @@ export const registerRateLimiter = new RateLimiterRedis({
   points: 5,
   duration: 60 * 60,
   blockDuration: 15 * 60,
+  insuranceLimiter: new RateLimiterMemory({
+    points: 5,
+    duration: 60 * 60,
+    blockDuration: 15 * 60
+  })
 });
 
 export const searchRateLimiter = new RateLimiterRedis({
@@ -47,6 +67,11 @@ export const searchRateLimiter = new RateLimiterRedis({
   points: 30,
   duration: 60,
   blockDuration: 60,
+  insuranceLimiter: new RateLimiterMemory({
+    points: 30,
+    duration: 60,
+    blockDuration: 60
+  })
 });
 
 export const loginLimiter = async (req: Request, res: Response, next: NextFunction): Promise<any> => {
@@ -65,10 +90,11 @@ export const loginLimiter = async (req: Request, res: Response, next: NextFuncti
 
     next();
   } catch (err: any) {
-    if (err.remainingPoints !== undefined) {
+    if (err && err.remainingPoints !== undefined) {
       return res.status(429).json({ success: false, statusCode: 429, message: 'Too many login attempts from this IP, try again after 15 minutes.' });
     }
-    return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
+    logger.warn('Login rate limiter encountered an error, failing open:', err);
+    return next();
   }
 };
 
@@ -76,10 +102,11 @@ export const refreshLimiter = (req: Request, res: Response, next: NextFunction):
   refreshRateLimiter.consume(req.ip || '127.0.0.1')
     .then(() => next())
     .catch((err) => {
-      if (err instanceof Error) {
-        return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
+      if (err && err.remainingPoints !== undefined) {
+        return res.status(429).json({ success: false, statusCode: 429, message: 'Too many refresh token requests, try again later.' });
       }
-      res.status(429).json({ success: false, statusCode: 429, message: 'Too many refresh token requests, try again later.' });
+      logger.warn('Refresh rate limiter encountered an error, failing open:', err);
+      return next();
     });
 };
 
@@ -87,10 +114,11 @@ export const registerLimiter = (req: Request, res: Response, next: NextFunction)
   registerRateLimiter.consume(req.ip || '127.0.0.1')
     .then(() => next())
     .catch((err) => {
-      if (err instanceof Error) {
-        return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
+      if (err && err.remainingPoints !== undefined) {
+        return res.status(429).json({ success: false, statusCode: 429, message: 'Too many registration attempts, try again later.' });
       }
-      res.status(429).json({ success: false, statusCode: 429, message: 'Too many registration attempts, try again later.' });
+      logger.warn('Register rate limiter encountered an error, failing open:', err);
+      return next();
     });
 };
 
@@ -99,10 +127,11 @@ export const searchLimiter = (req: Request, res: Response, next: NextFunction): 
   searchRateLimiter.consume(key)
     .then(() => next())
     .catch((err) => {
-      if (err instanceof Error) {
-        return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
+      if (err && err.remainingPoints !== undefined) {
+        return res.status(429).json({ success: false, statusCode: 429, message: 'Too many search requests, please slow down.' });
       }
-      res.status(429).json({ success: false, statusCode: 429, message: 'Too many search requests, please slow down.' });
+      logger.warn('Search rate limiter encountered an error, failing open:', err);
+      return next();
     });
 };
 
@@ -112,16 +141,22 @@ export const otpRateLimiter = new RateLimiterRedis({
   points: 10,
   duration: 15 * 60,
   blockDuration: 5 * 60,
+  insuranceLimiter: new RateLimiterMemory({
+    points: 10,
+    duration: 15 * 60,
+    blockDuration: 5 * 60
+  })
 });
 
 export const otpLimiter = (req: Request, res: Response, next: NextFunction): void => {
   otpRateLimiter.consume(req.ip || '127.0.0.1')
     .then(() => next())
     .catch((err) => {
-      if (err instanceof Error) {
-        return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
+      if (err && err.remainingPoints !== undefined) {
+        return res.status(429).json({ success: false, statusCode: 429, message: 'Too many OTP requests, try again after 15 minutes.' });
       }
-      res.status(429).json({ success: false, statusCode: 429, message: 'Too many OTP requests, try again after 15 minutes.' });
+      logger.warn('OTP rate limiter encountered an error, failing open:', err);
+      return next();
     });
 };
 
@@ -129,7 +164,11 @@ export const chatRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
   keyPrefix: 'chat_api_v1',
   points: 30,
-  duration: 60
+  duration: 60,
+  insuranceLimiter: new RateLimiterMemory({
+    points: 30,
+    duration: 60
+  })
 });
 
 export const chatLimiter = (req: Request, res: Response, next: NextFunction): void => {
@@ -137,10 +176,11 @@ export const chatLimiter = (req: Request, res: Response, next: NextFunction): vo
   chatRateLimiter.consume(key)
     .then(() => next())
     .catch((err) => {
-      if (err instanceof Error) {
-        return res.status(500).json({ success: false, statusCode: 500, message: 'Internal Server Error' });
+      if (err && err.remainingPoints !== undefined) {
+        return res.status(429).json({ success: false, statusCode: 429, message: 'Too many requests, please slow down.' });
       }
-      res.status(429).json({ success: false, statusCode: 429, message: 'Too many requests, please slow down.' });
+      logger.warn('Chat rate limiter encountered an error, failing open:', err);
+      return next();
     });
 };
 
