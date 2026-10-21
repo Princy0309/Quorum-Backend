@@ -37,3 +37,15 @@ export const respondInviteSchema = z.object({
   action: z.enum(['accept', 'decline'])
 });
 
+export const createChannelSchema = z.object({
+  name: z.string().trim().min(2).max(50),
+  description: z.string().trim().max(500).optional().nullable()
+});
+
+export const updateChannelSchema = z.object({
+  name: z.string().trim().min(2).max(50).optional(),
+  description: z.string().trim().max(500).optional().nullable()
+}).refine((data) => data.name !== undefined || data.description !== undefined, {
+  message: 'At least one field (name or description) must be provided'
+});
+
