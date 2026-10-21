@@ -287,7 +287,7 @@ export const createInviteLink = async (userId: string, communityId: string, expi
     }
 
     const token = crypto.randomBytes(16).toString('hex');
-    const days = expiresInDays && expiresInDays > 0 ? expiresInDays : 7;
+    const days = Math.min(Math.max(expiresInDays && expiresInDays > 0 ? expiresInDays : 7, 1), 30);
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + days);
 
@@ -378,7 +378,25 @@ export const joinCommunityViaInvite = async (userId: string, token: string) => {
       await tx.$queryRaw`SELECT id FROM "CommunityInvite" WHERE token = ${token} FOR UPDATE`;
 
       const invite = await tx.communityInvite.findUnique({
-        where: { token }
+        where: { token },
+        include: {
+          community: {
+            include: {
+              owner: {
+                select: {
+                  id: true,
+                  name: true,
+                  avatar: true
+                }
+              },
+              _count: {
+                select: {
+                  members: true
+                }
+              }
+            }
+          }
+        }
       });
 
       if (!invite || invite.isRevoked) {
@@ -387,6 +405,30 @@ export const joinCommunityViaInvite = async (userId: string, token: string) => {
 
       if (invite.expiresAt && invite.expiresAt < new Date()) {
         throw new ApiError(410, 'Invitation link has expired');
+      }
+
+      const isTargeted = Boolean(invite.inviteeId || invite.email);
+      if (isTargeted) {
+        if (invite.status !== 'pending') {
+          throw new ApiError(400, `Invitation has already been ${invite.status}`);
+        }
+
+        const user = await tx.user.findUnique({
+          where: { id: userId },
+          select: { id: true, email: true }
+        });
+
+        if (!user) {
+          throw new ApiError(401, 'Unauthorized');
+        }
+
+        if (invite.inviteeId && invite.inviteeId !== userId) {
+          if (!invite.email || invite.email.toLowerCase() !== user.email.toLowerCase()) {
+            throw new ApiError(403, 'You are not authorized to use this invitation');
+          }
+        } else if (invite.email && invite.email.toLowerCase() !== user.email.toLowerCase()) {
+          throw new ApiError(403, 'You are not authorized to use this invitation');
+        }
       }
 
       const existingMember = await tx.communityMember.findUnique({
@@ -399,14 +441,36 @@ export const joinCommunityViaInvite = async (userId: string, token: string) => {
       });
 
       if (existingMember) {
-        throw new ApiError(400, 'You are already a member of this community');
+        if (isTargeted) {
+          await tx.communityInvite.update({
+            where: { id: invite.id },
+            data: {
+              status: 'accepted',
+              inviteeId: userId
+            }
+          });
+        }
+        return {
+          success: true,
+          message: 'You are already a member of this community',
+          communityId: invite.communityId,
+          name: invite.community.name,
+          description: invite.community.description,
+          role: existingMember.role,
+          memberCount: invite.community._count.members,
+          joinedAt: existingMember.joinedAt
+        };
       }
+
+      const assignedRole = (isTargeted && invite.role === CommunityRole.ADMIN)
+        ? CommunityRole.ADMIN
+        : CommunityRole.MEMBER;
 
       const newMembership = await tx.communityMember.create({
         data: {
           communityId: invite.communityId,
           userId,
-          role: CommunityRole.MEMBER
+          role: assignedRole
         },
         include: {
           community: {
@@ -428,7 +492,19 @@ export const joinCommunityViaInvite = async (userId: string, token: string) => {
         }
       });
 
+      if (isTargeted) {
+        await tx.communityInvite.update({
+          where: { id: invite.id },
+          data: {
+            status: 'accepted',
+            inviteeId: userId
+          }
+        });
+      }
+
       return {
+        success: true,
+        message: 'Joined community successfully',
         communityId: newMembership.communityId,
         name: newMembership.community.name,
         description: newMembership.community.description,
@@ -585,7 +661,7 @@ export const inviteUserToCommunity = async (
     });
 
     const token = crypto.randomBytes(16).toString('hex');
-    const days = input.expiresInDays && input.expiresInDays > 0 ? input.expiresInDays : 7;
+    const days = Math.min(Math.max(input.expiresInDays && input.expiresInDays > 0 ? input.expiresInDays : 7, 1), 30);
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + days);
     const assignedRole = input.role === CommunityRole.ADMIN ? CommunityRole.ADMIN : CommunityRole.MEMBER;
@@ -843,16 +919,30 @@ export const respondToCommunityInvite = async (
     if (existingMembership) {
       await tx.communityInvite.update({
         where: { id: invite.id },
-        data: { status: 'accepted' }
+        data: {
+          status: 'accepted',
+          inviteeId: userId
+        }
       });
-      throw new ApiError(400, 'You are already a member of this community');
+      return {
+        success: true,
+        message: 'You are already a member of this community',
+        communityId: invite.communityId,
+        name: invite.community.name,
+        description: invite.community.description,
+        role: existingMembership.role,
+        memberCount: invite.community._count.members,
+        joinedAt: existingMembership.joinedAt
+      };
     }
+
+    const assignedRole = invite.role === CommunityRole.ADMIN ? CommunityRole.ADMIN : CommunityRole.MEMBER;
 
     const newMembership = await tx.communityMember.create({
       data: {
         communityId: invite.communityId,
         userId,
-        role: invite.role || CommunityRole.MEMBER
+        role: assignedRole
       },
       include: {
         community: {
@@ -1309,14 +1399,34 @@ export const searchCommunities = async (
   cursor?: string,
   limit: number = 20
 ) => {
+  const userMemberships = await prisma.communityMember.findMany({
+    where: { userId },
+    select: { communityId: true }
+  });
+
+  const joinedCommunityIds = userMemberships.map((m) => m.communityId);
+  if (joinedCommunityIds.length === 0) {
+    return {
+      communities: [],
+      nextCursor: null,
+      hasNextPage: false
+    };
+  }
+
   const cleanQuery = typeof query === 'string' ? query.trim() : '';
   const take = Math.min(Math.max(limit, 1), 50);
 
-  const whereClause: any = {};
+  const whereClause: any = {
+    id: { in: joinedCommunityIds }
+  };
   if (cleanQuery) {
-    whereClause.OR = [
-      { name: { contains: cleanQuery, mode: 'insensitive' } },
-      { description: { contains: cleanQuery, mode: 'insensitive' } }
+    whereClause.AND = [
+      {
+        OR: [
+          { name: { contains: cleanQuery, mode: 'insensitive' } },
+          { description: { contains: cleanQuery, mode: 'insensitive' } }
+        ]
+      }
     ];
   }
 
@@ -1365,8 +1475,8 @@ export const searchCommunities = async (
         owner: c.owner,
         memberCount: c._count.members,
         postCount: c._count.posts,
-        isMember: !!userMembership,
-        role: userMembership ? userMembership.role : null,
+        isMember: true,
+        role: userMembership ? userMembership.role : CommunityRole.MEMBER,
         joinedAt: userMembership ? userMembership.joinedAt : null,
         createdAt: c.createdAt,
         updatedAt: c.updatedAt
