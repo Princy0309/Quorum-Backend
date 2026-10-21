@@ -8,7 +8,9 @@ import {
   inviteMemberSchema,
   respondInviteSchema,
   updateMemberRoleSchema,
-  transferOwnershipSchema
+  transferOwnershipSchema,
+  createChannelSchema,
+  updateChannelSchema
 } from '../validators/communityValidators.js';
 import { createPostSchema } from '../validators/postValidators.js';
 import {
@@ -33,7 +35,12 @@ import {
   leaveCommunityController,
   removeCommunityMemberController,
   changeMemberRoleController,
-  transferCommunityOwnershipController
+  transferCommunityOwnershipController,
+  createChannelController,
+  getCommunityChannelsController,
+  getChannelDetailsController,
+  updateChannelController,
+  deleteChannelController
 } from '../controllers/communityController.js';
 import {
   createPostController,
@@ -70,6 +77,14 @@ router.patch('/:id/members/:userId/role', authMiddleware, validate(updateMemberR
 router.post('/:id/leave', authMiddleware, leaveCommunityController);
 router.post('/:id/transfer-ownership', authMiddleware, validate(transferOwnershipSchema), transferCommunityOwnershipController);
 router.delete('/:id/members/:userId', authMiddleware, removeCommunityMemberController);
+
+router.get('/:id/channels', authMiddleware, getCommunityChannelsController);
+router.post('/:id/channels', authMiddleware, validate(createChannelSchema), createChannelController);
+router.get('/:id/channels/:channelId', authMiddleware, getChannelDetailsController);
+router.patch('/:id/channels/:channelId', authMiddleware, validate(updateChannelSchema), updateChannelController);
+router.delete('/:id/channels/:channelId', authMiddleware, deleteChannelController);
+router.get('/:id/channels/:channelId/posts', authMiddleware, getCommunityPostsController);
+router.post('/:id/channels/:channelId/posts', authMiddleware, validate(createPostSchema), createPostController);
 
 router.post('/:id/posts', authMiddleware, validate(createPostSchema), createPostController);
 router.get('/:id/posts', authMiddleware, getCommunityPostsController);
