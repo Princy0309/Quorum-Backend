@@ -35,7 +35,7 @@ export const createCommunityPost = async (
   const fileName = typeof postData === 'object' && postData.fileName ? postData.fileName.trim() : null;
   const fileSize = typeof postData === 'object' && typeof postData.fileSize === 'number' ? postData.fileSize : null;
 
-  let targetChannelId: string | null = null;
+  let targetChannelId: string;
   if (typeof postData === 'object' && postData.channelId) {
     const channel = await prisma.communityChannel.findUnique({
       where: { id: postData.channelId }
@@ -46,7 +46,10 @@ export const createCommunityPost = async (
     targetChannelId = channel.id;
   } else {
     const defaultGeneral = await ensureDefaultGeneralChannel(communityId);
-    targetChannelId = defaultGeneral ? defaultGeneral.id : null;
+    if (!defaultGeneral) {
+      throw new ApiError(500, 'Failed to resolve default channel for community');
+    }
+    targetChannelId = defaultGeneral.id;
   }
 
   const post = await prisma.communityPost.create({

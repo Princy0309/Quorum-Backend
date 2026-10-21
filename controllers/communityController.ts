@@ -51,6 +51,13 @@ const validateChannelId = (id: unknown): string => {
   return id.trim();
 };
 
+const validateInviteId = (id: unknown): string => {
+  if (!id || typeof id !== 'string' || !UUID_REGEX.test(id.trim())) {
+    throw new ApiError(400, 'Invalid invite ID format');
+  }
+  return id.trim();
+};
+
 export const createCommunityController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.id;
@@ -229,7 +236,7 @@ export const revokeInviteLinkController = async (req: Request, res: Response, ne
     }
 
     const id = validateCommunityId(req.params.id);
-    const inviteId = validateCommunityId(req.params.inviteId);
+    const inviteId = validateInviteId(req.params.inviteId);
 
     const result = await revokeInviteLink(userId, id, inviteId);
     res.status(200).json({
