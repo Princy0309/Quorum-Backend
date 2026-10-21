@@ -256,6 +256,10 @@ export class RoomBroker extends EventEmitter {
       );
     }
 
+    if (kind === 'video') {
+      this.requestKeyframe(roomCode, publishedTrack.peerId, trackId);
+    }
+
     return true;
   }
 
@@ -393,6 +397,34 @@ export class RoomBroker extends EventEmitter {
       }
     }
     return tracks;
+  }
+
+  public unpublishTrack(
+    roomCode: string,
+    peerId: string,
+    trackId: string
+  ): boolean {
+    const room = this.rooms.get(roomCode);
+    if (!room) return false;
+
+    const peer = room.peers.get(peerId);
+    if (!peer) return false;
+
+    if (!peer.publishedTracks.has(trackId)) {
+      return false;
+    }
+
+    peer.publishedTracks.delete(trackId);
+    room.channels.delete(trackId);
+
+    const router = this.routers.get(roomCode);
+    if (router) {
+      router.removePublisher(trackId);
+    }
+
+    this.emit('track-unpublished', { roomCode, peerId, trackId });
+    logger.info(`[SFU Broker] Track ${trackId} unpublished by peer ${peerId} in room ${roomCode}`);
+    return true;
   }
 
   public removePeer(roomCode: string, peerId: string): void {

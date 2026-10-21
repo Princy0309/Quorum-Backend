@@ -345,13 +345,49 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     logger.info(`[Signaling] Peer ${pId} unsubscribed from track ${trackId}`);
   });
 
+  socket.on('sfu:unpublish', ({ roomCode, peerId, trackId }: { roomCode: string; peerId: string; trackId: string }) => {
+    const rCode = roomCode || currentRoom;
+    const pId = peerId || currentPeerId;
+    if (!rCode || !pId || !trackId) return;
+
+    for (const [key, pc] of subscriberPeerConnections.entries()) {
+      if (key.endsWith(`:${trackId}`)) {
+        try {
+          pc.close();
+        } catch {}
+        subscriberPeerConnections.delete(key);
+      }
+    }
+
+    const unpublished = roomBroker.unpublishTrack(rCode, pId, trackId);
+    if (unpublished) {
+      socket.to(rCode).emit('sfu:track-unpublished', { peerId: pId, trackId });
+      logger.info(`[Signaling] Peer ${pId} unpublished track ${trackId}`);
+    }
+  });
+
   const handleLeave = () => {
     if (currentRoom && currentPeerId) {
+      const room = roomBroker.getOrCreateRoom(currentRoom);
+      const peer = room.peers.get(currentPeerId);
+      const publishedTrackIds = peer ? Array.from(peer.publishedTracks.keys()) : [];
+
       for (const [key, pc] of subscriberPeerConnections.entries()) {
-        if (key.includes(`:${currentPeerId}:`)) {
-          pc.close();
+        const isSubscriberForPeer = key.includes(`:${currentPeerId}:`);
+        const isTrackPublishedByPeer = publishedTrackIds.some((tId) => key.endsWith(`:${tId}`));
+        if (isSubscriberForPeer || isTrackPublishedByPeer) {
+          try {
+            pc.close();
+          } catch {}
           subscriberPeerConnections.delete(key);
         }
+      }
+
+      for (const tId of publishedTrackIds) {
+        socket.to(currentRoom).emit('sfu:track-unpublished', {
+          peerId: currentPeerId,
+          trackId: tId,
+        });
       }
 
       roomBroker.removePeer(currentRoom, currentPeerId);
