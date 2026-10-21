@@ -5,6 +5,9 @@ import { createPeerConnection } from '../sfu/peerConnection.js';
 import { SrtpContext } from '../sfu/protocols/srtp/srtpContext.js';
 import { SrtpSession } from '../sfu/protocols/srtp/srtpPacket.js';
 import logger from '../utils/logger.js';
+import { RoomSharder } from '../sfu/roomSharder.js';
+
+
 
 interface JoinPayload {
   roomCode: string;
@@ -181,63 +184,72 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     }
   };
 
-  socket.on('sfu:join', ({ roomCode, peerId, name }: JoinPayload) => {
-    if (!roomCode) {
-      socket.emit('sfu:error', { message: 'roomCode is required' });
-      return;
-    }
-
-    if (!socket.data.user?.isAuthenticated) {
-      logger.warn(`[Signaling] Rejecting unauthenticated SFU join from socket ${socket.id}`);
-      socket.emit('sfu:error', { message: 'Authentication required to join SFU room' });
-      return;
-    }
-
-    const effectivePeerId = socket.data.user.id;
-    const effectiveName = socket.data.user.name || name || 'Participant';
-
-    if (currentRoom) {
-      handleLeave();
-    }
-
-    const existingRoom = roomBroker.getRoom(roomCode);
-    const existingPeer = existingRoom?.peers.get(effectivePeerId);
-    if (existingPeer && existingPeer.socketId && existingPeer.socketId !== socket.id) {
-      io.to(existingPeer.socketId).emit('sfu:replaced', {
-        roomCode,
-        peerId: effectivePeerId,
-        message: 'Session replaced by another connection'
-      });
-      existingPeer.socketId = socket.id;
-    }
-
-    currentRoom = roomCode;
-    currentPeerId = effectivePeerId;
-
-    socket.join(roomCode);
-    roomBroker.addPeer(roomCode, effectivePeerId, socket.id, effectiveName);
-
-    const existingTracks = roomBroker.getRoomTracks(roomCode).map((t) => ({
-      trackId: t.trackId,
-      kind: t.kind,
-      peerId: t.peerId,
-    }));
-
-    socket.emit('sfu:joined', { existingTracks, peerId: effectivePeerId });
-    socket.to(roomCode).emit('sfu:peer-joined', { peerId: effectivePeerId, name: effectiveName });
-
-    for (const t of existingTracks) {
-      if (t.peerId !== effectivePeerId) {
-        socket.emit('sfu:new-producer', {
-          peerId: t.peerId,
-          trackId: t.trackId,
-          kind: t.kind,
-        });
+    socket.on('sfu:join', async ({ roomCode, peerId, name }: JoinPayload) => {
+      if (!roomCode) {
+        socket.emit('sfu:error', { message: 'roomCode is required' });
+        return;
       }
-    }
 
-    logger.info(`[Signaling] Peer ${effectivePeerId} joined SFU room ${roomCode}`);
-  });
+      if (!socket.data.user?.isAuthenticated) {
+        logger.warn(`[Signaling] Rejecting unauthenticated SFU join from socket ${socket.id}`);
+        socket.emit('sfu:error', { message: 'Authentication required to join SFU room' });
+        return;
+      }
+
+      const effectivePeerId = socket.data.user.id || peerId;
+      const effectiveName = socket.data.user.name || name || 'Participant';
+
+      if (currentRoom) {
+        handleLeave();
+      }
+
+      const existingRoom = roomBroker.getRoom(roomCode);
+      const existingPeer = existingRoom?.peers.get(effectivePeerId);
+      if (existingPeer && existingPeer.socketId && existingPeer.socketId !== socket.id) {
+        io.to(existingPeer.socketId).emit('sfu:replaced', {
+          roomCode,
+          peerId: effectivePeerId,
+          message: 'Session replaced by another connection',
+        });
+        existingPeer.socketId = socket.id;
+      }
+
+      currentRoom = roomCode;
+      currentPeerId = effectivePeerId;
+
+      try {
+        const assignedWorker = await RoomSharder.getInstance().getOrAssignWorker(roomCode);
+        logger.info(`[Signaling] Room ${roomCode} coordinated on ${assignedWorker} for peer ${effectivePeerId}`);
+      } catch (shardingErr) {
+        logger.warn(`[Signaling] Room sharder coordination warning:`, shardingErr);
+      }
+
+      socket.join(roomCode);
+      roomBroker.addPeer(roomCode, effectivePeerId, socket.id, effectiveName);
+
+      const existingTracks = roomBroker.getRoomTracks(roomCode).map((t) => ({
+        trackId: t.trackId,
+        kind: t.kind,
+        peerId: t.peerId,
+      }));
+
+      socket.emit('sfu:joined', { existingTracks });
+      socket.to(roomCode).emit('sfu:peer-joined', { peerId: effectivePeerId, name: effectiveName });
+
+      for (const t of existingTracks) {
+        if (t.peerId !== effectivePeerId) {
+          socket.emit('sfu:new-producer', {
+            peerId: t.peerId,
+            trackId: t.trackId,
+            kind: t.kind,
+          });
+        }
+      }
+
+      logger.info(`[Signaling] Peer ${effectivePeerId} joined SFU room ${roomCode}`);
+    });
+
+  
 
   socket.on('sfu:offer', async ({ roomCode, peerId, sdp }: OfferPayload) => {
     let pc: RTCPeerConnection | null = null;

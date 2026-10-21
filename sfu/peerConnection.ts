@@ -1,5 +1,7 @@
 import { RTCPeerConnection, RTCRtpCodecParameters } from "werift";
 import logger from "../utils/logger.js";
+import sfuConfig from "../config/sfuConfig.js";
+
 
 export const AUDIO_CODEC = new RTCRtpCodecParameters({
     mimeType: 'audio/opus',
@@ -23,15 +25,9 @@ export const createPeerConnection = (): RTCPeerConnection => {
       audio: [AUDIO_CODEC],
       video: [VIDEO_CODEC],
     },
-    iceServers: [
-      {
-        urls: 'stun:stun.l.google.com:19302',
-      },
-    ],
-    icePortRange: [40000, 40100],
-    iceAdditionalHostAddresses: [
-      process.env.ANNOUNCED_IP || '13.126.35.230',
-    ],
+    iceServers: sfuConfig.stunUrls.map((url) => ({ urls: url })),
+    icePortRange: sfuConfig.portRange,
+    iceAdditionalHostAddresses: [sfuConfig.announcedIp],
   });
 
   pc.connectionStateChange.subscribe((state) => {
