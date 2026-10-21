@@ -133,20 +133,6 @@ export class RoomBroker extends EventEmitter {
 
     router.addPublisher(publisher, trackId);
 
-    const iceConn = (peer.peerConnection as any)?.iceTransports?.[0]?.connection;
-    if (iceConn && typeof iceConn.onData?.subscribe === 'function') {
-      iceConn.onData.subscribe((data: Buffer) => {
-        if (data.length >= 12 && data[0] >= 128 && data[0] <= 191) {
-          const pt = data[1] & 0x7f;
-          if (pt >= 200 && pt <= 207) {
-            publisher.pushSrtcp(data);
-          } else {
-            publisher.pushSrtp(data);
-          }
-        }
-      });
-    }
-
     track.onReceiveRtp.subscribe((packet: RtpPacket) => {
       if (!publishedTrack.ssrc && packet.header?.ssrc) {
         publishedTrack.ssrc = packet.header.ssrc;
@@ -179,7 +165,8 @@ export class RoomBroker extends EventEmitter {
     roomCode: string,
     subscriberPeerId: string,
     trackId: string,
-    sender: RTCRtpSender
+    sender: RTCRtpSender,
+    subscriberPeerConnection?: any
   ): boolean {
     const room = this.rooms.get(roomCode);
     if (!room) {
@@ -217,11 +204,13 @@ export class RoomBroker extends EventEmitter {
       srtpSession: peer.outboundSrtpSession,
       transportSender: (buf: Buffer) => {
         try {
-          const pc = (sender as any).peerConnection || (peer?.peerConnection as any);
+          const pc = subscriberPeerConnection || (sender as any).peerConnection;
           const iceConn = pc?.iceTransports?.[0]?.connection;
           if (iceConn && typeof iceConn.send === 'function') {
-            iceConn.send(buf).catch(() => {});
-            return true;
+            return iceConn.send(buf).catch((err: any) => {
+              logger.debug(`[SFU Broker] UDP send failed for subscriber ${subscriberPeerId}:`, err);
+              throw err;
+            });
           }
           const rtpPkt = RtpPacket.deSerialize(buf);
           sender.sendRtp(rtpPkt);
@@ -232,19 +221,19 @@ export class RoomBroker extends EventEmitter {
       },
       rtcpTransportSender: (buf: Buffer) => {
         try {
-          const pc = (sender as any).peerConnection || (peer?.peerConnection as any);
+          const pc = subscriberPeerConnection || (sender as any).peerConnection;
           const iceConn = pc?.iceTransports?.[0]?.connection;
           if (iceConn && typeof iceConn.send === 'function') {
-            iceConn.send(buf).catch(() => {});
-            return true;
+            return iceConn.send(buf).catch((err: any) => {
+              logger.debug(`[SFU Broker] UDP RTCP send failed for subscriber ${subscriberPeerId}:`, err);
+              throw err;
+            });
           }
           if (typeof (sender as any).sendRtcp === 'function') {
-            (sender as any).sendRtcp(buf);
-            return true;
+            return (sender as any).sendRtcp(buf);
           }
-          if (pc && typeof pc.sendRtcp === 'function') {
-            pc.sendRtcp(buf);
-            return true;
+          if (pc && typeof (pc as any).sendRtcp === 'function') {
+            return (pc as any).sendRtcp(buf);
           }
           return false;
         } catch {
@@ -328,18 +317,20 @@ export class RoomBroker extends EventEmitter {
     return false;
   }
 
-  public attachPeerSrtpSessions(
+  public attachPublisherSrtpSessions(
     roomCode: string,
     peerId: string,
     inboundSession: SrtpSession,
-    outboundSession: SrtpSession
+    outboundSession?: SrtpSession
   ): void {
     const room = this.rooms.get(roomCode);
     if (!room) return;
     const peer = room.peers.get(peerId);
     if (!peer) return;
     peer.inboundSrtpSession = inboundSession;
-    peer.outboundSrtpSession = outboundSession;
+    if (outboundSession) {
+      peer.outboundSrtpSession = outboundSession;
+    }
 
     const router = this.routers.get(roomCode);
     if (router) {
@@ -349,13 +340,31 @@ export class RoomBroker extends EventEmitter {
           pub.setSrtpSession(inboundSession);
         }
       }
-      for (const trackId of room.channels.keys()) {
-        const sub = router.getSubscriber(peerId, trackId);
-        if (sub) {
-          sub.setSrtpSession(outboundSession);
-        }
+    }
+  }
+
+  public attachSubscriberSrtpSession(
+    roomCode: string,
+    subscriberPeerId: string,
+    trackId: string,
+    outboundSession: SrtpSession
+  ): void {
+    const router = this.routers.get(roomCode);
+    if (router) {
+      const sub = router.getSubscriber(subscriberPeerId, trackId);
+      if (sub) {
+        sub.setSrtpSession(outboundSession);
       }
     }
+  }
+
+  public attachPeerSrtpSessions(
+    roomCode: string,
+    peerId: string,
+    inboundSession: SrtpSession,
+    outboundSession: SrtpSession
+  ): void {
+    this.attachPublisherSrtpSessions(roomCode, peerId, inboundSession, outboundSession);
   }
 
   public requestKeyframe(roomCode: string, publisherPeerId: string, trackId?: string): void {

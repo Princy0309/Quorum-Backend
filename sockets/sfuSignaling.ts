@@ -117,7 +117,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
               const outboundContext = new SrtpContext(localKey, localSalt);
               const inboundSession = new SrtpSession(inboundContext, false);
               const outboundSession = new SrtpSession(outboundContext, true);
-              roomBroker.attachPeerSrtpSessions(roomCode, peerId, inboundSession, outboundSession);
+              roomBroker.attachPublisherSrtpSessions(roomCode, peerId, inboundSession, outboundSession);
               logger.info(`[Signaling] Publisher DTLS connected and SRTP sessions attached for peer ${peerId}`);
             }
           } catch (err) {
@@ -302,7 +302,8 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           roomCode,
           subscriberPeerId,
           trackId,
-          transceiver.sender
+          transceiver.sender,
+          consumerPc
         );
 
         if (!subscribed) {
@@ -327,17 +328,15 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
             try {
               const dtls = (dtlsTransport as any).dtls;
               if (dtls && typeof dtls.extractSessionKeys === 'function') {
-                const { localKey, localSalt, remoteKey, remoteSalt } = dtls.extractSessionKeys(16, 14);
-                const inboundContext = new SrtpContext(remoteKey, remoteSalt);
+                const { localKey, localSalt } = dtls.extractSessionKeys(16, 14);
                 const outboundContext = new SrtpContext(localKey, localSalt);
-                const inboundSession = new SrtpSession(inboundContext, false);
                 const outboundSession = new SrtpSession(outboundContext, true);
-                roomBroker.attachPeerSrtpSessions(roomCode, subscriberPeerId, inboundSession, outboundSession);
+                roomBroker.attachSubscriberSrtpSession(roomCode, subscriberPeerId, trackId, outboundSession);
                 roomBroker.markSubscriberReady(roomCode, subscriberPeerId, trackId);
                 if (publishedTrack.kind === 'video') {
                   roomBroker.requestKeyframe(roomCode, publishedTrack.peerId, trackId);
                 }
-                logger.info(`[Signaling] Subscriber DTLS connected and SRTP sessions attached for peer ${subscriberPeerId} on track ${trackId}`);
+                logger.info(`[Signaling] Subscriber DTLS connected and track-specific SRTP session attached for peer ${subscriberPeerId} on track ${trackId}`);
               }
             } catch (err) {
               logger.error(`[Signaling] Failed to extract subscriber SRTP session keys:`, err);

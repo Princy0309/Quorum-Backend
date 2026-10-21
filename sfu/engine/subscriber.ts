@@ -4,7 +4,7 @@ import { IRtpSubscriber } from './rtpForwarder.js';
 
 export type MediaKind = 'audio' | 'video';
 
-export type PacketTransportSender = (packet: Buffer) => boolean | void;
+export type PacketTransportSender = (packet: Buffer) => boolean | void | Promise<any>;
 
 export type SubscriberLifecycleState = 'pending' | 'ready' | 'closed';
 
@@ -309,7 +309,12 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
 
     try {
       const result = this.transportSender(dispatchPacket);
-      if (result === false) {
+      if (result instanceof Promise) {
+        result.catch((err: any) => {
+          this.stats.packetsDropped++;
+          this.emit('error', err);
+        });
+      } else if (result === false) {
         this.stats.packetsDropped++;
         return false;
       }
@@ -354,7 +359,11 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
 
     try {
       const result = sender(dispatchPacket);
-      if (result === false) {
+      if (result instanceof Promise) {
+        result.catch((err: any) => {
+          this.emit('error', err);
+        });
+      } else if (result === false) {
         return false;
       }
     } catch (err: any) {
