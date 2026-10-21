@@ -15,7 +15,7 @@ const envSchema = z.object({
   JWT_ISSUER: z.string().default('quorum-api'),
   JWT_AUDIENCE: z.string().default('quorum-app'),
 
-  CLIENT_URL: z.string().url().optional(),
+  CLIENT_URL: z.string().url().default(process.env.NODE_ENV === 'production' ? 'https://newquorum.me' : 'http://localhost:3000'),
   SMTP_HOST: z.string().default('smtp.gmail.com'),
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional().default(''),

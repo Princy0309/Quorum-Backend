@@ -24,20 +24,17 @@ import {
 
 const router = Router();
 
-router.use(authMiddleware);
-router.use(aiRateLimiterMiddleware);
-
-router.post('/chat', validate(aiChatSchema), chatController);
-router.post('/summarize', validate(aiSummarySchema), summarizeChatController);
-router.post('/chat/:conversationId/summary', validate(aiSummarySchema), summarizeChatController);
-router.post('/search', validate(aiSearchSchema), searchWorkspaceController);
-router.post('/project-assistance', validate(aiProjectAssistanceSchema), projectAssistanceController);
-router.post('/assistance', validate(aiProjectAssistanceSchema), projectAssistanceController);
-router.post('/assist', validate(aiProjectAssistanceSchema), projectAssistanceController);
-router.post('/quick-replies', validate(aiQuickRepliesSchema), quickRepliesController);
-router.post('/project-update', validate(aiProjectUpdateSchema), projectUpdateController);
-router.get('/history', validateQuery(aiHistoryQuerySchema), getHistoryController);
-router.delete('/history', deleteHistoryController);
-router.delete('/history/:id', deleteHistoryController);
+router.post('/chat', authMiddleware, aiRateLimiterMiddleware, validate(aiChatSchema), chatController);
+router.post('/summarize', authMiddleware, aiRateLimiterMiddleware, validate(aiSummarySchema), summarizeChatController);
+router.post('/chat/:conversationId/summary', authMiddleware, aiRateLimiterMiddleware, validate(aiSummarySchema), summarizeChatController);
+router.post('/search', authMiddleware, aiRateLimiterMiddleware, validate(aiSearchSchema), searchWorkspaceController);
+router.post('/project-assistance', authMiddleware, aiRateLimiterMiddleware, validate(aiProjectAssistanceSchema), projectAssistanceController);
+router.post('/assistance', authMiddleware, aiRateLimiterMiddleware, validate(aiProjectAssistanceSchema), projectAssistanceController);
+router.post('/assist', authMiddleware, aiRateLimiterMiddleware, validate(aiProjectAssistanceSchema), projectAssistanceController);
+router.post('/quick-replies', authMiddleware, aiRateLimiterMiddleware, validate(aiQuickRepliesSchema), quickRepliesController);
+router.post('/project-update', authMiddleware, aiRateLimiterMiddleware, validate(aiProjectUpdateSchema), projectUpdateController);
+router.get('/history', authMiddleware, aiRateLimiterMiddleware, validateQuery(aiHistoryQuerySchema), getHistoryController);
+router.delete('/history', authMiddleware, aiRateLimiterMiddleware, deleteHistoryController);
+router.delete('/history/:id', authMiddleware, aiRateLimiterMiddleware, deleteHistoryController);
 
 export default router;
