@@ -139,7 +139,7 @@ export class RoomBroker extends EventEmitter {
 
     router.addPublisher(publisher, trackId);
 
-    track.onReceiveRtp.subscribe((packet: RtpPacket) => {
+    const rtpSubscription = track.onReceiveRtp.subscribe((packet: RtpPacket) => {
       if (!publishedTrack.ssrc && packet.header?.ssrc) {
         publishedTrack.ssrc = packet.header.ssrc;
         (track as any).ssrc = packet.header.ssrc;
@@ -152,6 +152,7 @@ export class RoomBroker extends EventEmitter {
       const rtpBuffer = packet.serialize ? packet.serialize() : (Buffer.isBuffer(packet) ? packet : Buffer.from((packet as any).buffer));
       publisher.pushRtp(rtpBuffer);
     });
+    publishedTrack.rtpSubscription = rtpSubscription;
 
     logger.info(
       `[SFU Broker] Published track ${trackId} (${track.kind}) by peer ${peerId} in room ${roomCode}`
@@ -443,8 +444,15 @@ export class RoomBroker extends EventEmitter {
     const peer = room.peers.get(peerId);
     if (!peer) return false;
 
-    if (!peer.publishedTracks.has(trackId)) {
+    const published = peer.publishedTracks.get(trackId);
+    if (!published) {
       return false;
+    }
+
+    try {
+      published.rtpSubscription?.unSubscribe();
+    } catch (err) {
+      logger.warn(`[SFU Broker] Error unsubscribing RTP for track ${trackId}:`, err);
     }
 
     peer.publishedTracks.delete(trackId);
@@ -482,7 +490,12 @@ export class RoomBroker extends EventEmitter {
       router.removePeer(resolvedPeerId);
     }
 
-    for (const trackId of peer.publishedTracks.keys()) {
+    for (const [trackId, published] of peer.publishedTracks.entries()) {
+      try {
+        published.rtpSubscription?.unSubscribe();
+      } catch (err) {
+        logger.warn(`[SFU Broker] Error unsubscribing RTP for track ${trackId}:`, err);
+      }
       room.channels.delete(trackId);
       this.emit('track-unpublished', { roomCode, peerId: resolvedPeerId, trackId });
     }

@@ -19,7 +19,7 @@ export interface PublishedTrack {
     peerId: string;
     mediaStreamTrack: MediaStreamTrack;
     ssrc?: number;
-
+    rtpSubscription?: { unSubscribe: () => void };
 }
 
 export interface SfuRoom {

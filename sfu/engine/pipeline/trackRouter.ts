@@ -128,6 +128,7 @@ export class TrackRouter extends EventEmitter {
     const peerId = this.trackOwners.get(trackId);
 
     forwarder.close();
+    publisher.close();
     this.forwarders.delete(trackId);
     this.publishers.delete(trackId);
     this.trackOwners.delete(trackId);
