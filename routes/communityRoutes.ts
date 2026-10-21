@@ -5,6 +5,8 @@ import {
   createCommunitySchema,
   updateCommunitySchema,
   createInviteSchema,
+  inviteMemberSchema,
+  respondInviteSchema,
   updateMemberRoleSchema,
   transferOwnershipSchema
 } from '../validators/communityValidators.js';
@@ -17,6 +19,12 @@ import {
   updateCommunityController,
   deleteCommunityController,
   createInviteLinkController,
+  inviteUserToCommunityController,
+  getCommunityInvitesController,
+  getUserPendingInvitesController,
+  respondToCommunityInviteController,
+  acceptCommunityInviteController,
+  declineCommunityInviteController,
   validateInviteTokenController,
   joinCommunityViaInviteController,
   revokeInviteLinkController,
@@ -40,11 +48,21 @@ router.get('/', authMiddleware, getUserCommunitiesController);
 router.get('/search', authMiddleware, searchCommunitiesController);
 router.get('/feed', authMiddleware, getCommunityFeedController);
 
+router.get('/invitations/pending', authMiddleware, getUserPendingInvitesController);
+router.get('/invites/pending', authMiddleware, getUserPendingInvitesController);
+router.post('/invitations/:identifier/accept', authMiddleware, acceptCommunityInviteController);
+router.post('/invitations/:identifier/decline', authMiddleware, declineCommunityInviteController);
+router.post('/invitations/:identifier/respond', authMiddleware, validate(respondInviteSchema), respondToCommunityInviteController);
+
 router.get('/invites/:token', validateInviteTokenController);
 router.post('/invites/:token/join', authMiddleware, joinCommunityViaInviteController);
+router.post('/invites/:token/accept', authMiddleware, acceptCommunityInviteController);
+router.post('/invites/:token/decline', authMiddleware, declineCommunityInviteController);
 
 router.get('/:id/users/search', authMiddleware, searchUsersToInviteController);
-router.post('/:id/invites', authMiddleware, validate(createInviteSchema), createInviteLinkController);
+router.get('/:id/invites', authMiddleware, getCommunityInvitesController);
+router.post('/:id/invites', authMiddleware, inviteUserToCommunityController);
+router.post('/:id/invitations', authMiddleware, inviteUserToCommunityController);
 router.delete('/:id/invites/:inviteId', authMiddleware, revokeInviteLinkController);
 
 router.get('/:id/members', authMiddleware, getCommunityMembersController);

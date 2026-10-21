@@ -34,18 +34,26 @@ model CommunityMember {
 }
 
 model CommunityInvite {
-  id          String    @id @default(uuid())
+  id          String        @id @default(uuid())
   communityId String
   inviterId   String
-  token       String    @unique
+  inviteeId   String?
+  email       String?
+  role        CommunityRole @default(MEMBER)
+  status      String        @default("pending")
+  token       String        @unique
   expiresAt   DateTime?
-  isRevoked   Boolean   @default(false)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
-  inviter     User      @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+  isRevoked   Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  community   Community     @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  inviter     User          @relation("SentCommunityInvites", fields: [inviterId], references: [id], onDelete: Cascade)
+  invitee     User?         @relation("ReceivedCommunityInvites", fields: [inviteeId], references: [id], onDelete: Cascade)
 
   @@index([communityId])
+  @@index([inviteeId])
+  @@index([email])
+  @@index([status])
 }
 
 model CommunityPost {

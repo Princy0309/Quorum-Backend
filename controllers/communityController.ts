@@ -7,6 +7,10 @@ import {
   updateCommunity,
   deleteCommunity,
   createInviteLink,
+  inviteUserToCommunity,
+  getCommunityInvites,
+  getUserPendingCommunityInvites,
+  respondToCommunityInvite,
   validateInviteToken,
   joinCommunityViaInvite,
   revokeInviteLink,
@@ -219,6 +223,146 @@ export const revokeInviteLinkController = async (req: Request, res: Response, ne
     res.status(200).json({
       success: true,
       data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const inviteUserToCommunityController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const { userId: targetUserId, email, role, expiresInDays } = req.body || {};
+
+    if (!targetUserId && !email) {
+      const result = await createInviteLink(userId, id, expiresInDays);
+      return res.status(201).json({
+        success: true,
+        data: result
+      });
+    }
+
+    const result = await inviteUserToCommunity(userId, id, {
+      userId: targetUserId,
+      email,
+      role,
+      expiresInDays
+    });
+
+    res.status(201).json({
+      success: true,
+      data: result,
+      message: 'Invitation sent successfully'
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getCommunityInvitesController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const result = await getCommunityInvites(userId, id);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getUserPendingInvitesController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const result = await getUserPendingCommunityInvites(userId);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const respondToCommunityInviteController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawIdentifier = req.params.identifier || req.params.inviteId || req.params.token;
+    if (!rawIdentifier || typeof rawIdentifier !== 'string' || rawIdentifier.trim().length === 0) {
+      throw new ApiError(400, 'Invitation identifier is required');
+    }
+
+    const action = req.body?.action === 'decline' ? 'decline' : 'accept';
+    const result = await respondToCommunityInvite(userId, rawIdentifier.trim(), action);
+    res.status(200).json({
+      success: true,
+      data: result,
+      message: result.message
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const acceptCommunityInviteController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawIdentifier = req.params.identifier || req.params.inviteId || req.params.token;
+    if (!rawIdentifier || typeof rawIdentifier !== 'string' || rawIdentifier.trim().length === 0) {
+      throw new ApiError(400, 'Invitation identifier is required');
+    }
+
+    const result = await respondToCommunityInvite(userId, rawIdentifier.trim(), 'accept');
+    res.status(200).json({
+      success: true,
+      data: result,
+      message: result.message
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const declineCommunityInviteController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawIdentifier = req.params.identifier || req.params.inviteId || req.params.token;
+    if (!rawIdentifier || typeof rawIdentifier !== 'string' || rawIdentifier.trim().length === 0) {
+      throw new ApiError(400, 'Invitation identifier is required');
+    }
+
+    const result = await respondToCommunityInvite(userId, rawIdentifier.trim(), 'decline');
+    res.status(200).json({
+      success: true,
+      data: result,
+      message: result.message
     });
   } catch (err) {
     next(err);

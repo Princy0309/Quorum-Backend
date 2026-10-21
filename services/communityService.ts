@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import prisma from '../config/prisma.js';
 import env from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
+import { queueNotification } from '../queues/notificationQueue.js';
 
 export const CommunityRole = {
   OWNER: 'OWNER',
@@ -459,12 +460,402 @@ export const revokeInviteLink = async (userId: string, communityId: string, invi
 
     await tx.communityInvite.update({
       where: { id: inviteId },
-      data: { isRevoked: true }
+      data: { isRevoked: true, status: 'revoked' }
     });
 
     return {
       success: true,
       message: 'Invitation link revoked successfully'
+    };
+  });
+};
+
+export interface InviteUserToCommunityInput {
+  userId?: string;
+  email?: string;
+  role?: CommunityRole;
+  expiresInDays?: number;
+}
+
+export const inviteUserToCommunity = async (
+  inviterUserId: string,
+  communityId: string,
+  input: InviteUserToCommunityInput
+) => {
+  return await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Community" WHERE id = ${communityId} FOR UPDATE`;
+
+    const community = await tx.community.findUnique({
+      where: { id: communityId },
+      include: {
+        owner: { select: { id: true, name: true, email: true } }
+      }
+    });
+
+    if (!community) {
+      throw new ApiError(404, 'Community not found');
+    }
+
+    const inviterMembership = await tx.communityMember.findUnique({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId: inviterUserId
+        }
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true, avatar: true } }
+      }
+    });
+
+    if (!inviterMembership || (inviterMembership.role !== CommunityRole.OWNER && inviterMembership.role !== CommunityRole.ADMIN)) {
+      throw new ApiError(403, 'Only community owners and admins can invite members');
+    }
+
+    let targetUser = null;
+    if (input.userId) {
+      targetUser = await tx.user.findUnique({
+        where: { id: input.userId },
+        select: { id: true, name: true, email: true, avatar: true }
+      });
+    } else if (input.email) {
+      const cleanEmail = input.email.trim().toLowerCase();
+      targetUser = await tx.user.findUnique({
+        where: { email: cleanEmail },
+        select: { id: true, name: true, email: true, avatar: true }
+      });
+    }
+
+    if (!targetUser) {
+      throw new ApiError(404, 'User not found');
+    }
+
+    if (targetUser.id === inviterUserId) {
+      throw new ApiError(400, 'You cannot invite yourself to the community');
+    }
+
+    const existingMembership = await tx.communityMember.findUnique({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId: targetUser.id
+        }
+      }
+    });
+
+    if (existingMembership) {
+      throw new ApiError(400, 'User is already a member of this community');
+    }
+
+    const existingActiveInvite = await tx.communityInvite.findFirst({
+      where: {
+        communityId,
+        inviteeId: targetUser.id,
+        status: 'pending',
+        isRevoked: false,
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: new Date() } }
+        ]
+      }
+    });
+
+    const token = crypto.randomBytes(16).toString('hex');
+    const days = input.expiresInDays && input.expiresInDays > 0 ? input.expiresInDays : 7;
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + days);
+    const assignedRole = input.role === CommunityRole.ADMIN ? CommunityRole.ADMIN : CommunityRole.MEMBER;
+
+    let invite;
+    if (existingActiveInvite) {
+      invite = await tx.communityInvite.update({
+        where: { id: existingActiveInvite.id },
+        data: {
+          token,
+          expiresAt,
+          role: assignedRole,
+          inviterId: inviterUserId,
+          status: 'pending'
+        },
+        include: {
+          community: { select: { id: true, name: true, description: true } },
+          inviter: { select: { id: true, name: true, email: true, avatar: true } },
+          invitee: { select: { id: true, name: true, email: true, avatar: true } }
+        }
+      });
+    } else {
+      invite = await tx.communityInvite.create({
+        data: {
+          communityId,
+          inviterId: inviterUserId,
+          inviteeId: targetUser.id,
+          email: targetUser.email,
+          role: assignedRole,
+          status: 'pending',
+          token,
+          expiresAt
+        },
+        include: {
+          community: { select: { id: true, name: true, description: true } },
+          inviter: { select: { id: true, name: true, email: true, avatar: true } },
+          invitee: { select: { id: true, name: true, email: true, avatar: true } }
+        }
+      });
+    }
+
+    const baseUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || env.CLIENT_URL;
+    const cleanBase = baseUrl.replace(/\/$/, '');
+    const inviteUrl = `${cleanBase}/communities/invites/${invite.token}`;
+
+    try {
+      await queueNotification({
+        recipientId: targetUser.id,
+        actorId: inviterUserId,
+        type: 'COMMUNITY_INVITE',
+        title: 'Community Invitation',
+        body: `${inviterMembership.user?.name || 'Someone'} invited you to join the community "${community.name}"`,
+        data: {
+          communityId: community.id,
+          communityName: community.name,
+          inviteId: invite.id,
+          token: invite.token,
+          role: invite.role
+        }
+      });
+    } catch {
+    }
+
+    return {
+      id: invite.id,
+      communityId: invite.communityId,
+      communityName: invite.community.name,
+      role: invite.role,
+      status: invite.status,
+      token: invite.token,
+      inviteUrl,
+      expiresAt: invite.expiresAt,
+      createdAt: invite.createdAt,
+      inviter: invite.inviter,
+      invitee: invite.invitee
+    };
+  });
+};
+
+export const getCommunityInvites = async (userId: string, communityId: string) => {
+  const membership = await prisma.communityMember.findUnique({
+    where: {
+      communityId_userId: {
+        communityId,
+        userId
+      }
+    }
+  });
+
+  if (!membership || (membership.role !== CommunityRole.OWNER && membership.role !== CommunityRole.ADMIN)) {
+    throw new ApiError(403, 'Only community owners and admins can view invitations');
+  }
+
+  const invites = await prisma.communityInvite.findMany({
+    where: { communityId },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      inviter: { select: { id: true, name: true, email: true, avatar: true } },
+      invitee: { select: { id: true, name: true, email: true, avatar: true } }
+    }
+  });
+
+  const baseUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || env.CLIENT_URL;
+  const cleanBase = baseUrl.replace(/\/$/, '');
+
+  return invites.map((inv) => ({
+    id: inv.id,
+    communityId: inv.communityId,
+    role: inv.role,
+    status: inv.status,
+    isRevoked: inv.isRevoked,
+    token: inv.token,
+    inviteUrl: `${cleanBase}/communities/invites/${inv.token}`,
+    email: inv.email,
+    expiresAt: inv.expiresAt,
+    createdAt: inv.createdAt,
+    inviter: inv.inviter,
+    invitee: inv.invitee
+  }));
+};
+
+export const getUserPendingCommunityInvites = async (userId: string) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true }
+  });
+
+  const invites = await prisma.communityInvite.findMany({
+    where: {
+      isRevoked: false,
+      status: 'pending',
+      OR: [
+        { inviteeId: userId },
+        ...(user?.email ? [{ email: user.email }] : [])
+      ],
+      AND: [
+        {
+          OR: [
+            { expiresAt: null },
+            { expiresAt: { gt: new Date() } }
+          ]
+        }
+      ]
+    },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      community: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          _count: { select: { members: true } }
+        }
+      },
+      inviter: {
+        select: { id: true, name: true, email: true, avatar: true }
+      }
+    }
+  });
+
+  const baseUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || env.CLIENT_URL;
+  const cleanBase = baseUrl.replace(/\/$/, '');
+
+  return invites.map((inv) => ({
+    id: inv.id,
+    communityId: inv.communityId,
+    communityName: inv.community.name,
+    communityDescription: inv.community.description,
+    memberCount: inv.community._count.members,
+    role: inv.role,
+    status: inv.status,
+    token: inv.token,
+    inviteUrl: `${cleanBase}/communities/invites/${inv.token}`,
+    expiresAt: inv.expiresAt,
+    createdAt: inv.createdAt,
+    inviter: inv.inviter
+  }));
+};
+
+export const respondToCommunityInvite = async (
+  userId: string,
+  inviteIdentifier: string,
+  action: 'accept' | 'decline'
+) => {
+  return await prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, name: true }
+    });
+
+    if (!user) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const invite = await tx.communityInvite.findFirst({
+      where: {
+        OR: [
+          { id: inviteIdentifier },
+          { token: inviteIdentifier }
+        ]
+      },
+      include: {
+        community: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            _count: { select: { members: true } }
+          }
+        }
+      }
+    });
+
+    if (!invite || invite.isRevoked) {
+      throw new ApiError(404, 'Invitation is invalid or has been revoked');
+    }
+
+    if (invite.status !== 'pending') {
+      throw new ApiError(400, `Invitation has already been ${invite.status}`);
+    }
+
+    if (invite.expiresAt && invite.expiresAt < new Date()) {
+      throw new ApiError(410, 'Invitation has expired');
+    }
+
+    if (invite.inviteeId && invite.inviteeId !== userId) {
+      if (!invite.email || invite.email.toLowerCase() !== user.email.toLowerCase()) {
+        throw new ApiError(403, 'You are not authorized to respond to this invitation');
+      }
+    } else if (invite.email && invite.email.toLowerCase() !== user.email.toLowerCase()) {
+      throw new ApiError(403, 'You are not authorized to respond to this invitation');
+    }
+
+    if (action === 'decline') {
+      await tx.communityInvite.update({
+        where: { id: invite.id },
+        data: { status: 'declined' }
+      });
+
+      return {
+        success: true,
+        message: 'Invitation declined successfully'
+      };
+    }
+
+    const existingMembership = await tx.communityMember.findUnique({
+      where: {
+        communityId_userId: {
+          communityId: invite.communityId,
+          userId
+        }
+      }
+    });
+
+    if (existingMembership) {
+      await tx.communityInvite.update({
+        where: { id: invite.id },
+        data: { status: 'accepted' }
+      });
+      throw new ApiError(400, 'You are already a member of this community');
+    }
+
+    const newMembership = await tx.communityMember.create({
+      data: {
+        communityId: invite.communityId,
+        userId,
+        role: invite.role || CommunityRole.MEMBER
+      },
+      include: {
+        community: {
+          include: {
+            _count: { select: { members: true } }
+          }
+        }
+      }
+    });
+
+    await tx.communityInvite.update({
+      where: { id: invite.id },
+      data: {
+        status: 'accepted',
+        inviteeId: userId
+      }
+    });
+
+    return {
+      success: true,
+      message: 'Joined community successfully',
+      communityId: newMembership.communityId,
+      name: newMembership.community.name,
+      description: newMembership.community.description,
+      role: newMembership.role,
+      memberCount: newMembership.community._count.members,
+      joinedAt: newMembership.joinedAt
     };
   });
 };

@@ -30,7 +30,8 @@ model User {
   ownedConversations       Conversation[]            @relation("GroupOwner")
   ownedCommunities         Community[]               @relation("CommunityOwner")
   communityMemberships     CommunityMember[]
-  sentCommunityInvites     CommunityInvite[]
+  sentCommunityInvites     CommunityInvite[]         @relation("SentCommunityInvites")
+  receivedCommunityInvites CommunityInvite[]         @relation("ReceivedCommunityInvites")
   communityPosts           CommunityPost[]
   communityComments        CommunityComment[]
   ownedOrganizations       Organization[]            @relation("OrgOwner")
