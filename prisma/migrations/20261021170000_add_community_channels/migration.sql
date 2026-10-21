@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS "CommunityChannel" (
 
 CREATE UNIQUE INDEX IF NOT EXISTS "CommunityChannel_communityId_name_key" ON "CommunityChannel"("communityId", "name");
 
+CREATE UNIQUE INDEX IF NOT EXISTS "CommunityChannel_communityId_lower_name_key" ON "CommunityChannel"("communityId", lower("name"));
+
 CREATE INDEX IF NOT EXISTS "CommunityChannel_communityId_idx" ON "CommunityChannel"("communityId");
 
 DO $$
@@ -37,7 +39,7 @@ INSERT INTO "CommunityChannel" ("id", "communityId", "name", "description", "isD
 SELECT gen_random_uuid()::text, c."id", 'General', 'Announcements and general discussions', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM "Community" c
 WHERE NOT EXISTS (
-    SELECT 1 FROM "CommunityChannel" ch WHERE ch."communityId" = c."id" AND (ch."isDefault" = true OR ch."name" = 'General')
+    SELECT 1 FROM "CommunityChannel" ch WHERE ch."communityId" = c."id" AND (ch."isDefault" = true OR lower(ch."name") = 'general')
 );
 
 UPDATE "CommunityPost" p

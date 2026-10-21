@@ -1546,11 +1546,16 @@ export const createCommunityChannel = async (userId: string, communityId: string
 
   const cleanName = data.name.trim();
 
-  const existing = await prisma.communityChannel.findUnique({
+  if (cleanName.toLowerCase() === 'general') {
+    throw new ApiError(409, 'A General channel already exists in this community');
+  }
+
+  const existing = await prisma.communityChannel.findFirst({
     where: {
-      communityId_name: {
-        communityId,
-        name: cleanName
+      communityId,
+      name: {
+        equals: cleanName,
+        mode: 'insensitive'
       }
     }
   });
@@ -1659,23 +1664,29 @@ export const updateCommunityChannel = async (
 
   if (data.name !== undefined) {
     const cleanName = data.name.trim();
-    if (channel.isDefault || channel.name.toLowerCase() === 'general') {
+    if (channel.isDefault) {
       if (cleanName.toLowerCase() !== channel.name.toLowerCase()) {
         throw new ApiError(400, 'The default General channel cannot be renamed');
       }
     }
 
-    if (cleanName !== channel.name) {
-      const existing = await prisma.communityChannel.findUnique({
+    if (!channel.isDefault && cleanName.toLowerCase() === 'general') {
+      throw new ApiError(409, 'A General channel already exists in this community');
+    }
+
+    if (cleanName.toLowerCase() !== channel.name.toLowerCase()) {
+      const existing = await prisma.communityChannel.findFirst({
         where: {
-          communityId_name: {
-            communityId,
-            name: cleanName
+          communityId,
+          id: { not: channelId },
+          name: {
+            equals: cleanName,
+            mode: 'insensitive'
           }
         }
       });
 
-      if (existing && existing.id !== channelId) {
+      if (existing) {
         throw new ApiError(409, 'A channel with this name already exists in this community');
       }
     }
@@ -1717,7 +1728,7 @@ export const deleteCommunityChannel = async (userId: string, communityId: string
       throw new ApiError(404, 'Channel not found');
     }
 
-    if (channel.isDefault || channel.name.toLowerCase() === 'general') {
+    if (channel.isDefault) {
       throw new ApiError(400, 'The default General channel cannot be deleted');
     }
 
