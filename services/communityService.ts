@@ -156,11 +156,16 @@ export const getCommunityDetails = async (userId: string, communityId: string) =
   }
 
   let channels = community.channels;
-  if (!channels || channels.length === 0) {
-    const general = await ensureDefaultGeneralChannel(communityId);
-    if (general) {
-      channels = [general];
-    }
+  const hasDefault = Boolean(channels && channels.some((c: any) => c.isDefault || c.name.toLowerCase() === 'general'));
+  if (!hasDefault) {
+    await ensureDefaultGeneralChannel(communityId);
+    channels = await prisma.communityChannel.findMany({
+      where: { communityId },
+      orderBy: [
+        { isDefault: 'desc' },
+        { createdAt: 'asc' }
+      ]
+    });
   }
 
   return {
@@ -846,132 +851,153 @@ export const respondToCommunityInvite = async (
   inviteIdentifier: string,
   action: 'accept' | 'decline'
 ) => {
-  return await prisma.$transaction(async (tx) => {
-    const user = await tx.user.findUnique({
-      where: { id: userId },
-      select: { id: true, email: true, name: true }
-    });
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "CommunityInvite" WHERE id = ${inviteIdentifier} OR token = ${inviteIdentifier} FOR UPDATE`;
 
-    if (!user) {
-      throw new ApiError(401, 'Unauthorized');
-    }
-
-    const invite = await tx.communityInvite.findFirst({
-      where: {
-        OR: [
-          { id: inviteIdentifier },
-          { token: inviteIdentifier }
-        ]
-      },
-      include: {
-        community: {
-          select: {
-            id: true,
-            name: true,
-            description: true,
-            _count: { select: { members: true } }
-          }
-        }
-      }
-    });
-
-    if (!invite || invite.isRevoked) {
-      throw new ApiError(404, 'Invitation is invalid or has been revoked');
-    }
-
-    if (invite.status !== 'pending') {
-      throw new ApiError(400, `Invitation has already been ${invite.status}`);
-    }
-
-    if (invite.expiresAt && invite.expiresAt < new Date()) {
-      throw new ApiError(410, 'Invitation has expired');
-    }
-
-    if (invite.inviteeId && invite.inviteeId !== userId) {
-      if (!invite.email || invite.email.toLowerCase() !== user.email.toLowerCase()) {
-        throw new ApiError(403, 'You are not authorized to respond to this invitation');
-      }
-    } else if (invite.email && invite.email.toLowerCase() !== user.email.toLowerCase()) {
-      throw new ApiError(403, 'You are not authorized to respond to this invitation');
-    }
-
-    if (action === 'decline') {
-      await tx.communityInvite.update({
-        where: { id: invite.id },
-        data: { status: 'declined' }
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, name: true }
       });
 
-      return {
-        success: true,
-        message: 'Invitation declined successfully'
-      };
-    }
+      if (!user) {
+        throw new ApiError(401, 'Unauthorized');
+      }
 
-    const existingMembership = await tx.communityMember.findUnique({
-      where: {
-        communityId_userId: {
+      const invite = await tx.communityInvite.findFirst({
+        where: {
+          OR: [
+            { id: inviteIdentifier },
+            { token: inviteIdentifier }
+          ]
+        },
+        include: {
+          community: {
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              _count: { select: { members: true } }
+            }
+          }
+        }
+      });
+
+      if (!invite || invite.isRevoked) {
+        throw new ApiError(404, 'Invitation is invalid or has been revoked');
+      }
+
+      if (invite.expiresAt && invite.expiresAt < new Date()) {
+        throw new ApiError(410, 'Invitation has expired');
+      }
+
+      const isTargeted = Boolean(invite.inviteeId || invite.email);
+
+      if (isTargeted) {
+        if (invite.status !== 'pending') {
+          throw new ApiError(400, `Invitation has already been ${invite.status}`);
+        }
+
+        if (invite.inviteeId && invite.inviteeId !== userId) {
+          if (!invite.email || invite.email.toLowerCase() !== user.email.toLowerCase()) {
+            throw new ApiError(403, 'You are not authorized to respond to this invitation');
+          }
+        } else if (invite.email && invite.email.toLowerCase() !== user.email.toLowerCase()) {
+          throw new ApiError(403, 'You are not authorized to respond to this invitation');
+        }
+      }
+
+      if (action === 'decline') {
+        if (isTargeted) {
+          await tx.communityInvite.update({
+            where: { id: invite.id },
+            data: { status: 'declined' }
+          });
+        }
+
+        return {
+          success: true,
+          message: 'Invitation declined successfully'
+        };
+      }
+
+      const existingMembership = await tx.communityMember.findUnique({
+        where: {
+          communityId_userId: {
+            communityId: invite.communityId,
+            userId
+          }
+        }
+      });
+
+      if (existingMembership) {
+        if (isTargeted) {
+          await tx.communityInvite.update({
+            where: { id: invite.id },
+            data: {
+              status: 'accepted',
+              inviteeId: userId
+            }
+          });
+        }
+        return {
+          success: true,
+          message: 'You are already a member of this community',
           communityId: invite.communityId,
-          userId
-        }
+          name: invite.community.name,
+          description: invite.community.description,
+          role: existingMembership.role,
+          memberCount: invite.community._count.members,
+          joinedAt: existingMembership.joinedAt
+        };
       }
-    });
 
-    if (existingMembership) {
-      await tx.communityInvite.update({
-        where: { id: invite.id },
+      const assignedRole = (isTargeted && invite.role === CommunityRole.ADMIN)
+        ? CommunityRole.ADMIN
+        : CommunityRole.MEMBER;
+
+      const newMembership = await tx.communityMember.create({
         data: {
-          status: 'accepted',
-          inviteeId: userId
-        }
-      });
-      return {
-        success: true,
-        message: 'You are already a member of this community',
-        communityId: invite.communityId,
-        name: invite.community.name,
-        description: invite.community.description,
-        role: existingMembership.role,
-        memberCount: invite.community._count.members,
-        joinedAt: existingMembership.joinedAt
-      };
-    }
-
-    const assignedRole = invite.role === CommunityRole.ADMIN ? CommunityRole.ADMIN : CommunityRole.MEMBER;
-
-    const newMembership = await tx.communityMember.create({
-      data: {
-        communityId: invite.communityId,
-        userId,
-        role: assignedRole
-      },
-      include: {
-        community: {
-          include: {
-            _count: { select: { members: true } }
+          communityId: invite.communityId,
+          userId,
+          role: assignedRole
+        },
+        include: {
+          community: {
+            include: {
+              _count: { select: { members: true } }
+            }
           }
         }
-      }
-    });
+      });
 
-    await tx.communityInvite.update({
-      where: { id: invite.id },
-      data: {
-        status: 'accepted',
-        inviteeId: userId
+      if (isTargeted) {
+        await tx.communityInvite.update({
+          where: { id: invite.id },
+          data: {
+            status: 'accepted',
+            inviteeId: userId
+          }
+        });
       }
-    });
 
-    return {
-      success: true,
-      message: 'Joined community successfully',
-      communityId: newMembership.communityId,
-      name: newMembership.community.name,
-      description: newMembership.community.description,
-      role: newMembership.role,
-      memberCount: newMembership.community._count.members,
-      joinedAt: newMembership.joinedAt
-    };
-  });
+      return {
+        success: true,
+        message: 'Joined community successfully',
+        communityId: newMembership.communityId,
+        name: newMembership.community.name,
+        description: newMembership.community.description,
+        role: newMembership.role,
+        memberCount: newMembership.community._count.members,
+        joinedAt: newMembership.joinedAt
+      };
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2002') {
+      throw new ApiError(400, 'You are already a member of this community');
+    }
+    throw err;
+  }
 };
 
 export const searchUsersToInvite = async (
@@ -995,6 +1021,14 @@ export const searchUsersToInvite = async (
   }
 
   const cleanQuery = typeof query === 'string' ? query.trim() : '';
+  if (!cleanQuery) {
+    return {
+      users: [],
+      nextCursor: null,
+      hasNextPage: false
+    };
+  }
+
   const take = Math.min(Math.max(limit, 1), 50);
 
   const existingMembers = await prisma.communityMember.findMany({
@@ -1004,12 +1038,9 @@ export const searchUsersToInvite = async (
   const excludedUserIds = existingMembers.map((m) => m.userId);
 
   const whereClause: any = {
-    id: { notIn: excludedUserIds }
+    id: { notIn: excludedUserIds },
+    name: { contains: cleanQuery, mode: 'insensitive' }
   };
-
-  if (cleanQuery) {
-    whereClause.name = { contains: cleanQuery, mode: 'insensitive' };
-  }
 
   const users = await prisma.user.findMany({
     where: whereClause,
@@ -1504,8 +1535,20 @@ export const ensureDefaultGeneralChannel = async (communityId: string, tx?: any)
   });
   if (!general) {
     general = await client.communityChannel.findFirst({
-      where: { communityId, name: 'General' }
+      where: {
+        communityId,
+        name: {
+          equals: 'General',
+          mode: 'insensitive'
+        }
+      }
     });
+    if (general && !general.isDefault) {
+      general = await client.communityChannel.update({
+        where: { id: general.id },
+        data: { isDefault: true }
+      });
+    }
   }
   if (!general) {
     try {
@@ -1519,7 +1562,13 @@ export const ensureDefaultGeneralChannel = async (communityId: string, tx?: any)
       });
     } catch {
       general = await client.communityChannel.findFirst({
-        where: { communityId, name: 'General' }
+        where: {
+          communityId,
+          name: {
+            equals: 'General',
+            mode: 'insensitive'
+          }
+        }
       });
     }
   }
@@ -1564,14 +1613,21 @@ export const createCommunityChannel = async (userId: string, communityId: string
     throw new ApiError(409, 'A channel with this name already exists in this community');
   }
 
-  return await prisma.communityChannel.create({
-    data: {
-      communityId,
-      name: cleanName,
-      description: data.description?.trim() || null,
-      isDefault: false
+  try {
+    return await prisma.communityChannel.create({
+      data: {
+        communityId,
+        name: cleanName,
+        description: data.description?.trim() || null,
+        isDefault: false
+      }
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2002') {
+      throw new ApiError(409, 'A channel with this name already exists in this community');
     }
-  });
+    throw err;
+  }
 };
 
 export const getCommunityChannels = async (userId: string, communityId: string) => {
@@ -1596,11 +1652,16 @@ export const getCommunityChannels = async (userId: string, communityId: string) 
     ]
   });
 
-  if (channels.length === 0) {
-    const general = await ensureDefaultGeneralChannel(communityId);
-    if (general) {
-      channels = [general];
-    }
+  const hasDefault = channels.some((c) => c.isDefault || c.name.toLowerCase() === 'general');
+  if (!hasDefault) {
+    await ensureDefaultGeneralChannel(communityId);
+    channels = await prisma.communityChannel.findMany({
+      where: { communityId },
+      orderBy: [
+        { isDefault: 'desc' },
+        { createdAt: 'asc' }
+      ]
+    });
   }
 
   return channels;
@@ -1692,13 +1753,20 @@ export const updateCommunityChannel = async (
     }
   }
 
-  return await prisma.communityChannel.update({
-    where: { id: channelId },
-    data: {
-      ...(data.name !== undefined ? { name: data.name.trim() } : {}),
-      ...(data.description !== undefined ? { description: data.description?.trim() || null } : {})
+  try {
+    return await prisma.communityChannel.update({
+      where: { id: channelId },
+      data: {
+        ...(data.name !== undefined ? { name: data.name.trim() } : {}),
+        ...(data.description !== undefined ? { description: data.description?.trim() || null } : {})
+      }
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2002') {
+      throw new ApiError(409, 'A channel with this name already exists in this community');
     }
-  });
+    throw err;
+  }
 };
 
 export const deleteCommunityChannel = async (userId: string, communityId: string, channelId: string) => {
