@@ -12,6 +12,8 @@ export interface PublisherOptions {
   ssrc: number;
   payloadType: number;
   srtpSession?: SrtpSession;
+  inboundSrtpSession?: SrtpSession;
+  outboundSrtpSession?: SrtpSession;
   transportSender?: PacketTransportSender;
 }
 
@@ -31,6 +33,8 @@ export class Publisher extends EventEmitter {
   public ssrc: number;
   public readonly payloadType: number;
   private srtpSession: SrtpSession | null = null;
+  private inboundSrtpSession: SrtpSession | null = null;
+  private outboundSrtpSession: SrtpSession | null = null;
   private transportSender: PacketTransportSender | null = null;
   private isClosed: boolean = false;
   private stats: PublisherStats = {
@@ -49,8 +53,15 @@ export class Publisher extends EventEmitter {
     this.kind = options.kind;
     this.ssrc = options.ssrc;
     this.payloadType = options.payloadType;
-    if (options.srtpSession) {
+    if (options.inboundSrtpSession) {
+      this.inboundSrtpSession = options.inboundSrtpSession;
+      this.srtpSession = options.inboundSrtpSession;
+    } else if (options.srtpSession) {
+      this.inboundSrtpSession = options.srtpSession;
       this.srtpSession = options.srtpSession;
+    }
+    if (options.outboundSrtpSession) {
+      this.outboundSrtpSession = options.outboundSrtpSession;
     }
     if (options.transportSender) {
       this.transportSender = options.transportSender;
@@ -58,7 +69,17 @@ export class Publisher extends EventEmitter {
   }
 
   public setSrtpSession(session: SrtpSession): void {
+    this.inboundSrtpSession = session;
     this.srtpSession = session;
+  }
+
+  public setInboundSrtpSession(session: SrtpSession): void {
+    this.inboundSrtpSession = session;
+    this.srtpSession = session;
+  }
+
+  public setOutboundSrtpSession(session: SrtpSession): void {
+    this.outboundSrtpSession = session;
   }
 
   public setTransportSender(sender: PacketTransportSender): void {
@@ -119,13 +140,14 @@ export class Publisher extends EventEmitter {
       return false;
     }
 
-    if (!this.srtpSession) {
+    const session = this.inboundSrtpSession || this.srtpSession;
+    if (!session) {
       this.stats.packetsDropped++;
       return false;
     }
 
     try {
-      const plaintextRtp = this.srtpSession.unprotect(encryptedBuffer);
+      const plaintextRtp = session.unprotect(encryptedBuffer);
       return this.validateAndIngestRtp(plaintextRtp);
     } catch {
       this.stats.packetsDropped++;
@@ -139,13 +161,14 @@ export class Publisher extends EventEmitter {
       return false;
     }
 
-    if (!this.srtpSession) {
+    const session = this.inboundSrtpSession || this.srtpSession;
+    if (!session) {
       this.stats.packetsDropped++;
       return false;
     }
 
     try {
-      const plaintextRtcp = this.srtpSession.unprotectRtcp(encryptedBuffer);
+      const plaintextRtcp = session.unprotectRtcp(encryptedBuffer);
       this.stats.rtcpPacketsReceived++;
       this.emit('rtcp', plaintextRtcp, this);
       return true;
@@ -165,9 +188,10 @@ export class Publisher extends EventEmitter {
     }
 
     let dispatchPacket: Buffer = packet;
-    if (this.srtpSession) {
+    const session = this.outboundSrtpSession || this.srtpSession;
+    if (session) {
       try {
-        dispatchPacket = this.srtpSession.protectRtcp(packet);
+        dispatchPacket = session.protectRtcp(packet);
       } catch (err: any) {
         if (this.listenerCount('error') > 0) {
           this.emit('error', err);
@@ -215,6 +239,8 @@ export class Publisher extends EventEmitter {
     }
     this.isClosed = true;
     this.srtpSession = null;
+    this.inboundSrtpSession = null;
+    this.outboundSrtpSession = null;
     this.transportSender = null;
     this.emit('close', this);
     this.removeAllListeners();

@@ -259,8 +259,24 @@ export class SrtpSession {
     if (version !== 2) {
       throw new Error('Invalid RTCP version');
     }
+    const packetType = packet[1];
+    if (packetType < 192 || packetType > 223) {
+      throw new Error('Invalid RTCP packet type');
+    }
     const declaredWords = packet.readUInt16BE(2);
     const declaredLength = (declaredWords + 1) * 4;
+    if (declaredLength < 8) {
+      throw new Error('Malformed RTCP: declared length less than minimum header size');
+    }
+    if (packetType === 200 && declaredLength < 28) {
+      throw new Error('Malformed RTCP: Sender Report shorter than minimum structural size');
+    }
+    if (packetType === 204 && declaredLength < 12) {
+      throw new Error('Malformed RTCP: APP packet shorter than minimum structural size');
+    }
+    if ((packetType === 205 || packetType === 206) && declaredLength < 12) {
+      throw new Error('Malformed RTCP: Feedback packet shorter than minimum structural size');
+    }
     const maxAllowed = isSrtcp ? (packet.length - 4) : packet.length;
     if (declaredLength > maxAllowed) {
       throw new Error('Malformed RTCP: declared length exceeds packet bounds');

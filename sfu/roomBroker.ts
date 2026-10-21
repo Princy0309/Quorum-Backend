@@ -97,12 +97,6 @@ export class RoomBroker extends EventEmitter {
       mediaStreamTrack: track,
     };
 
-    peer.publishedTracks.set(trackId, publishedTrack);
-
-    if (!room.channels.has(trackId)) {
-      room.channels.set(trackId, []);
-    }
-
     const router = this.getOrCreateRouter(roomCode);
     const publisher = new Publisher({
       id: trackId,
@@ -110,6 +104,8 @@ export class RoomBroker extends EventEmitter {
       kind: track.kind as 'audio' | 'video',
       ssrc: publishedTrack.ssrc || 0,
       payloadType: (track as any).payloadType || (track.kind === 'video' ? 96 : 111),
+      inboundSrtpSession: peer.inboundSrtpSession,
+      outboundSrtpSession: peer.outboundSrtpSession,
       srtpSession: peer.inboundSrtpSession
     });
 
@@ -137,22 +133,42 @@ export class RoomBroker extends EventEmitter {
       this.requestKeyframe(roomCode, peerId, trackId);
     });
 
-    router.addPublisher(publisher, trackId);
+    try {
+      router.addPublisher(publisher, trackId);
+    } catch (err) {
+      publisher.close();
+      logger.error(`[SFU Broker] Failed to register publisher in router for track ${trackId}:`, err);
+      throw err;
+    }
 
-    const rtpSubscription = track.onReceiveRtp.subscribe((packet: RtpPacket) => {
-      if (!publishedTrack.ssrc && packet.header?.ssrc) {
-        publishedTrack.ssrc = packet.header.ssrc;
-        (track as any).ssrc = packet.header.ssrc;
-        publisher.ssrc = packet.header.ssrc;
-        logger.info(
-          `[SFU Broker] Captured SSRC ${packet.header.ssrc} for track ${trackId} (${track.kind})`
-        );
-      }
+    peer.publishedTracks.set(trackId, publishedTrack);
 
-      const rtpBuffer = packet.serialize ? packet.serialize() : (Buffer.isBuffer(packet) ? packet : Buffer.from((packet as any).buffer));
-      publisher.pushRtp(rtpBuffer);
-    });
-    publishedTrack.rtpSubscription = rtpSubscription;
+    if (!room.channels.has(trackId)) {
+      room.channels.set(trackId, []);
+    }
+
+    try {
+      const rtpSubscription = track.onReceiveRtp.subscribe((packet: RtpPacket) => {
+        if (!publishedTrack.ssrc && packet.header?.ssrc) {
+          publishedTrack.ssrc = packet.header.ssrc;
+          (track as any).ssrc = packet.header.ssrc;
+          publisher.ssrc = packet.header.ssrc;
+          logger.info(
+            `[SFU Broker] Captured SSRC ${packet.header.ssrc} for track ${trackId} (${track.kind})`
+          );
+        }
+
+        const rtpBuffer = packet.serialize ? packet.serialize() : (Buffer.isBuffer(packet) ? packet : Buffer.from((packet as any).buffer));
+        publisher.pushRtp(rtpBuffer);
+      });
+      publishedTrack.rtpSubscription = rtpSubscription;
+    } catch (subErr) {
+      router.removePublisher(trackId, publisher);
+      peer.publishedTracks.delete(trackId);
+      room.channels.delete(trackId);
+      publisher.close();
+      throw subErr;
+    }
 
     logger.info(
       `[SFU Broker] Published track ${trackId} (${track.kind}) by peer ${peerId} in room ${roomCode}`
@@ -336,7 +352,10 @@ export class RoomBroker extends EventEmitter {
       for (const trackId of peer.publishedTracks.keys()) {
         const pub = router.getPublisher(trackId);
         if (pub) {
-          pub.setSrtpSession(inboundSession);
+          pub.setInboundSrtpSession(inboundSession);
+          if (outboundSession) {
+            pub.setOutboundSrtpSession(outboundSession);
+          }
         }
       }
     }
