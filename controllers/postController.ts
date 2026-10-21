@@ -92,9 +92,8 @@ export const getCommunityFeedController = async (req: Request, res: Response, ne
     const limit = typeof req.query.limit === 'string' && /^\d+$/.test(req.query.limit)
       ? parseInt(req.query.limit, 10)
       : 20;
-    const scope = typeof req.query.scope === 'string' ? req.query.scope : (req.query.all === 'true' ? 'all' : undefined);
 
-    const result = await getCommunityFeed(userId, cursor, limit, scope);
+    const result = await getCommunityFeed(userId, cursor, limit);
     res.status(200).json({
       success: true,
       data: result

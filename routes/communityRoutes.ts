@@ -6,6 +6,7 @@ import {
   updateCommunitySchema,
   createInviteSchema,
   inviteMemberSchema,
+  inviteOrLinkSchema,
   respondInviteSchema,
   updateMemberRoleSchema,
   transferOwnershipSchema,
@@ -68,8 +69,8 @@ router.post('/invites/:token/decline', authMiddleware, declineCommunityInviteCon
 
 router.get('/:id/users/search', authMiddleware, searchUsersToInviteController);
 router.get('/:id/invites', authMiddleware, getCommunityInvitesController);
-router.post('/:id/invites', authMiddleware, inviteUserToCommunityController);
-router.post('/:id/invitations', authMiddleware, inviteUserToCommunityController);
+router.post('/:id/invites', authMiddleware, validate(inviteOrLinkSchema), inviteUserToCommunityController);
+router.post('/:id/invitations', authMiddleware, validate(inviteOrLinkSchema), inviteUserToCommunityController);
 router.delete('/:id/invites/:inviteId', authMiddleware, revokeInviteLinkController);
 
 router.get('/:id/members', authMiddleware, getCommunityMembersController);

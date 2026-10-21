@@ -188,8 +188,7 @@ export const getCommunityPosts = async (
 export const getCommunityFeed = async (
   userId: string,
   cursor?: string,
-  limit: number = 20,
-  scope?: string
+  limit: number = 20
 ) => {
   const userMemberships = await prisma.communityMember.findMany({
     where: { userId },
@@ -197,16 +196,22 @@ export const getCommunityFeed = async (
   });
 
   const joinedCommunityIds = userMemberships.map((m) => m.communityId);
-  const take = Math.min(Math.max(limit, 1), 50);
-
-  let whereClause: any = {};
-  if (scope !== 'all' && joinedCommunityIds.length > 0) {
-    whereClause = { communityId: { in: joinedCommunityIds } };
+  if (joinedCommunityIds.length === 0) {
+    return {
+      posts: [],
+      nextCursor: null,
+      hasNextPage: false
+    };
   }
 
+  const take = Math.min(Math.max(limit, 1), 50);
+
   if (cursor) {
-    const cursorPost = await prisma.communityPost.findUnique({
-      where: { id: cursor }
+    const cursorPost = await prisma.communityPost.findFirst({
+      where: {
+        id: cursor,
+        communityId: { in: joinedCommunityIds }
+      }
     });
 
     if (!cursorPost) {
@@ -215,7 +220,9 @@ export const getCommunityFeed = async (
   }
 
   const posts = await prisma.communityPost.findMany({
-    where: whereClause,
+    where: {
+      communityId: { in: joinedCommunityIds }
+    },
     take: take + 1,
     skip: cursor ? 1 : 0,
     cursor: cursor ? { id: cursor } : undefined,

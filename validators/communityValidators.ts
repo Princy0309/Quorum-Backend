@@ -13,7 +13,7 @@ export const updateCommunitySchema = z.object({
 });
 
 export const createInviteSchema = z.object({
-  expiresInDays: z.coerce.number().int().min(1).max(30).optional()
+  expiresInDays: z.coerce.number().int().min(1).max(30).optional().default(7)
 });
 
 export const updateMemberRoleSchema = z.object({
@@ -33,6 +33,13 @@ export const inviteMemberSchema = z.object({
   message: 'Either userId or email must be provided to invite a user'
 });
 
+export const inviteOrLinkSchema = z.object({
+  userId: z.string().trim().min(1).optional(),
+  email: z.string().trim().email().optional(),
+  role: z.enum(['ADMIN', 'MEMBER']).optional().default('MEMBER'),
+  expiresInDays: z.coerce.number().int().min(1).max(30).optional().default(7)
+});
+
 export const respondInviteSchema = z.object({
   action: z.enum(['accept', 'decline'])
 });
@@ -48,4 +55,3 @@ export const updateChannelSchema = z.object({
 }).refine((data) => data.name !== undefined || data.description !== undefined, {
   message: 'At least one field (name or description) must be provided'
 });
-
