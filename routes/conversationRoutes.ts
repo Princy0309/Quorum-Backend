@@ -9,6 +9,7 @@ import {
 } from '../validators/chatValidators.js';
 import {
   getUserConversationsController,
+  getUnreadConversationsCountController,
   getConversationMessagesController,
   searchConversationMessagesController,
   createGroupConversationController,
@@ -25,6 +26,7 @@ import { createOrGetDMController } from '../controllers/dmController.js';
 const router = Router();
 
 router.get('/', authMiddleware, getUserConversationsController);
+router.get('/unread-count', authMiddleware, getUnreadConversationsCountController);
 router.post('/', authMiddleware, chatLimiter, createOrGetDMController);
 router.post('/direct', authMiddleware, chatLimiter, createOrGetDMController);
 router.post('/dm', authMiddleware, chatLimiter, createOrGetDMController);

@@ -61,6 +61,26 @@ export const getUserConversationsController = async (req: Request, res: Response
   }
 };
 
+export const getUnreadConversationsCountController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const conversations = await getUserConversations(userId);
+    const unreadCount = conversations.reduce((acc: number, conv: any) => acc + (conv.unreadCount || 0), 0);
+
+    res.status(200).json({
+      success: true,
+      data: { unreadCount },
+      unreadCount
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const getConversationMessagesController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.id;
