@@ -24,6 +24,13 @@ const validatePostId = (id: unknown): string => {
   return id.trim();
 };
 
+const validateChannelId = (id: unknown): string => {
+  if (!id || typeof id !== 'string' || !UUID_REGEX.test(id.trim())) {
+    throw new ApiError(400, 'Invalid channel ID format');
+  }
+  return id.trim();
+};
+
 export const createPostController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.id;
@@ -33,9 +40,8 @@ export const createPostController = async (req: Request, res: Response, next: Ne
 
     const id = validateCommunityId(req.params.id);
     const { content, fileUrl, fileType, fileName, fileSize } = req.body;
-    const channelId = typeof req.params.channelId === 'string' && req.params.channelId.trim()
-      ? req.params.channelId.trim()
-      : (typeof req.body.channelId === 'string' && req.body.channelId.trim() ? req.body.channelId.trim() : null);
+    const rawChannelId = req.params.channelId || req.body.channelId;
+    const channelId = rawChannelId ? validateChannelId(rawChannelId) : null;
 
     const result = await createCommunityPost(userId, id, { content, fileUrl, fileType, fileName, fileSize, channelId });
     res.status(201).json({
@@ -59,9 +65,8 @@ export const getCommunityPostsController = async (req: Request, res: Response, n
     const limit = typeof req.query.limit === 'string' && /^\d+$/.test(req.query.limit)
       ? parseInt(req.query.limit, 10)
       : 20;
-    const channelId = typeof req.params.channelId === 'string' && req.params.channelId.trim()
-      ? req.params.channelId.trim()
-      : (typeof req.query.channelId === 'string' && req.query.channelId.trim() ? req.query.channelId.trim() : undefined);
+    const rawChannelId = req.params.channelId || req.query.channelId;
+    const channelId = rawChannelId ? validateChannelId(rawChannelId) : undefined;
     const search = typeof req.query.search === 'string' && req.query.search.trim()
       ? req.query.search.trim()
       : (typeof req.query.q === 'string' && req.query.q.trim() ? req.query.q.trim() : undefined);

@@ -1612,10 +1612,13 @@ export const deleteCommunityChannel = async (userId: string, communityId: string
     }
 
     const general = await ensureDefaultGeneralChannel(communityId, tx);
+    if (!general) {
+      throw new ApiError(500, 'Failed to resolve default channel for community');
+    }
 
     await tx.communityPost.updateMany({
       where: { channelId },
-      data: { channelId: general?.id }
+      data: { channelId: general.id }
     });
 
     await tx.communityChannel.delete({
