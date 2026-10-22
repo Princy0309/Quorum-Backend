@@ -48,9 +48,10 @@ export const signCommunityUploadSchema = z.object({
 });
 
 export const createPostSchema = z.object({
+  channelId: z.string().trim().min(1).optional().nullable(),
   content: z.string().trim().max(10000).optional().nullable(),
   fileUrl: trustedMediaUrlSchema.optional().nullable(),
-  fileType: z.enum(['image', 'file']).optional().nullable(),
+  fileType: z.enum(['image', 'file', 'document']).optional().nullable(),
   fileName: z.string().trim().max(255).optional().nullable(),
   fileSize: z.number().int().min(1).max(26214400).optional().nullable()
 }).refine((data) => {
@@ -64,15 +65,9 @@ export const createPostSchema = z.object({
 export const updatePostSchema = z.object({
   content: z.string().trim().max(10000).optional().nullable(),
   fileUrl: trustedMediaUrlSchema.optional().nullable(),
-  fileType: z.enum(['image', 'file']).optional().nullable(),
+  fileType: z.enum(['image', 'file', 'document']).optional().nullable(),
   fileName: z.string().trim().max(255).optional().nullable(),
   fileSize: z.number().int().min(1).max(26214400).optional().nullable()
-}).refine((data) => {
-  const hasContent = typeof data.content === 'string' && data.content.trim().length > 0;
-  const hasFile = typeof data.fileUrl === 'string' && data.fileUrl.trim().length > 0;
-  return hasContent || hasFile;
-}, {
-  message: 'Post must contain either non-empty content or a file attachment'
 });
 
 export const createCommentSchema = z.object({

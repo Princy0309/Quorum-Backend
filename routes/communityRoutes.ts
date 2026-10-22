@@ -6,15 +6,17 @@ import {
   updateCommunitySchema,
   createInviteSchema,
   inviteMemberSchema,
+  inviteOrLinkSchema,
   respondInviteSchema,
   updateMemberRoleSchema,
-  transferOwnershipSchema
+  transferOwnershipSchema,
+  createChannelSchema,
+  updateChannelSchema
 } from '../validators/communityValidators.js';
 import { createPostSchema } from '../validators/postValidators.js';
 import {
   createCommunityController,
   getUserCommunitiesController,
-  searchCommunitiesController,
   getCommunityDetailsController,
   updateCommunityController,
   deleteCommunityController,
@@ -33,7 +35,12 @@ import {
   leaveCommunityController,
   removeCommunityMemberController,
   changeMemberRoleController,
-  transferCommunityOwnershipController
+  transferCommunityOwnershipController,
+  createChannelController,
+  getCommunityChannelsController,
+  getChannelDetailsController,
+  updateChannelController,
+  deleteChannelController
 } from '../controllers/communityController.js';
 import {
   createPostController,
@@ -45,7 +52,6 @@ const router = Router();
 
 router.post('/', authMiddleware, validate(createCommunitySchema), createCommunityController);
 router.get('/', authMiddleware, getUserCommunitiesController);
-router.get('/search', authMiddleware, searchCommunitiesController);
 router.get('/feed', authMiddleware, getCommunityFeedController);
 
 router.get('/invitations/pending', authMiddleware, getUserPendingInvitesController);
@@ -61,8 +67,8 @@ router.post('/invites/:token/decline', authMiddleware, declineCommunityInviteCon
 
 router.get('/:id/users/search', authMiddleware, searchUsersToInviteController);
 router.get('/:id/invites', authMiddleware, getCommunityInvitesController);
-router.post('/:id/invites', authMiddleware, inviteUserToCommunityController);
-router.post('/:id/invitations', authMiddleware, inviteUserToCommunityController);
+router.post('/:id/invites', authMiddleware, validate(inviteOrLinkSchema), inviteUserToCommunityController);
+router.post('/:id/invitations', authMiddleware, validate(inviteOrLinkSchema), inviteUserToCommunityController);
 router.delete('/:id/invites/:inviteId', authMiddleware, revokeInviteLinkController);
 
 router.get('/:id/members', authMiddleware, getCommunityMembersController);
@@ -70,6 +76,14 @@ router.patch('/:id/members/:userId/role', authMiddleware, validate(updateMemberR
 router.post('/:id/leave', authMiddleware, leaveCommunityController);
 router.post('/:id/transfer-ownership', authMiddleware, validate(transferOwnershipSchema), transferCommunityOwnershipController);
 router.delete('/:id/members/:userId', authMiddleware, removeCommunityMemberController);
+
+router.get('/:id/channels', authMiddleware, getCommunityChannelsController);
+router.post('/:id/channels', authMiddleware, validate(createChannelSchema), createChannelController);
+router.get('/:id/channels/:channelId', authMiddleware, getChannelDetailsController);
+router.patch('/:id/channels/:channelId', authMiddleware, validate(updateChannelSchema), updateChannelController);
+router.delete('/:id/channels/:channelId', authMiddleware, deleteChannelController);
+router.get('/:id/channels/:channelId/posts', authMiddleware, getCommunityPostsController);
+router.post('/:id/channels/:channelId/posts', authMiddleware, validate(createPostSchema), createPostController);
 
 router.post('/:id/posts', authMiddleware, validate(createPostSchema), createPostController);
 router.get('/:id/posts', authMiddleware, getCommunityPostsController);

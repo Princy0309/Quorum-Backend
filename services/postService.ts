@@ -1,6 +1,6 @@
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
-import { CommunityRole } from './communityService.js';
+import { CommunityRole, ensureDefaultGeneralChannel } from './communityService.js';
 
 export interface CommunityPostInput {
   content?: string;
@@ -8,6 +8,7 @@ export interface CommunityPostInput {
   fileType?: string | null;
   fileName?: string | null;
   fileSize?: number | null;
+  channelId?: string | null;
 }
 
 export const createCommunityPost = async (
@@ -34,9 +35,27 @@ export const createCommunityPost = async (
   const fileName = typeof postData === 'object' && postData.fileName ? postData.fileName.trim() : null;
   const fileSize = typeof postData === 'object' && typeof postData.fileSize === 'number' ? postData.fileSize : null;
 
+  let targetChannelId: string;
+  if (typeof postData === 'object' && postData.channelId) {
+    const channel = await prisma.communityChannel.findUnique({
+      where: { id: postData.channelId }
+    });
+    if (!channel || channel.communityId !== communityId) {
+      throw new ApiError(400, 'Invalid channel for this community');
+    }
+    targetChannelId = channel.id;
+  } else {
+    const defaultGeneral = await ensureDefaultGeneralChannel(communityId);
+    if (!defaultGeneral) {
+      throw new ApiError(500, 'Failed to resolve default channel for community');
+    }
+    targetChannelId = defaultGeneral.id;
+  }
+
   const post = await prisma.communityPost.create({
     data: {
       communityId,
+      channelId: targetChannelId,
       authorId: userId,
       content: content.trim(),
       fileUrl,
@@ -50,6 +69,13 @@ export const createCommunityPost = async (
           id: true,
           name: true,
           avatar: true
+        }
+      },
+      channel: {
+        select: {
+          id: true,
+          name: true,
+          isDefault: true
         }
       },
       _count: {
@@ -67,7 +93,9 @@ export const getCommunityPosts = async (
   userId: string,
   communityId: string,
   cursor?: string,
-  limit: number = 20
+  limit: number = 20,
+  channelId?: string,
+  search?: string
 ) => {
   const membership = await prisma.communityMember.findUnique({
     where: {
@@ -80,6 +108,15 @@ export const getCommunityPosts = async (
 
   if (!membership) {
     throw new ApiError(403, 'Access denied. You are not a member of this community');
+  }
+
+  if (channelId) {
+    const channel = await prisma.communityChannel.findUnique({
+      where: { id: channelId }
+    });
+    if (!channel || channel.communityId !== communityId) {
+      throw new ApiError(404, 'Channel not found in this community');
+    }
   }
 
   const take = Math.min(Math.max(limit, 1), 50);
@@ -97,8 +134,19 @@ export const getCommunityPosts = async (
     }
   }
 
+  const whereClause: any = {
+    communityId,
+    ...(channelId ? { channelId } : {}),
+    ...(search && search.trim() ? {
+      content: {
+        contains: search.trim(),
+        mode: 'insensitive'
+      }
+    } : {})
+  };
+
   const posts = await prisma.communityPost.findMany({
-    where: { communityId },
+    where: whereClause,
     take: take + 1,
     skip: cursor ? 1 : 0,
     cursor: cursor ? { id: cursor } : undefined,
@@ -109,6 +157,13 @@ export const getCommunityPosts = async (
           id: true,
           name: true,
           avatar: true
+        }
+      },
+      channel: {
+        select: {
+          id: true,
+          name: true,
+          isDefault: true
         }
       },
       _count: {
@@ -133,8 +188,7 @@ export const getCommunityPosts = async (
 export const getCommunityFeed = async (
   userId: string,
   cursor?: string,
-  limit: number = 20,
-  scope?: string
+  limit: number = 20
 ) => {
   const userMemberships = await prisma.communityMember.findMany({
     where: { userId },
@@ -142,16 +196,22 @@ export const getCommunityFeed = async (
   });
 
   const joinedCommunityIds = userMemberships.map((m) => m.communityId);
-  const take = Math.min(Math.max(limit, 1), 50);
-
-  let whereClause: any = {};
-  if (scope !== 'all' && joinedCommunityIds.length > 0) {
-    whereClause = { communityId: { in: joinedCommunityIds } };
+  if (joinedCommunityIds.length === 0) {
+    return {
+      posts: [],
+      nextCursor: null,
+      hasNextPage: false
+    };
   }
 
+  const take = Math.min(Math.max(limit, 1), 50);
+
   if (cursor) {
-    const cursorPost = await prisma.communityPost.findUnique({
-      where: { id: cursor }
+    const cursorPost = await prisma.communityPost.findFirst({
+      where: {
+        id: cursor,
+        communityId: { in: joinedCommunityIds }
+      }
     });
 
     if (!cursorPost) {
@@ -160,7 +220,9 @@ export const getCommunityFeed = async (
   }
 
   const posts = await prisma.communityPost.findMany({
-    where: whereClause,
+    where: {
+      communityId: { in: joinedCommunityIds }
+    },
     take: take + 1,
     skip: cursor ? 1 : 0,
     cursor: cursor ? { id: cursor } : undefined,
@@ -171,6 +233,13 @@ export const getCommunityFeed = async (
           id: true,
           name: true,
           description: true
+        }
+      },
+      channel: {
+        select: {
+          id: true,
+          name: true,
+          isDefault: true
         }
       },
       author: {
@@ -238,6 +307,11 @@ export const updateCommunityPost = async (
     }
     if (postData.fileUrl !== undefined) {
       dataToUpdate.fileUrl = postData.fileUrl ? postData.fileUrl.trim() : null;
+      if (!dataToUpdate.fileUrl) {
+        if (postData.fileType === undefined) dataToUpdate.fileType = null;
+        if (postData.fileName === undefined) dataToUpdate.fileName = null;
+        if (postData.fileSize === undefined) dataToUpdate.fileSize = null;
+      }
     }
     if (postData.fileType !== undefined) {
       dataToUpdate.fileType = postData.fileType ? postData.fileType.trim() : null;
@@ -250,6 +324,16 @@ export const updateCommunityPost = async (
     }
   }
 
+  const finalContent = dataToUpdate.content !== undefined ? dataToUpdate.content : post.content;
+  const finalFileUrl = dataToUpdate.fileUrl !== undefined ? dataToUpdate.fileUrl : post.fileUrl;
+
+  const hasContent = typeof finalContent === 'string' && finalContent.trim().length > 0;
+  const hasFile = typeof finalFileUrl === 'string' && finalFileUrl.trim().length > 0;
+
+  if (!hasContent && !hasFile) {
+    throw new ApiError(400, 'Post cannot be empty. It must contain either text content or a file attachment');
+  }
+
   const updated = await prisma.communityPost.update({
     where: { id: postId },
     data: dataToUpdate,
@@ -259,6 +343,13 @@ export const updateCommunityPost = async (
           id: true,
           name: true,
           avatar: true
+        }
+      },
+      channel: {
+        select: {
+          id: true,
+          name: true,
+          isDefault: true
         }
       },
       _count: {
