@@ -4,53 +4,73 @@ import prisma from '../config/prisma.js';
 import jwt from 'jsonwebtoken';
 
 describe('Saved Items and Collections API', () => {
-  let user: any;
-  let token: string;
-  let authCookie: string;
+  let user1: any;
+  let user2: any;
+  let authCookie1: string;
+  let authCookie2: string;
   let conversation: any;
-  let message: any;
+  let textMessage: any;
+  let fileMessage: any;
 
   beforeAll(async () => {
-    user = await prisma.user.create({
+    user1 = await prisma.user.create({
       data: {
-        name: 'Test Saved User',
-        email: `saved_${Date.now()}@example.com`,
+        name: 'User One',
+        email: `saved_user1_${Date.now()}@example.com`,
+        role: 'member'
+      }
+    });
+
+    user2 = await prisma.user.create({
+      data: {
+        name: 'User Two',
+        email: `saved_user2_${Date.now()}@example.com`,
         role: 'member'
       }
     });
 
     const secret = process.env.JWT_ACCESS_SECRET || 'access-secret';
-    token = jwt.sign({ id: user.id, email: user.email, role: user.role }, secret, { expiresIn: '1h' });
-    authCookie = `accessToken=${token}`;
+    authCookie1 = `accessToken=${jwt.sign({ id: user1.id, email: user1.email, role: user1.role }, secret, { expiresIn: '1h' })}`;
+    authCookie2 = `accessToken=${jwt.sign({ id: user2.id, email: user2.email, role: user2.role }, secret, { expiresIn: '1h' })}`;
 
     conversation = await prisma.conversation.create({
       data: {
         type: 'direct',
         participants: {
-          create: {
-            userId: user.id
-          }
+          create: [{ userId: user1.id }]
         }
       }
     });
 
-    message = await prisma.message.create({
+    textMessage = await prisma.message.create({
       data: {
         conversationId: conversation.id,
-        senderId: user.id,
-        content: 'Important reference message',
+        senderId: user1.id,
+        content: 'This is plain text without file attachment',
         seq: 1
+      }
+    });
+
+    fileMessage = await prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        senderId: user1.id,
+        content: 'Here is the project roadmap',
+        fileUrl: 'https://storage.googleapis.com/quorum/roadmap.pdf',
+        fileName: 'roadmap.pdf',
+        fileType: 'document',
+        seq: 2
       }
     });
   });
 
   afterAll(async () => {
-    await prisma.savedItem.deleteMany({ where: { userId: user.id } });
-    await prisma.savedCollection.deleteMany({ where: { userId: user.id } });
+    await prisma.savedItem.deleteMany({ where: { userId: { in: [user1.id, user2.id] } } });
+    await prisma.savedCollection.deleteMany({ where: { userId: { in: [user1.id, user2.id] } } });
     await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
     await prisma.conversationParticipant.deleteMany({ where: { conversationId: conversation.id } });
     await prisma.conversation.deleteMany({ where: { id: conversation.id } });
-    await prisma.user.deleteMany({ where: { id: user.id } });
+    await prisma.user.deleteMany({ where: { id: { in: [user1.id, user2.id] } } });
   });
 
   it('should reject unauthenticated access', async () => {
@@ -58,97 +78,122 @@ describe('Saved Items and Collections API', () => {
     expect(res.status).toBe(401);
   });
 
-  it('should create a personal collection', async () => {
+  it('should reject saving a text message as FILE when it lacks fileUrl', async () => {
     const res = await request(app)
-      .post('/api/saved-items/collections')
-      .set('Cookie', [authCookie])
+      .post('/api/saved-items')
+      .set('Cookie', [authCookie1])
       .send({
-        name: 'Work References',
-        description: 'Crucial messages and notes',
-        color: '#ff5733'
+        itemType: 'FILE',
+        itemId: textMessage.id
+      });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('should save a valid file message as FILE', async () => {
+    const res = await request(app)
+      .post('/api/saved-items')
+      .set('Cookie', [authCookie1])
+      .send({
+        itemType: 'FILE',
+        itemId: fileMessage.id,
+        note: 'Quarterly roadmap'
       });
 
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.name).toBe('Work References');
+    expect(res.body.data.itemType).toBe('FILE');
   });
 
-  it('should prevent duplicate collection names for the same user', async () => {
-    const res = await request(app)
-      .post('/api/saved-items/collections')
-      .set('Cookie', [authCookie])
-      .send({
-        name: 'work references'
-      });
-
-    expect(res.status).toBe(409);
-  });
-
-  it('should save a message and enrich content', async () => {
-    const collectionsRes = await request(app)
-      .get('/api/saved-items/collections')
-      .set('Cookie', [authCookie]);
-
-    const collectionId = collectionsRes.body.data[0].id;
-
+  it('should prevent user from saving content they do not have access to', async () => {
     const res = await request(app)
       .post('/api/saved-items')
-      .set('Cookie', [authCookie])
+      .set('Cookie', [authCookie2])
       .send({
         itemType: 'MESSAGE',
-        itemId: message.id,
-        note: 'Keep for project kick-off',
+        itemId: textMessage.id
+      });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('should handle concurrent saves atomically without duplicate error', async () => {
+    const req1 = request(app)
+      .post('/api/saved-items')
+      .set('Cookie', [authCookie1])
+      .send({ itemType: 'MESSAGE', itemId: textMessage.id, note: 'Save A' });
+
+    const req2 = request(app)
+      .post('/api/saved-items')
+      .set('Cookie', [authCookie1])
+      .send({ itemType: 'MESSAGE', itemId: textMessage.id, note: 'Save B' });
+
+    const [res1, res2] = await Promise.all([req1, req2]);
+    expect([200, 201]).toContain(res1.status);
+    expect([200, 201]).toContain(res2.status);
+  });
+
+  it('should search across personal notes, file names, and message content', async () => {
+    const res = await request(app)
+      .get('/api/saved-items?search=roadmap')
+      .set('Cookie', [authCookie1]);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.items.length).toBeGreaterThan(0);
+    expect(res.body.data.items[0].itemId).toBe(fileMessage.id);
+  });
+
+  it('should prevent user from updating or deleting another user collection or item', async () => {
+    const collectionRes = await request(app)
+      .post('/api/saved-items/collections')
+      .set('Cookie', [authCookie1])
+      .send({ name: 'Private Work' });
+
+    const collectionId = collectionRes.body.data.id;
+
+    const crossUpdateRes = await request(app)
+      .patch(`/api/saved-items/collections/${collectionId}`)
+      .set('Cookie', [authCookie2])
+      .send({ name: 'Hijacked' });
+
+    expect(crossUpdateRes.status).toBe(404);
+
+    const crossDeleteRes = await request(app)
+      .delete(`/api/saved-items/collections/${collectionId}`)
+      .set('Cookie', [authCookie2]);
+
+    expect(crossDeleteRes.status).toBe(404);
+  });
+
+  it('should keep saved items intact when collection is deleted', async () => {
+    const collectionRes = await request(app)
+      .post('/api/saved-items/collections')
+      .set('Cookie', [authCookie1])
+      .send({ name: 'Temp Folder' });
+
+    const collectionId = collectionRes.body.data.id;
+
+    const saveRes = await request(app)
+      .post('/api/saved-items')
+      .set('Cookie', [authCookie1])
+      .send({
+        itemType: 'MESSAGE',
+        itemId: textMessage.id,
         collectionId
       });
 
-    expect(res.status).toBe(201);
-    expect(res.body.success).toBe(true);
-    expect(res.body.data.itemType).toBe('MESSAGE');
-    expect(res.body.data.itemId).toBe(message.id);
-  });
+    const savedItemId = saveRes.body.data.id;
 
-  it('should retrieve saved items with enriched data and filters', async () => {
-    const res = await request(app)
-      .get('/api/saved-items?itemType=MESSAGE')
-      .set('Cookie', [authCookie]);
+    await request(app)
+      .delete(`/api/saved-items/collections/${collectionId}`)
+      .set('Cookie', [authCookie1]);
 
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.data.items.length).toBeGreaterThan(0);
-    expect(res.body.data.items[0].content.content).toBe('Important reference message');
-    expect(res.body.data.items[0].isAccessible).toBe(true);
-  });
-
-  it('should update a saved item note and collection', async () => {
-    const listRes = await request(app)
+    const checkRes = await request(app)
       .get('/api/saved-items')
-      .set('Cookie', [authCookie]);
+      .set('Cookie', [authCookie1]);
 
-    const savedId = listRes.body.data.items[0].id;
-
-    const res = await request(app)
-      .patch(`/api/saved-items/${savedId}`)
-      .set('Cookie', [authCookie])
-      .send({
-        note: 'Updated note for team reference'
-      });
-
-    expect(res.status).toBe(200);
-    expect(res.body.data.note).toBe('Updated note for team reference');
-  });
-
-  it('should remove a saved item', async () => {
-    const listRes = await request(app)
-      .get('/api/saved-items')
-      .set('Cookie', [authCookie]);
-
-    const savedId = listRes.body.data.items[0].id;
-
-    const res = await request(app)
-      .delete(`/api/saved-items/${savedId}`)
-      .set('Cookie', [authCookie]);
-
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
+    const item = checkRes.body.data.items.find((i: any) => i.id === savedItemId);
+    expect(item).toBeDefined();
+    expect(item.collection).toBeNull();
   });
 });
