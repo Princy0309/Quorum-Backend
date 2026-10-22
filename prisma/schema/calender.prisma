@@ -1,0 +1,30 @@
+enum CalendarEventType {
+  REMINDER
+  MEETING
+  DEADLINE
+  GENERAL
+}
+
+model CalendarEvent {
+  id              String            @id @default(uuid())
+  userId          String
+  title           String
+  description     String?
+  eventType       CalendarEventType @default(REMINDER)
+  startDate       DateTime
+  endDate         DateTime?
+  isAllDay        Boolean           @default(false)
+  meetingLink     String?
+  attendeeEmails  String[]          @default([])
+  hasReminder     Boolean           @default(false)
+  reminderMinutes Int               @default(15)
+  isNotified      Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  user            User              @relation("UserCalendarEvents", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([startDate])
+  @@index([userId, startDate])
+}
