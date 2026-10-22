@@ -18,7 +18,6 @@ model SavedCollection {
   items       SavedItem[]
 
   @@unique([userId, name])
-  @@index([userId])
 }
 
 model SavedItem {

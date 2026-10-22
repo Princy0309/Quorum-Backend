@@ -1,6 +1,6 @@
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
-import { SavedItemType } from '@prisma/client';
+import { SavedItemType, Prisma } from '@prisma/client';
 
 export interface SaveItemInput {
   itemType: SavedItemType;
@@ -254,54 +254,121 @@ export const getSavedItems = async (userId: string, query: GetSavedItemsQuery) =
     ...(query.collectionId ? { collectionId: query.collectionId } : {})
   };
 
-  const items = await prisma.savedItem.findMany({
-    where: whereClause,
-    take: query.search ? 100 : take + 1,
-    skip: (!query.search && query.cursor) ? 1 : 0,
-    cursor: (!query.search && query.cursor) ? { id: query.cursor } : undefined,
-    orderBy: { createdAt: 'desc' },
-    include: {
-      collection: {
-        select: {
-          id: true,
-          name: true,
-          color: true
+  const searchTerm = query.search ? query.search.trim().toLowerCase() : '';
+
+  if (!searchTerm) {
+    const items = await prisma.savedItem.findMany({
+      where: whereClause,
+      take: take + 1,
+      skip: query.cursor ? 1 : 0,
+      cursor: query.cursor ? { id: query.cursor } : undefined,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        collection: {
+          select: {
+            id: true,
+            name: true,
+            color: true
+          }
+        }
+      }
+    });
+
+    const hasNextPage = items.length > take;
+    const pagedItems = hasNextPage ? items.slice(0, take) : items;
+    const nextCursor = hasNextPage && pagedItems.length > 0 ? pagedItems[pagedItems.length - 1].id : null;
+
+    const enrichedItems = await Promise.all(
+      pagedItems.map(async (item) => {
+        const details = await resolveItemMetadata(userId, item.itemType, item.itemId);
+        return {
+          id: item.id,
+          itemType: item.itemType,
+          itemId: item.itemId,
+          note: item.note,
+          collection: item.collection,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+          isAccessible: details.isAccessible,
+          title: details.title,
+          content: details.content
+        };
+      })
+    );
+
+    return {
+      items: enrichedItems,
+      nextCursor,
+      hasNextPage
+    };
+  }
+
+  const matchedItems: any[] = [];
+  let currentCursor = query.cursor;
+  let hasMoreDbRecords = true;
+  let lastScannedId: string | null = null;
+
+  while (matchedItems.length < take + 1 && hasMoreDbRecords) {
+    const batch = await prisma.savedItem.findMany({
+      where: whereClause,
+      take: 50,
+      skip: currentCursor ? 1 : 0,
+      cursor: currentCursor ? { id: currentCursor } : undefined,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        collection: {
+          select: {
+            id: true,
+            name: true,
+            color: true
+          }
+        }
+      }
+    });
+
+    if (batch.length === 0) {
+      hasMoreDbRecords = false;
+      break;
+    }
+
+    currentCursor = batch[batch.length - 1].id;
+
+    for (const item of batch) {
+      lastScannedId = item.id;
+      const details = await resolveItemMetadata(userId, item.itemType, item.itemId);
+      const combinedText = `${item.note || ''} ${details.searchText}`.toLowerCase();
+
+      if (combinedText.includes(searchTerm)) {
+        matchedItems.push({
+          id: item.id,
+          itemType: item.itemType,
+          itemId: item.itemId,
+          note: item.note,
+          collection: item.collection,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+          isAccessible: details.isAccessible,
+          title: details.title,
+          content: details.content
+        });
+
+        if (matchedItems.length === take + 1) {
+          break;
         }
       }
     }
-  });
 
-  const enrichedItems = await Promise.all(
-    items.map(async (item) => {
-      const details = await resolveItemMetadata(userId, item.itemType, item.itemId);
-      return {
-        id: item.id,
-        itemType: item.itemType,
-        itemId: item.itemId,
-        note: item.note,
-        collection: item.collection,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
-        isAccessible: details.isAccessible,
-        title: details.title,
-        content: details.content,
-        searchText: `${item.note || ''} ${details.searchText}`.toLowerCase()
-      };
-    })
-  );
-
-  let finalItems = enrichedItems;
-  if (query.search && query.search.trim()) {
-    const term = query.search.trim().toLowerCase();
-    finalItems = enrichedItems.filter((i) => i.searchText.includes(term));
+    if (batch.length < 50) {
+      hasMoreDbRecords = false;
+    }
   }
 
-  const hasNextPage = finalItems.length > take;
-  const pagedItems = hasNextPage ? finalItems.slice(0, take) : finalItems;
-  const nextCursor = hasNextPage && pagedItems.length > 0 ? pagedItems[pagedItems.length - 1].id : null;
+  const hasNextPage = matchedItems.length > take || (hasMoreDbRecords && Boolean(lastScannedId));
+  const pagedItems = matchedItems.length > take ? matchedItems.slice(0, take) : matchedItems;
+  const nextCursor = hasNextPage ? (pagedItems.length > 0 ? pagedItems[pagedItems.length - 1].id : lastScannedId) : null;
 
   return {
-    items: pagedItems.map(({ searchText, ...rest }) => rest),
+    items: pagedItems,
     nextCursor,
     hasNextPage
   };
@@ -374,14 +441,21 @@ export const createSavedCollection = async (userId: string, data: CreateCollecti
     throw new ApiError(409, 'A collection with this name already exists');
   }
 
-  return await prisma.savedCollection.create({
-    data: {
-      userId,
-      name: data.name.trim(),
-      description: data.description?.trim() || null,
-      color: data.color?.trim() || null
+  try {
+    return await prisma.savedCollection.create({
+      data: {
+        userId,
+        name: data.name.trim(),
+        description: data.description?.trim() || null,
+        color: data.color?.trim() || null
+      }
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new ApiError(409, 'A collection with this name already exists');
     }
-  });
+    throw error;
+  }
 };
 
 export const getSavedCollections = async (userId: string) => {
@@ -424,14 +498,21 @@ export const updateSavedCollection = async (userId: string, id: string, data: Up
     }
   }
 
-  return await prisma.savedCollection.update({
-    where: { id },
-    data: {
-      ...(data.name !== undefined ? { name: data.name.trim() } : {}),
-      ...(data.description !== undefined ? { description: data.description?.trim() || null } : {}),
-      ...(data.color !== undefined ? { color: data.color?.trim() || null } : {})
+  try {
+    return await prisma.savedCollection.update({
+      where: { id },
+      data: {
+        ...(data.name !== undefined ? { name: data.name.trim() } : {}),
+        ...(data.description !== undefined ? { description: data.description?.trim() || null } : {}),
+        ...(data.color !== undefined ? { color: data.color?.trim() || null } : {})
+      }
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new ApiError(409, 'A collection with this name already exists');
     }
-  });
+    throw error;
+  }
 };
 
 export const deleteSavedCollection = async (userId: string, id: string) => {

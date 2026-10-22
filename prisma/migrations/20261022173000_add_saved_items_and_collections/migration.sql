@@ -19,7 +19,6 @@ CREATE TABLE IF NOT EXISTS "SavedCollection" (
 
 CREATE UNIQUE INDEX IF NOT EXISTS "SavedCollection_userId_name_key" ON "SavedCollection"("userId", "name");
 CREATE UNIQUE INDEX IF NOT EXISTS "SavedCollection_userId_lower_name_key" ON "SavedCollection"("userId", lower("name"));
-CREATE INDEX IF NOT EXISTS "SavedCollection_userId_idx" ON "SavedCollection"("userId");
 
 CREATE TABLE IF NOT EXISTS "SavedItem" (
     "id" TEXT NOT NULL,
