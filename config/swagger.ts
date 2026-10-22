@@ -4613,7 +4613,52 @@ const swaggerDocument = {
           { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } }
         ],
         "responses": {
-          "200": { "description": "List of saved items" },
+          "200": {
+            "description": "List of saved items. Items whose underlying content was deleted or access revoked have isAccessible: false and content: null.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": { "type": "string", "format": "uuid" },
+                              "itemType": { "type": "string", "enum": ["MESSAGE", "FILE", "CHAT", "DOCUMENT", "RESOURCE"] },
+                              "itemId": { "type": "string" },
+                              "note": { "type": "string", "nullable": true },
+                              "isAccessible": { "type": "boolean", "example": true },
+                              "title": { "type": "string", "example": "Important message" },
+                              "content": { "type": "object", "nullable": true },
+                              "collection": {
+                                "type": "object",
+                                "nullable": true,
+                                "properties": {
+                                  "id": { "type": "string", "format": "uuid" },
+                                  "name": { "type": "string" },
+                                  "color": { "type": "string", "nullable": true }
+                                }
+                              },
+                              "createdAt": { "type": "string", "format": "date-time" },
+                              "updatedAt": { "type": "string", "format": "date-time" }
+                            }
+                          }
+                        },
+                        "nextCursor": { "type": "string", "nullable": true, "format": "uuid" },
+                        "hasNextPage": { "type": "boolean" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "401": { "description": "Unauthorized" }
         }
       }

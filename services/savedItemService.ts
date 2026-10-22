@@ -372,7 +372,6 @@ export const getSavedItems = async (userId: string, query: GetSavedItemsQuery) =
           break;
         }
       }
-      lastScannedId = item.id;
     }
 
     if (hasNextMatch) {
@@ -385,7 +384,7 @@ export const getSavedItems = async (userId: string, query: GetSavedItemsQuery) =
   }
 
   const hasNextPage = hasNextMatch;
-  const nextCursor = hasNextPage && matchedItems.length > 0 ? (lastScannedId || matchedItems[matchedItems.length - 1].id) : null;
+  const nextCursor = hasNextPage && matchedItems.length > 0 ? matchedItems[matchedItems.length - 1].id : null;
 
   return {
     items: matchedItems,
