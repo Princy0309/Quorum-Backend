@@ -6,6 +6,7 @@ enum NotificationType {
   MEETING_STARTED
   DIRECT_MESSAGE
   SYSTEM
+  EVENT_REMINDER
 }
 
 model Notification {
