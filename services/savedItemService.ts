@@ -34,169 +34,182 @@ export interface UpdateCollectionInput {
   color?: string | null;
 }
 
-const resolveItemMetadata = async (userId: string, itemType: SavedItemType, itemId: string) => {
-  if (itemType === 'MESSAGE' || itemType === 'FILE') {
-    const message = await prisma.message.findUnique({
-      where: { id: itemId },
-      include: {
-        conversation: {
-          select: {
-            id: true,
-            type: true,
-            name: true,
+const resolveItemsMetadataBatch = async (
+  userId: string,
+  items: Array<{ id: string; itemType: SavedItemType; itemId: string }>
+) => {
+  const messageIds = items.filter((i) => i.itemType === 'MESSAGE' || i.itemType === 'FILE').map((i) => i.itemId);
+  const conversationIds = items.filter((i) => i.itemType === 'CHAT').map((i) => i.itemId);
+  const postIds = items.filter((i) => i.itemType === 'DOCUMENT' || i.itemType === 'RESOURCE').map((i) => i.itemId);
+
+  const [messages, conversations, posts] = await Promise.all([
+    messageIds.length > 0
+      ? prisma.message.findMany({
+          where: { id: { in: messageIds } },
+          include: {
+            conversation: {
+              select: {
+                id: true,
+                type: true,
+                name: true,
+                participants: {
+                  where: { userId },
+                  select: { id: true }
+                }
+              }
+            },
+            sender: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true
+              }
+            }
+          }
+        })
+      : [],
+    conversationIds.length > 0
+      ? prisma.conversation.findMany({
+          where: { id: { in: conversationIds } },
+          include: {
             participants: {
               where: { userId },
-              select: { id: true }
+              select: { id: true, role: true }
             }
           }
-        },
-        sender: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true
-          }
-        }
-      }
-    });
-
-    if (!message) {
-      return { isAccessible: false, content: null, title: 'Deleted message or file', searchText: '' };
-    }
-
-    if (message.conversation.participants.length === 0) {
-      return { isAccessible: false, content: null, title: 'Inaccessible message', searchText: '' };
-    }
-
-    if (itemType === 'FILE' && (!message.fileUrl || message.fileUrl.trim().length === 0)) {
-      return { isAccessible: false, content: null, title: 'Message contains no file attachment', searchText: '' };
-    }
-
-    const title = itemType === 'FILE' ? (message.fileName || 'Attached file') : (message.content.slice(0, 80) || 'Message');
-    const searchText = `${message.content || ''} ${message.fileName || ''} ${message.conversation.name || ''}`.toLowerCase();
-
-    return {
-      isAccessible: true,
-      content: {
-        id: message.id,
-        conversationId: message.conversationId,
-        conversationType: message.conversation.type,
-        conversationName: message.conversation.name,
-        sender: message.sender,
-        content: message.content,
-        fileUrl: message.fileUrl,
-        fileName: message.fileName,
-        fileType: message.fileType,
-        fileSize: message.fileSize,
-        createdAt: message.createdAt
-      },
-      title,
-      searchText
-    };
-  }
-
-  if (itemType === 'CHAT') {
-    const conversation = await prisma.conversation.findUnique({
-      where: { id: itemId },
-      include: {
-        participants: {
-          where: { userId },
-          select: { id: true, role: true }
-        }
-      }
-    });
-
-    if (!conversation) {
-      return { isAccessible: false, content: null, title: 'Deleted conversation', searchText: '' };
-    }
-
-    if (conversation.participants.length === 0) {
-      return { isAccessible: false, content: null, title: 'Inaccessible conversation', searchText: '' };
-    }
-
-    const title = conversation.name || 'Chat Conversation';
-    const searchText = (conversation.name || '').toLowerCase();
-
-    return {
-      isAccessible: true,
-      content: {
-        id: conversation.id,
-        type: conversation.type,
-        name: conversation.name,
-        createdAt: conversation.createdAt
-      },
-      title,
-      searchText
-    };
-  }
-
-  if (itemType === 'DOCUMENT' || itemType === 'RESOURCE') {
-    const post = await prisma.communityPost.findUnique({
-      where: { id: itemId },
-      include: {
-        community: {
-          select: {
-            id: true,
-            name: true,
-            members: {
-              where: { userId },
-              select: { id: true }
+        })
+      : [],
+    postIds.length > 0
+      ? prisma.communityPost.findMany({
+          where: { id: { in: postIds } },
+          include: {
+            community: {
+              select: {
+                id: true,
+                name: true,
+                members: {
+                  where: { userId },
+                  select: { id: true }
+                }
+              }
+            },
+            channel: {
+              select: {
+                id: true,
+                name: true
+              }
+            },
+            author: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true
+              }
             }
           }
-        },
-        channel: {
-          select: {
-            id: true,
-            name: true
-          }
-        },
-        author: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true
-          }
-        }
+        })
+      : []
+  ]);
+
+  const messageMap = new Map(messages.map((m) => [m.id, m]));
+  const conversationMap = new Map(conversations.map((c) => [c.id, c]));
+  const postMap = new Map(posts.map((p) => [p.id, p]));
+
+  const metadataMap = new Map<string, { isAccessible: boolean; content: any; title: string; searchText: string }>();
+
+  for (const item of items) {
+    if (item.itemType === 'MESSAGE' || item.itemType === 'FILE') {
+      const msg = messageMap.get(item.itemId);
+      if (!msg) {
+        metadataMap.set(item.id, { isAccessible: false, content: null, title: 'Deleted message or file', searchText: '' });
+      } else if (msg.conversation.participants.length === 0) {
+        metadataMap.set(item.id, { isAccessible: false, content: null, title: 'Inaccessible message', searchText: '' });
+      } else if (item.itemType === 'FILE' && (!msg.fileUrl || msg.fileUrl.trim().length === 0)) {
+        metadataMap.set(item.id, { isAccessible: false, content: null, title: 'Message contains no file attachment', searchText: '' });
+      } else {
+        const title = item.itemType === 'FILE' ? (msg.fileName || 'Attached file') : (msg.content.slice(0, 80) || 'Message');
+        const searchText = `${msg.content || ''} ${msg.fileName || ''} ${msg.conversation.name || ''}`.toLowerCase();
+        metadataMap.set(item.id, {
+          isAccessible: true,
+          content: {
+            id: msg.id,
+            conversationId: msg.conversationId,
+            conversationType: msg.conversation.type,
+            conversationName: msg.conversation.name,
+            sender: msg.sender,
+            content: msg.content,
+            fileUrl: msg.fileUrl,
+            fileName: msg.fileName,
+            fileType: msg.fileType,
+            fileSize: msg.fileSize,
+            createdAt: msg.createdAt
+          },
+          title,
+          searchText
+        });
       }
-    });
-
-    if (!post) {
-      return { isAccessible: false, content: null, title: 'Deleted post or resource', searchText: '' };
+    } else if (item.itemType === 'CHAT') {
+      const conv = conversationMap.get(item.itemId);
+      if (!conv) {
+        metadataMap.set(item.id, { isAccessible: false, content: null, title: 'Deleted conversation', searchText: '' });
+      } else if (conv.participants.length === 0) {
+        metadataMap.set(item.id, { isAccessible: false, content: null, title: 'Inaccessible conversation', searchText: '' });
+      } else {
+        const title = conv.name || 'Chat Conversation';
+        metadataMap.set(item.id, {
+          isAccessible: true,
+          content: {
+            id: conv.id,
+            type: conv.type,
+            name: conv.name,
+            createdAt: conv.createdAt
+          },
+          title,
+          searchText: (conv.name || '').toLowerCase()
+        });
+      }
+    } else if (item.itemType === 'DOCUMENT' || item.itemType === 'RESOURCE') {
+      const post = postMap.get(item.itemId);
+      if (!post) {
+        metadataMap.set(item.id, { isAccessible: false, content: null, title: 'Deleted post or resource', searchText: '' });
+      } else if (post.community.members.length === 0) {
+        metadataMap.set(item.id, { isAccessible: false, content: null, title: 'Inaccessible resource', searchText: '' });
+      } else if (item.itemType === 'DOCUMENT' && (!post.fileUrl || post.fileUrl.trim().length === 0)) {
+        metadataMap.set(item.id, { isAccessible: false, content: null, title: 'Post contains no attached document', searchText: '' });
+      } else {
+        const title = post.fileName || post.content.slice(0, 80) || 'Community Resource';
+        const searchText = `${post.content || ''} ${post.fileName || ''} ${post.community.name || ''} ${post.channel.name || ''}`.toLowerCase();
+        metadataMap.set(item.id, {
+          isAccessible: true,
+          content: {
+            id: post.id,
+            communityId: post.communityId,
+            communityName: post.community.name,
+            channelId: post.channelId,
+            channelName: post.channel.name,
+            author: post.author,
+            content: post.content,
+            fileUrl: post.fileUrl,
+            fileName: post.fileName,
+            fileType: post.fileType,
+            fileSize: post.fileSize,
+            createdAt: post.createdAt
+          },
+          title,
+          searchText
+        });
+      }
+    } else {
+      metadataMap.set(item.id, { isAccessible: true, content: null, title: 'Saved Item', searchText: '' });
     }
-
-    if (post.community.members.length === 0) {
-      return { isAccessible: false, content: null, title: 'Inaccessible resource', searchText: '' };
-    }
-
-    if (itemType === 'DOCUMENT' && (!post.fileUrl || post.fileUrl.trim().length === 0)) {
-      return { isAccessible: false, content: null, title: 'Post contains no attached document', searchText: '' };
-    }
-
-    const title = post.fileName || post.content.slice(0, 80) || 'Community Resource';
-    const searchText = `${post.content || ''} ${post.fileName || ''} ${post.community.name || ''} ${post.channel.name || ''}`.toLowerCase();
-
-    return {
-      isAccessible: true,
-      content: {
-        id: post.id,
-        communityId: post.communityId,
-        communityName: post.community.name,
-        channelId: post.channelId,
-        channelName: post.channel.name,
-        author: post.author,
-        content: post.content,
-        fileUrl: post.fileUrl,
-        fileName: post.fileName,
-        fileType: post.fileType,
-        fileSize: post.fileSize,
-        createdAt: post.createdAt
-      },
-      title,
-      searchText
-    };
   }
 
-  return { isAccessible: true, content: null, title: 'Saved Item', searchText: '' };
+  return metadataMap;
+};
+
+const resolveItemMetadata = async (userId: string, itemType: SavedItemType, itemId: string) => {
+  const map = await resolveItemsMetadataBatch(userId, [{ id: itemId, itemType, itemId }]);
+  return map.get(itemId) || { isAccessible: false, content: null, title: 'Item not found', searchText: '' };
 };
 
 export const saveItem = async (userId: string, data: SaveItemInput) => {
@@ -262,7 +275,7 @@ export const getSavedItems = async (userId: string, query: GetSavedItemsQuery) =
       take: take + 1,
       skip: query.cursor ? 1 : 0,
       cursor: query.cursor ? { id: query.cursor } : undefined,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: {
         collection: {
           select: {
@@ -278,23 +291,23 @@ export const getSavedItems = async (userId: string, query: GetSavedItemsQuery) =
     const pagedItems = hasNextPage ? items.slice(0, take) : items;
     const nextCursor = hasNextPage && pagedItems.length > 0 ? pagedItems[pagedItems.length - 1].id : null;
 
-    const enrichedItems = await Promise.all(
-      pagedItems.map(async (item) => {
-        const details = await resolveItemMetadata(userId, item.itemType, item.itemId);
-        return {
-          id: item.id,
-          itemType: item.itemType,
-          itemId: item.itemId,
-          note: item.note,
-          collection: item.collection,
-          createdAt: item.createdAt,
-          updatedAt: item.updatedAt,
-          isAccessible: details.isAccessible,
-          title: details.title,
-          content: details.content
-        };
-      })
-    );
+    const metadataMap = await resolveItemsMetadataBatch(userId, pagedItems);
+
+    const enrichedItems = pagedItems.map((item) => {
+      const details = metadataMap.get(item.id) || { isAccessible: false, content: null, title: 'Item not found' };
+      return {
+        id: item.id,
+        itemType: item.itemType,
+        itemId: item.itemId,
+        note: item.note,
+        collection: item.collection,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        isAccessible: details.isAccessible,
+        title: details.title,
+        content: details.content
+      };
+    });
 
     return {
       items: enrichedItems,
@@ -307,14 +320,15 @@ export const getSavedItems = async (userId: string, query: GetSavedItemsQuery) =
   let currentCursor = query.cursor;
   let hasMoreDbRecords = true;
   let lastScannedId: string | null = null;
+  let hasNextMatch = false;
 
-  while (matchedItems.length < take + 1 && hasMoreDbRecords) {
+  while (hasMoreDbRecords) {
     const batch = await prisma.savedItem.findMany({
       where: whereClause,
       take: 50,
       skip: currentCursor ? 1 : 0,
       cursor: currentCursor ? { id: currentCursor } : undefined,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: {
         collection: {
           select: {
@@ -332,30 +346,36 @@ export const getSavedItems = async (userId: string, query: GetSavedItemsQuery) =
     }
 
     currentCursor = batch[batch.length - 1].id;
+    const metadataMap = await resolveItemsMetadataBatch(userId, batch);
 
     for (const item of batch) {
       lastScannedId = item.id;
-      const details = await resolveItemMetadata(userId, item.itemType, item.itemId);
+      const details = metadataMap.get(item.id) || { isAccessible: false, content: null, title: '', searchText: '' };
       const combinedText = `${item.note || ''} ${details.searchText}`.toLowerCase();
 
       if (combinedText.includes(searchTerm)) {
-        matchedItems.push({
-          id: item.id,
-          itemType: item.itemType,
-          itemId: item.itemId,
-          note: item.note,
-          collection: item.collection,
-          createdAt: item.createdAt,
-          updatedAt: item.updatedAt,
-          isAccessible: details.isAccessible,
-          title: details.title,
-          content: details.content
-        });
-
-        if (matchedItems.length === take + 1) {
+        if (matchedItems.length < take) {
+          matchedItems.push({
+            id: item.id,
+            itemType: item.itemType,
+            itemId: item.itemId,
+            note: item.note,
+            collection: item.collection,
+            createdAt: item.createdAt,
+            updatedAt: item.updatedAt,
+            isAccessible: details.isAccessible,
+            title: details.title,
+            content: details.content
+          });
+        } else {
+          hasNextMatch = true;
           break;
         }
       }
+    }
+
+    if (hasNextMatch) {
+      break;
     }
 
     if (batch.length < 50) {
@@ -363,12 +383,11 @@ export const getSavedItems = async (userId: string, query: GetSavedItemsQuery) =
     }
   }
 
-  const hasNextPage = matchedItems.length > take || (hasMoreDbRecords && Boolean(lastScannedId));
-  const pagedItems = matchedItems.length > take ? matchedItems.slice(0, take) : matchedItems;
-  const nextCursor = hasNextPage ? (pagedItems.length > 0 ? pagedItems[pagedItems.length - 1].id : lastScannedId) : null;
+  const hasNextPage = hasNextMatch;
+  const nextCursor = hasNextPage ? (lastScannedId || (matchedItems.length > 0 ? matchedItems[matchedItems.length - 1].id : null)) : null;
 
   return {
-    items: pagedItems,
+    items: matchedItems,
     nextCursor,
     hasNextPage
   };
@@ -461,7 +480,7 @@ export const createSavedCollection = async (userId: string, data: CreateCollecti
 export const getSavedCollections = async (userId: string) => {
   return await prisma.savedCollection.findMany({
     where: { userId },
-    orderBy: { createdAt: 'desc' },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     include: {
       _count: {
         select: {
