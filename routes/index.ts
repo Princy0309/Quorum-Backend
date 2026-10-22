@@ -14,6 +14,7 @@ import deviceRoutes from './deviceRoutes.js';
 import aiRoutes from './aiRoutes.js';
 import notificationRoutes from './notificationRoutes.js';
 
+import savedItemRoutes from './savedItemRoutes.js';
 
 const router = Router();
 
@@ -63,6 +64,7 @@ router.use('/v1/chat/conversations', conversationRoutes);
 
 router.use('/uploads', uploadRoutes);
 router.use('/devices', deviceRoutes);
-
+router.use('/saved-items', savedItemRoutes);
+router.use('/v1/saved-items', savedItemRoutes);
 
 export default router;
