@@ -1,0 +1,41 @@
+enum SavedItemType {
+  MESSAGE
+  FILE
+  CHAT
+  DOCUMENT
+  RESOURCE
+}
+
+model SavedCollection {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  color       String?
+  userId      String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items       SavedItem[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model SavedItem {
+  id           String           @id @default(uuid())
+  userId       String
+  itemType     SavedItemType
+  itemId       String
+  note         String?
+  collectionId String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collection   SavedCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, itemType, itemId])
+  @@index([userId])
+  @@index([userId, itemType])
+  @@index([collectionId])
+  @@index([createdAt])
+}
