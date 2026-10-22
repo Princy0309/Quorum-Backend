@@ -196,4 +196,46 @@ describe('Saved Items and Collections API', () => {
     expect(item).toBeDefined();
     expect(item.collection).toBeNull();
   });
+
+  it('should paginate search results without skipping any matching item', async () => {
+    const msg1 = await prisma.message.create({
+      data: { conversationId: conversation.id, senderId: user1.id, content: 'KeywordTarget alpha test', seq: 10 }
+    });
+    const msg2 = await prisma.message.create({
+      data: { conversationId: conversation.id, senderId: user1.id, content: 'KeywordTarget beta test', seq: 11 }
+    });
+    const msg3 = await prisma.message.create({
+      data: { conversationId: conversation.id, senderId: user1.id, content: 'KeywordTarget gamma test', seq: 12 }
+    });
+
+    await request(app).post('/api/saved-items').set('Cookie', [authCookie1]).send({ itemType: 'MESSAGE', itemId: msg1.id });
+    await request(app).post('/api/saved-items').set('Cookie', [authCookie1]).send({ itemType: 'MESSAGE', itemId: msg2.id });
+    await request(app).post('/api/saved-items').set('Cookie', [authCookie1]).send({ itemType: 'MESSAGE', itemId: msg3.id });
+
+    const page1 = await request(app)
+      .get('/api/saved-items?search=KeywordTarget&limit=2')
+      .set('Cookie', [authCookie1]);
+
+    expect(page1.status).toBe(200);
+    expect(page1.body.data.items.length).toBe(2);
+    expect(page1.body.data.hasNextPage).toBe(true);
+    expect(page1.body.data.nextCursor).toBeDefined();
+
+    const page2 = await request(app)
+      .get(`/api/saved-items?search=KeywordTarget&limit=2&cursor=${page1.body.data.nextCursor}`)
+      .set('Cookie', [authCookie1]);
+
+    expect(page2.status).toBe(200);
+    expect(page2.body.data.items.length).toBe(1);
+
+    const allMatchedIds = [
+      ...page1.body.data.items.map((i: any) => i.itemId),
+      ...page2.body.data.items.map((i: any) => i.itemId)
+    ];
+
+    expect(new Set(allMatchedIds).size).toBe(3);
+    expect(allMatchedIds).toContain(msg1.id);
+    expect(allMatchedIds).toContain(msg2.id);
+    expect(allMatchedIds).toContain(msg3.id);
+  });
 });
