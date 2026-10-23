@@ -152,7 +152,12 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response, ne
   await prisma.$transaction([
     prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash },
+      data: {
+        passwordHash,
+        isEmailVerified: true,
+        failedLoginAttempts: 0,
+        lockedUntil: null
+      },
     }),
     prisma.refreshToken.updateMany({
       where: { userId: user.id, revokedAt: null },
