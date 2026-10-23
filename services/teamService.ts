@@ -32,7 +32,7 @@ export const createTeam = async (
     throw new ApiError(409, 'A team with this name already exists in this organization');
   }
 
-  return await prisma.$transaction(async (tx) => {
+    return await prisma.$transaction(async (tx) => {
     const team = await tx.team.create({
       data: {
         organizationId,
@@ -49,8 +49,25 @@ export const createTeam = async (
       },
     });
 
+   
+    await tx.conversation.create({
+      data: {
+        type: 'team',
+        teamId: team.id,
+        name: team.name,
+        ownerId: creatorUserId,
+        participants: {
+          create: {
+            userId: creatorUserId,
+            role: 'admin',
+          },
+        },
+      },
+    });
+
     return team;
   });
+
 };
  
 export const getOrganizationTeams = async (organizationId: string) => {
@@ -272,6 +289,30 @@ export const addTeamMember = async (
     },
   });
 
+  const teamConversation = await prisma.conversation.findUnique({
+    where: { teamId },
+  });
+
+  if (teamConversation) {
+    await prisma.conversationParticipant.upsert({
+      where: {
+        conversationId_userId: {
+          conversationId: teamConversation.id,
+          userId: targetUserId,
+        },
+      },
+      create: {
+        conversationId: teamConversation.id,
+        userId: targetUserId,
+        role: role === 'LEAD' ? 'admin' : 'member',
+      },
+      update: {
+        role: role === 'LEAD' ? 'admin' : 'member',
+      },
+    });
+  }
+
+
   try {
     await queueNotification({
       recipientId: targetUserId,
@@ -329,6 +370,36 @@ export const removeTeamMember = async (
     },
   });
 
+  const teamConv = await prisma.conversation.findUnique({
+    where: { teamId },
+  });
+
+  if (teamConv) {
+    await prisma.conversationParticipant.deleteMany({
+      where: {
+        conversationId: teamConv.id,
+        userId: targetUserId,
+      },
+    });
+  }
+
+
   return { message: 'Member removed from team successfully' };
+};
+
+
+export const getTeamConversation = async (teamId: string) => {
+  return await prisma.conversation.findUnique({
+    where: { teamId },
+    include: {
+      participants: {
+        include: {
+          user: {
+            select: { id: true, name: true, email: true, avatar: true },
+          },
+        },
+      },
+    },
+  });
 };
 
