@@ -157,7 +157,9 @@ export class RoomBroker extends EventEmitter {
     }
 
     try {
+      let rtpPacketCount = 0;
       const rtpSubscription = track.onReceiveRtp.subscribe((packet: RtpPacket) => {
+        rtpPacketCount++;
         if (!publishedTrack.ssrc && packet.header?.ssrc) {
           publishedTrack.ssrc = packet.header.ssrc;
           (track as any).ssrc = packet.header.ssrc;
@@ -165,6 +167,12 @@ export class RoomBroker extends EventEmitter {
           logger.info(
             `[SFU Broker] Captured SSRC ${packet.header.ssrc} for track ${trackId} (${track.kind})`
           );
+        }
+
+        if (rtpPacketCount <= 3 || rtpPacketCount % 500 === 0) {
+          const fwd = router.getForwarder(trackId);
+          const fwdStats = fwd?.getStats();
+          logger.info(`[SFU Broker] RTP packet #${rtpPacketCount} from publisher ${peerId} track ${trackId} (${track.kind}) | ssrc=${packet.header?.ssrc} | pt=${packet.header?.payloadType} | seq=${packet.header?.sequenceNumber} | fwd.subs=${fwdStats?.activeSubscribers || 0}`);
         }
 
         const rtpBuffer = packet.serialize ? packet.serialize() : (Buffer.isBuffer(packet) ? packet : Buffer.from((packet as any).buffer));
@@ -227,6 +235,12 @@ export class RoomBroker extends EventEmitter {
     const kind = publishedTrack.kind || 'video';
     const subId = `${subscriberPeerId}:${trackId}`;
 
+    // Diagnostic: Log werift sender state
+    logger.info(`[SFU Broker] Creating subscriber ${subId} | sender.ssrc=${sender.ssrc} | sender.codec=${JSON.stringify(sender.codec ? { pt: sender.codec.payloadType, mime: sender.codec.mimeType } : null)} | sender.stopped=${(sender as any).stopped} | dtls.state=${(sender as any).dtlsTransport?.state}`);
+
+    let transportSendCount = 0;
+    let transportSendErrors = 0;
+
     const subscriber = new Subscriber({
       id: subId,
       peerId: subscriberPeerId,
@@ -237,9 +251,17 @@ export class RoomBroker extends EventEmitter {
       requireSrtp: false,
       transportSender: (buf: Buffer) => {
         try {
+          transportSendCount++;
+          if (transportSendCount <= 5 || transportSendCount % 100 === 0) {
+            const canSend = typeof (sender as any).canSendRtp === 'function' ? (sender as any).canSendRtp() : 'N/A';
+            logger.info(`[SFU Broker] transportSender invoked #${transportSendCount} for ${subscriberPeerId} | buf.len=${buf.length} | canSendRtp=${canSend} | sender.stopped=${(sender as any).stopped} | dtls.state=${(sender as any).dtlsTransport?.state} | codec=${!!(sender as any).codec}`);
+          }
           if (sender && typeof sender.sendRtp === 'function') {
             return sender.sendRtp(buf).catch((err: any) => {
-              logger.debug(`[SFU Broker] sender.sendRtp error for peer ${subscriberPeerId}:`, err);
+              transportSendErrors++;
+              if (transportSendErrors <= 5) {
+                logger.warn(`[SFU Broker] sender.sendRtp error #${transportSendErrors} for peer ${subscriberPeerId}:`, err?.message || err);
+              }
               throw err;
             });
           }
@@ -251,8 +273,10 @@ export class RoomBroker extends EventEmitter {
               throw err;
             });
           }
+          logger.warn(`[SFU Broker] No transport available for subscriber ${subscriberPeerId} - sender.sendRtp=${typeof sender.sendRtp}, iceConn=${!!iceConn}`);
           return false;
-        } catch {
+        } catch (err: any) {
+          logger.warn(`[SFU Broker] transportSender exception for ${subscriberPeerId}:`, err?.message || err);
           return false;
         }
       },
@@ -271,6 +295,11 @@ export class RoomBroker extends EventEmitter {
           return false;
         }
       }
+    });
+
+    // Add a listener to track when subscriber becomes ready
+    subscriber.on('ready', () => {
+      logger.info(`[SFU Broker] ✅ Subscriber ${subId} is now READY! Packets should start flowing.`);
     });
 
     const success = router.addSubscription(trackId, subscriber);
@@ -305,6 +334,23 @@ export class RoomBroker extends EventEmitter {
     if (kind === 'video') {
       this.requestKeyframe(roomCode, publishedTrack.peerId, trackId);
     }
+
+    // Diagnostic: Log subscriber state after setup
+    logger.info(`[SFU Broker] Subscriber ${subId} setup complete | lifecycleState=${subscriber.getLifecycleState()} | isPaused=${subscriber.isPaused}`);
+
+    // Periodic diagnostic check for the first 30 seconds
+    let diagChecks = 0;
+    const diagInterval = setInterval(() => {
+      diagChecks++;
+      const stats = subscriber.getStats();
+      const forwarder = router.getForwarder(trackId);
+      const forwarderStats = forwarder?.getStats();
+      logger.info(`[SFU Broker] DIAG #${diagChecks} sub=${subId} | state=${subscriber.getLifecycleState()} | sent=${stats.packetsSent} | attempted=${stats.packetsAttempted} | dropped=${stats.packetsDropped} | queued=${stats.packetsQueued} | fwd.total=${forwarderStats?.totalForwarded || 0} | fwd.failed=${forwarderStats?.failedForwarded || 0} | fwd.subs=${forwarderStats?.activeSubscribers || 0} | transportCalls=${transportSendCount} | transportErrors=${transportSendErrors}`);
+      if (diagChecks >= 10) {
+        clearInterval(diagInterval);
+      }
+    }, 3000);
+    subscriber.once('close', () => clearInterval(diagInterval));
 
     return true;
   }
