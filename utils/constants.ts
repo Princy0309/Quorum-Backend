@@ -11,3 +11,17 @@ export const CHAT_EVENTS = {
   CONVERSATION_UPDATE: 'conversation:update',
   CONVERSATION_REMOVED: 'conversation:removed'
 } as const;
+
+export const COMMUNITY_EVENTS = {
+  COMMUNITY_JOIN: 'community:join',
+  COMMUNITY_LEAVE: 'community:leave',
+  CHANNEL_JOIN: 'community:channel:join',
+  CHANNEL_LEAVE: 'community:channel:leave',
+  POST_ROOM_JOIN: 'community:post:join',
+  POST_ROOM_LEAVE: 'community:post:leave',
+  POST_NEW: 'community:post:new',
+  POST_UPDATED: 'community:post:updated',
+  POST_DELETED: 'community:post:deleted',
+  COMMENT_NEW: 'community:comment:new',
+  COMMENT_DELETED: 'community:comment:deleted'
+} as const;

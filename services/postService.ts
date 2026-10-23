@@ -1,6 +1,9 @@
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import { CommunityRole, ensureDefaultGeneralChannel } from './communityService.js';
+import { getIO } from '../sockets/socketServer.js';
+import { COMMUNITY_EVENTS } from '../utils/constants.js';
+import logger from '../utils/logger.js';
 
 export interface CommunityPostInput {
   content?: string;
@@ -85,6 +88,25 @@ export const createCommunityPost = async (
       }
     }
   });
+
+  try {
+    const io = getIO();
+    const payload = { post };
+    io.to(`community:${communityId}`).emit(COMMUNITY_EVENTS.POST_NEW, payload);
+    if (targetChannelId) {
+      io.to(`community:channel:${targetChannelId}`).emit(COMMUNITY_EVENTS.POST_NEW, payload);
+    }
+
+    const members = await prisma.communityMember.findMany({
+      where: { communityId },
+      select: { userId: true }
+    });
+    members.forEach((m) => {
+      io.to(`user:${m.userId}`).emit(COMMUNITY_EVENTS.POST_NEW, payload);
+    });
+  } catch (err: any) {
+    logger.error('Failed to emit community post creation event', { communityId, postId: post.id, error: err.message });
+  }
 
   return post;
 };
@@ -360,6 +382,17 @@ export const updateCommunityPost = async (
     }
   });
 
+  try {
+    const io = getIO();
+    const payload = { post: updated };
+    io.to(`community:${updated.communityId}`).emit(COMMUNITY_EVENTS.POST_UPDATED, payload);
+    if (updated.channelId) {
+      io.to(`community:channel:${updated.channelId}`).emit(COMMUNITY_EVENTS.POST_UPDATED, payload);
+    }
+  } catch (err: any) {
+    logger.error('Failed to emit community post update event', { postId, error: err.message });
+  }
+
   return updated;
 };
 
@@ -397,6 +430,17 @@ export const deleteCommunityPost = async (
   await prisma.communityPost.delete({
     where: { id: postId }
   });
+
+  try {
+    const io = getIO();
+    const payload = { postId, channelId: post.channelId, communityId: post.communityId };
+    io.to(`community:${post.communityId}`).emit(COMMUNITY_EVENTS.POST_DELETED, payload);
+    if (post.channelId) {
+      io.to(`community:channel:${post.channelId}`).emit(COMMUNITY_EVENTS.POST_DELETED, payload);
+    }
+  } catch (err: any) {
+    logger.error('Failed to emit community post delete event', { postId, error: err.message });
+  }
 
   return { message: 'Post deleted successfully' };
 };
