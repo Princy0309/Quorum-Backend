@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import expressWinston from 'express-winston';
 import helmet from 'helmet';
+import path from 'path';
 import apiRouter from './routes/index.js';
 
 dotenv.config();
@@ -32,7 +33,16 @@ app.use(cors({
   exposedHeaders: ['authorization'],
 }));
 
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
+}));
+
+app.get('/test', (req: Request, res: Response) => {
+  if (process.env.NODE_ENV !== 'production') {
+    return res.sendFile(path.resolve('sfu_test.html'));
+  }
+  res.status(404).send('Not Found');
+});
 app.use(express.json({ limit: "10kb" }));
 app.use(cookieParser());
 app.use(verifyCSRF);
