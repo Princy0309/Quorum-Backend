@@ -42,44 +42,49 @@ export const createCalendarEvent = async (userId: string, input: CreateEventInpu
         },
     });
 
-    if (input.eventType === 'MEETING' && input.attendeeEmails && input.attendeeEmails.length > 0) {
-        const attendees = await prisma.user.findMany({
-            where: { email: { in: input.attendeeEmails } },
-            select: { id: true, email: true },
-        });
+        if (input.eventType === 'MEETING' && input.attendeeEmails && input.attendeeEmails.length > 0) {
+        try {
+            const attendees = await prisma.user.findMany({
+                where: { email: { in: input.attendeeEmails } },
+                select: { id: true, email: true },
+            });
 
-        for (const attendee of attendees) {
-            if (attendee.id === userId) continue;
-            try {
-                const notif = await prisma.notification.create({
-                    data: {
-                        recipientId: attendee.id,
-                        actorId: userId,
-                        type: 'EVENT_REMINDER',
-                        title: `Meeting Scheduled: ${input.title}`,
-                        body: `${creator.name} scheduled a meeting for ${start.toLocaleDateString()} at ${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-                        data: {
-                            eventId: event.id,
-                            meetingLink: input.meetingLink || '',
-                            startDate: start.toISOString(),
-                        },
-                    },
-                });
-
+            for (const attendee of attendees) {
+                if (attendee.id === userId) continue;
                 try {
-                    const io = getIO();
-                    io.to(`user:${attendee.id}`).emit('notification:new', notif);
-                } catch (socketErr: unknown) {
-                    const msg = socketErr instanceof Error ? socketErr.message : String(socketErr);
-                    logger.warn(`Could not emit real-time socket notification: ${msg}`);
-                }
-            } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : String(err);
-                logger.warn(`Could not dispatch meeting notification: ${message}`);
-            }
+                    const notif = await prisma.notification.create({
+                        data: {
+                            recipientId: attendee.id,
+                            actorId: userId,
+                            type: 'EVENT_REMINDER',
+                            title: `Meeting Scheduled: ${input.title}`,
+                            body: `${creator.name} scheduled a meeting for ${start.toLocaleDateString()} at ${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+                            data: {
+                                eventId: event.id,
+                                meetingLink: input.meetingLink || '',
+                                startDate: start.toISOString(),
+                            },
+                        },
+                    });
 
+                    try {
+                        const io = getIO();
+                        io.to(`user:${attendee.id}`).emit('notification:new', notif);
+                    } catch (socketErr: unknown) {
+                        const msg = socketErr instanceof Error ? socketErr.message : String(socketErr);
+                        logger.warn(`Could not emit real-time socket notification for event ${event.id} to user ${attendee.id}: ${msg}`);
+                    }
+                } catch (notifErr: unknown) {
+                    const msg = notifErr instanceof Error ? notifErr.message : String(notifErr);
+                    logger.warn(`Could not create notification in DB for event ${event.id} and attendee ${attendee.id}: ${msg}`);
+                }
+            }
+        } catch (lookupErr: unknown) {
+            const msg = lookupErr instanceof Error ? lookupErr.message : String(lookupErr);
+            logger.warn(`Failed attendee lookup for event ${event.id}: ${msg}`);
         }
     }
+
 
     if (input.hasReminder) {
         try {
