@@ -240,6 +240,9 @@ export class RoomBroker extends EventEmitter {
 
     let transportSendCount = 0;
     let transportSendErrors = 0;
+    if (sender) {
+      (sender as any).pendingRtpEnabled = true;
+    }
 
     const subscriber = new Subscriber({
       id: subId,
