@@ -9,7 +9,7 @@ import {
   deleteCalendarEventController,
 } from '../controllers/calendarController.js';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
-import { validate } from '../middlewares/validate.js';
+import { validate, validateQuery } from '../middlewares/validate.js';
 import {
   createCalendarEventSchema,
   updateCalendarEventSchema,
@@ -22,8 +22,8 @@ const router = Router();
 router.use(authMiddleware);
 
 router.post('/', validate(createCalendarEventSchema), createCalendarEventController);
-router.get('/month', validate(monthQuerySchema), getCalendarEventsByMonthController);
-router.get('/date', validate(dateQuerySchema), getCalendarEventsByDateController);
+router.get('/month', validateQuery(monthQuerySchema), getCalendarEventsByMonthController);
+router.get('/date', validateQuery(dateQuerySchema), getCalendarEventsByDateController);
 router.get('/upcoming', getUpcomingCalendarEventsController);
 router.get('/:id', getCalendarEventByIdController);
 router.patch('/:id', validate(updateCalendarEventSchema), updateCalendarEventController);

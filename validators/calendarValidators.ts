@@ -31,14 +31,10 @@ export const updateCalendarEventSchema = z.object({
 });
 
 export const monthQuerySchema = z.object({
-  query: z.object({
-    year: z.coerce.number().int().min(2020).max(2035),
-    month: z.coerce.number().int().min(1).max(12),
-  }),
+  year: z.coerce.number().int().min(2020).max(2035),
+  month: z.coerce.number().int().min(1).max(12),
 });
 
 export const dateQuerySchema = z.object({
-  query: z.object({
-    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in format YYYY-MM-DD'),
-  }),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in format YYYY-MM-DD'),
 });
