@@ -42,7 +42,7 @@ export const createCalendarEvent = async (userId: string, input: CreateEventInpu
         },
     });
 
-        if (input.eventType === 'MEETING' && input.attendeeEmails && input.attendeeEmails.length > 0) {
+    if (input.eventType === 'MEETING' && input.attendeeEmails && input.attendeeEmails.length > 0) {
         try {
             const attendees = await prisma.user.findMany({
                 where: { email: { in: input.attendeeEmails } },
@@ -121,51 +121,51 @@ export const createCalendarEvent = async (userId: string, input: CreateEventInpu
 
 
 export const getCalendarEventsByMonth = async (userId: string, year: number, month: number) => {
-  const startOfMonth = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
-  const endOfMonth = new Date(Date.UTC(year, month, 1, 0, 0, 0));
+    const startOfMonth = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
+    const endOfMonth = new Date(Date.UTC(year, month, 1, 0, 0, 0));
 
-  return await prisma.calendarEvent.findMany({
-    where: {
-      userId,
-      startDate: { lt: endOfMonth },
-      OR: [
-        { endDate: { gte: startOfMonth } },
-        { endDate: null, startDate: { gte: startOfMonth } },
-      ],
-    },
-    orderBy: { startDate: 'asc' },
-  });
+    return await prisma.calendarEvent.findMany({
+        where: {
+            userId,
+            startDate: { lt: endOfMonth },
+            OR: [
+                { endDate: { gte: startOfMonth } },
+                { endDate: null, startDate: { gte: startOfMonth } },
+            ],
+        },
+        orderBy: { startDate: 'asc' },
+    });
 };
 
 export const getCalendarEventsByDate = async (userId: string, dateStr: string) => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    throw new ApiError(400, 'Date must be in format YYYY-MM-DD');
-  }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        throw new ApiError(400, 'Date must be in format YYYY-MM-DD');
+    }
 
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const startOfDay = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const startOfDay = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
 
-  if (
-    startOfDay.getUTCFullYear() !== year ||
-    startOfDay.getUTCMonth() !== month - 1 ||
-    startOfDay.getUTCDate() !== day
-  ) {
-    throw new ApiError(400, 'Invalid calendar date');
-  }
+    if (
+        startOfDay.getUTCFullYear() !== year ||
+        startOfDay.getUTCMonth() !== month - 1 ||
+        startOfDay.getUTCDate() !== day
+    ) {
+        throw new ApiError(400, 'Invalid calendar date');
+    }
 
-  const nextDay = new Date(Date.UTC(year, month - 1, day + 1, 0, 0, 0));
+    const nextDay = new Date(Date.UTC(year, month - 1, day + 1, 0, 0, 0));
 
-  return await prisma.calendarEvent.findMany({
-    where: {
-      userId,
-      startDate: { lt: nextDay },
-      OR: [
-        { endDate: { gte: startOfDay } },
-        { endDate: null, startDate: { gte: startOfDay } },
-      ],
-    },
-    orderBy: { startDate: 'asc' },
-  });
+    return await prisma.calendarEvent.findMany({
+        where: {
+            userId,
+            startDate: { lt: nextDay },
+            OR: [
+                { endDate: { gte: startOfDay } },
+                { endDate: null, startDate: { gte: startOfDay } },
+            ],
+        },
+        orderBy: { startDate: 'asc' },
+    });
 };
 
 
@@ -198,11 +198,11 @@ export const getCalendarEventById = async (userId: string, eventId: string) => {
 };
 
 export const updateCalendarEvent = async (userId: string, eventId: string, input: UpdateEventInput) => {
-    const existing = await prisma.calendarEvent.findUnique({
-        where: { id: eventId },
+    const existing = await prisma.calendarEvent.findFirst({
+        where: { id: eventId, userId },
     });
 
-    if (!existing || existing.userId !== userId) {
+    if (!existing) {
         throw new ApiError(404, 'Calendar event not found');
     }
 
@@ -212,6 +212,14 @@ export const updateCalendarEvent = async (userId: string, eventId: string, input
             throw new ApiError(400, 'Title cannot be empty');
         }
     }
+
+    if (input.startDate !== undefined && !input.startDate.trim()) {
+        throw new ApiError(400, 'Start date cannot be empty');
+    }
+    if (input.endDate !== undefined && input.endDate !== null && !input.endDate.trim()) {
+        throw new ApiError(400, 'End date cannot be empty');
+    }
+
 
     const effectiveStart = input.startDate ? new Date(input.startDate) : existing.startDate;
     const effectiveEnd = input.endDate !== undefined
@@ -229,10 +237,11 @@ export const updateCalendarEvent = async (userId: string, eventId: string, input
     const datesOrReminderChanged =
         input.startDate !== undefined ||
         input.endDate !== undefined ||
-        input.reminderMinutes !== undefined;
+        input.reminderMinutes !== undefined ||
+        input.hasReminder !== undefined;
 
-    return await prisma.calendarEvent.update({
-        where: { id: eventId },
+    const updated = await prisma.calendarEvent.update({
+        where: { id: existing.id },
         data: {
             ...(input.title !== undefined && { title: input.title.trim() }),
             ...(input.description !== undefined && { description: input.description }),
@@ -248,18 +257,76 @@ export const updateCalendarEvent = async (userId: string, eventId: string, input
         },
     });
 
+    const effectiveType = input.eventType || existing.eventType;
+    const effectiveEmails = input.attendeeEmails || existing.attendeeEmails;
+    const meetingDetailsChanged =
+        input.startDate !== undefined ||
+        input.endDate !== undefined ||
+        input.meetingLink !== undefined ||
+        input.title !== undefined ||
+        input.attendeeEmails !== undefined;
+
+    if (effectiveType === 'MEETING' && effectiveEmails && effectiveEmails.length > 0 && meetingDetailsChanged) {
+        try {
+            const attendees = await prisma.user.findMany({
+                where: { email: { in: effectiveEmails } },
+                select: { id: true, email: true },
+            });
+
+            const creator = await prisma.user.findUnique({
+                where: { id: userId },
+                select: { name: true },
+            });
+
+            for (const attendee of attendees) {
+                if (attendee.id === userId) continue;
+                try {
+                    const notif = await prisma.notification.create({
+                        data: {
+                            recipientId: attendee.id,
+                            actorId: userId,
+                            type: 'EVENT_REMINDER',
+                            title: `Meeting Updated: ${updated.title}`,
+                            body: `${creator?.name || 'Organizer'} updated the meeting scheduled for ${effectiveStart.toLocaleDateString()} at ${effectiveStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+                            data: {
+                                eventId: updated.id,
+                                meetingLink: updated.meetingLink || '',
+                                startDate: effectiveStart.toISOString(),
+                            },
+                        },
+                    });
+
+                    try {
+                        const io = getIO();
+                        io.to(`user:${attendee.id}`).emit('notification:new', notif);
+                    } catch (socketErr: unknown) {
+                        const msg = socketErr instanceof Error ? socketErr.message : String(socketErr);
+                        logger.warn(`Could not emit update socket notification for event ${updated.id} to user ${attendee.id}: ${msg}`);
+                    }
+                } catch (notifErr: unknown) {
+                    const msg = notifErr instanceof Error ? notifErr.message : String(notifErr);
+                    logger.warn(`Could not create update notification for event ${updated.id} and attendee ${attendee.id}: ${msg}`);
+                }
+            }
+        } catch (lookupErr: unknown) {
+            const msg = lookupErr instanceof Error ? lookupErr.message : String(lookupErr);
+            logger.warn(`Failed attendee lookup during meeting update for event ${updated.id}: ${msg}`);
+        }
+    }
+
+    return updated;
 };
 
 export const deleteCalendarEvent = async (userId: string, eventId: string) => {
-    const existing = await prisma.calendarEvent.findUnique({
-        where: { id: eventId },
+    const existing = await prisma.calendarEvent.findFirst({
+        where: { id: eventId, userId },
     });
 
-    if (!existing || existing.userId !== userId) {
+    if (!existing) {
         throw new ApiError(404, 'Calendar event not found');
     }
 
     return await prisma.calendarEvent.delete({
-        where: { id: eventId },
+        where: { id: existing.id },
     });
 };
