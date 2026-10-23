@@ -13,6 +13,8 @@ import uploadRoutes from './uploadRoutes.js';
 import deviceRoutes from './deviceRoutes.js';
 import aiRoutes from './aiRoutes.js';
 import notificationRoutes from './notificationRoutes.js';
+import calendarRoutes from './calendarRoutes.js';
+
 
 
 const router = Router();
@@ -43,6 +45,9 @@ router.use('/communities', communityRoutes);
 router.use('/community', communityRoutes);
 router.use('/v1/communities', communityRoutes);
 router.use('/v1/community', communityRoutes);
+router.use('/calendar', calendarRoutes);
+router.use('/v1/calendar', calendarRoutes);
+
 
 router.use('/community-posts', postRoutes);
 router.use('/posts', postRoutes);
