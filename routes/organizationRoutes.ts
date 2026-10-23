@@ -24,6 +24,10 @@ import {
   deleteTeamController,
   addTeamMemberController,
   removeTeamMemberController,
+  getTeamMessagesController,
+  sendTeamMessageController,
+  deleteTeamMessageController,
+  pinTeamMessageController,
 } from '../controllers/teamController.js';
 
 import { authMiddleware } from '../middlewares/authMiddleware.js';
@@ -134,6 +138,36 @@ router.delete(
   requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
   removeTeamMemberController
 );
+
+
+router.get(
+  '/:id/teams/:teamId/messages',
+  authMiddleware,
+  requireOrgMember(),
+  getTeamMessagesController
+);
+
+router.post(
+  '/:id/teams/:teamId/messages',
+  authMiddleware,
+  requireOrgMember(),
+  sendTeamMessageController
+);
+
+router.delete(
+  '/:id/teams/:teamId/messages/:messageId',
+  authMiddleware,
+  requireOrgMember(),
+  deleteTeamMessageController
+);
+
+router.post(
+  '/:id/teams/:teamId/messages/:messageId/pin',
+  authMiddleware,
+  requireOrgMember(),
+  pinTeamMessageController
+);
+
 
 
 
