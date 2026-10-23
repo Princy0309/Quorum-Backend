@@ -11,6 +11,7 @@ export class RoomBroker extends EventEmitter {
   private static instance: RoomBroker;
   private rooms: Map<string, SfuRoom> = new Map();
   private routers: Map<string, TrackRouter> = new Map();
+  private keyframeThrottle: Map<string, number> = new Map();
 
   private constructor() {
     super();
@@ -139,10 +140,6 @@ export class RoomBroker extends EventEmitter {
 
     publisher.on('error', (err) => {
       logger.warn(`[SFU Broker] Publisher error for peer ${peerId} track ${trackId}:`, err);
-    });
-
-    publisher.on('rtcp-feedback', () => {
-      this.requestKeyframe(roomCode, peerId, trackId);
     });
 
     try {
@@ -399,6 +396,14 @@ export class RoomBroker extends EventEmitter {
   }
 
   public requestKeyframe(roomCode: string, publisherPeerId: string, trackId?: string): void {
+    const throttleKey = `${roomCode}:${publisherPeerId}:${trackId || 'any'}`;
+    const now = Date.now();
+    const last = this.keyframeThrottle.get(throttleKey) || 0;
+    if (now - last < 500) {
+      return;
+    }
+    this.keyframeThrottle.set(throttleKey, now);
+
     const room = this.rooms.get(roomCode);
     if (!room) return;
 
