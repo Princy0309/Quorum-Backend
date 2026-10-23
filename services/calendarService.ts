@@ -3,6 +3,8 @@ import { ApiError } from '../utils/ApiError.js';
 import { getIO } from '../sockets/socketServer.js';
 import logger from '../utils/logger.js';
 import type { CreateEventInput, UpdateEventInput } from '../types/index.js';
+import { scheduleEventReminder, cancelEventReminder } from '../queues/reminderQueue.js';
+
 
 export const createCalendarEvent = async (userId: string, input: CreateEventInput) => {
     const creator = await prisma.user.findUnique({
@@ -115,6 +117,8 @@ export const createCalendarEvent = async (userId: string, input: CreateEventInpu
         }
 
     }
+
+    await scheduleEventReminder(event);
 
     return event;
 };
@@ -314,6 +318,14 @@ export const updateCalendarEvent = async (userId: string, eventId: string, input
         }
     }
 
+    if (datesOrReminderChanged) {
+        if (updated.hasReminder) {
+            await scheduleEventReminder(updated);
+        } else {
+            await cancelEventReminder(updated.id);
+        }
+    }
+
     return updated;
 };
 
@@ -325,6 +337,8 @@ export const deleteCalendarEvent = async (userId: string, eventId: string) => {
     if (!existing) {
         throw new ApiError(404, 'Calendar event not found');
     }
+
+    await cancelEventReminder(eventId);
 
     return await prisma.calendarEvent.delete({
         where: { id: existing.id },
