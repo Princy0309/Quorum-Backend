@@ -148,6 +148,7 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         const fileType = (value.fileType || value.type) || undefined;
         const fileName = (value.fileName || (value as any).name) || undefined;
         const fileSize = typeof value.fileSize === 'number' ? value.fileSize : (typeof (value as any).size === 'number' ? (value as any).size : undefined);
+        const mentions = Array.isArray((value as any).mentions) ? (value as any).mentions : undefined;
 
         const { message, participants, isDuplicate } = await saveMessage(
           senderId,
@@ -157,7 +158,8 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           fileType,
           clientMessageId || undefined,
           fileName,
-          fileSize
+          fileSize,
+          mentions
         );
 
         if (isDuplicate) {
@@ -187,14 +189,39 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         });
 
         const recipientUserIds = participants.map((p) => p.userId).filter((id) => id !== senderId);
-        sendPushToOfflineUsers(
-          recipientUserIds,
-          `New message from ${message.sender.name}`,
-          rawContent || 'Sent an attachment',
-          { conversationId: message.conversationId, messageId: message.id }
-        ).catch((err) => {
-          logger.error('Background FCM notification dispatch error', { error: err.message });
-        });
+        const mentionedRecipientIds = recipientUserIds.filter((id) =>
+          ((message as any).mentionedUserIds || []).includes(id)
+        );
+        const standardRecipientIds = recipientUserIds.filter(
+          (id) => !mentionedRecipientIds.includes(id)
+        );
+
+        if (mentionedRecipientIds.length > 0) {
+          sendPushToOfflineUsers(
+            mentionedRecipientIds,
+            `${message.sender.name} mentioned you`,
+            rawContent || 'Mentioned you in a message',
+            {
+              conversationId: message.conversationId,
+              messageId: message.id,
+              isMention: 'true',
+              type: 'MENTION'
+            }
+          ).catch((err) => {
+            logger.error('Background FCM mention notification dispatch error', { error: err.message });
+          });
+        }
+
+        if (standardRecipientIds.length > 0) {
+          sendPushToOfflineUsers(
+            standardRecipientIds,
+            `New message from ${message.sender.name}`,
+            rawContent || 'Sent an attachment',
+            { conversationId: message.conversationId, messageId: message.id }
+          ).catch((err) => {
+            logger.error('Background FCM notification dispatch error', { error: err.message });
+          });
+        }
 
         if (callback) {
           callback({ success: true, data: message });
