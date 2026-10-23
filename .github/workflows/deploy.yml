@@ -35,6 +35,10 @@ jobs:
              git fetch origin dev
              git reset --hard origin/dev
 
+             sed -i '/^ANNOUNCED_IP=/d' .env 2>/dev/null || true
+             echo "ANNOUNCED_IP=${{ secrets.EC2_HOST }}" >> .env
+
+
              sudo docker compose down --remove-orphans || true
              sudo docker compose build --no-cache app
              sudo docker compose up -d --force-recreate

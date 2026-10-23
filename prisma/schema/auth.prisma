@@ -42,6 +42,8 @@ model User {
   receivedNotifications    Notification[]            @relation("RecipientNotifications")
   triggeredNotifications   Notification[]            @relation("ActorNotifications")
   notificationPreferences  UserNotificationPreference[]
+  calendarEvents           CalendarEvent[]           @relation("UserCalendarEvents")
+
 
 
 }

@@ -40,8 +40,8 @@ export const allowedOrigins: string[] = (data?.ALLOWED_ORIGINS || '')
 export const isOriginAllowed = (origin?: string | null): boolean => {
   if (!origin) return true;
   if (allowedOrigins.includes(origin)) return true;
-  if (data?.NODE_ENV !== 'production') {
-    return origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:');
+  if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+    return true;
   }
   return false;
 };
