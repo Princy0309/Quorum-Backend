@@ -235,8 +235,9 @@ export class RoomBroker extends EventEmitter {
       peerId: subscriberPeerId,
       kind,
       trackId,
+      outboundSsrc: sender.ssrc,
+      payloadType: sender.codec?.payloadType,
       requireSrtp: true,
-      srtpSession: peer.outboundSrtpSession,
       transportSender: (buf: Buffer) => {
         try {
           const pc = subscriberPeerConnection || (sender as any).peerConnection;
