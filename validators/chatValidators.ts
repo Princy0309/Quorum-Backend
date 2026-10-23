@@ -45,6 +45,7 @@ export const sendMessageSchema = z.object({
   clientMessageId: z.string().trim().max(100).optional(),
   content: z.string().trim().max(10000).optional().nullable(),
   caption: z.string().trim().max(10000).optional().nullable(),
+  mentions: z.array(z.string().trim().max(100)).max(20).optional().default([]),
   fileUrl: trustedMediaUrlSchema.optional().nullable().or(z.literal('')),
   url: trustedMediaUrlSchema.optional().nullable().or(z.literal('')),
   fileType: z.string().optional().nullable(),
