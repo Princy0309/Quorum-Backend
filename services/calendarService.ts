@@ -116,42 +116,53 @@ export const createCalendarEvent = async (userId: string, input: CreateEventInpu
 
 
 export const getCalendarEventsByMonth = async (userId: string, year: number, month: number) => {
-    const startOfMonth = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
-    const endOfMonth = new Date(Date.UTC(year, month, 1, 0, 0, 0));
+  const startOfMonth = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
+  const endOfMonth = new Date(Date.UTC(year, month, 1, 0, 0, 0));
 
-    return await prisma.calendarEvent.findMany({
-        where: {
-            userId,
-            startDate: { lt: endOfMonth },
-            OR: [
-                { endDate: { gte: startOfMonth } },
-                { endDate: null, startDate: { gte: startOfMonth } },
-            ],
-        },
-        orderBy: { startDate: 'asc' },
-    });
+  return await prisma.calendarEvent.findMany({
+    where: {
+      userId,
+      startDate: { lt: endOfMonth },
+      OR: [
+        { endDate: { gte: startOfMonth } },
+        { endDate: null, startDate: { gte: startOfMonth } },
+      ],
+    },
+    orderBy: { startDate: 'asc' },
+  });
 };
 
 export const getCalendarEventsByDate = async (userId: string, dateStr: string) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     throw new ApiError(400, 'Date must be in format YYYY-MM-DD');
   }
-    const [year, month, day] = dateStr.split('-').map(Number);
-    const startOfDay = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
-    const endOfDay = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
 
-    return await prisma.calendarEvent.findMany({
-        where: {
-            userId,
-            startDate: { lte: endOfDay },
-            OR: [
-                { endDate: { gte: startOfDay } },
-                { endDate: null, startDate: { gte: startOfDay } },
-            ],
-        },
-        orderBy: { startDate: 'asc' },
-    });
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const startOfDay = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
+
+  if (
+    startOfDay.getUTCFullYear() !== year ||
+    startOfDay.getUTCMonth() !== month - 1 ||
+    startOfDay.getUTCDate() !== day
+  ) {
+    throw new ApiError(400, 'Invalid calendar date');
+  }
+
+  const nextDay = new Date(Date.UTC(year, month - 1, day + 1, 0, 0, 0));
+
+  return await prisma.calendarEvent.findMany({
+    where: {
+      userId,
+      startDate: { lt: nextDay },
+      OR: [
+        { endDate: { gte: startOfDay } },
+        { endDate: null, startDate: { gte: startOfDay } },
+      ],
+    },
+    orderBy: { startDate: 'asc' },
+  });
 };
+
 
 
 export const getUpcomingCalendarEvents = async (userId: string, limit: number = 5) => {
