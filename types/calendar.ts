@@ -18,7 +18,7 @@ export interface UpdateEventInput {
   description?: string;
   eventType?: CalendarEventType;
   startDate?: string;
-  endDate?: string;
+  endDate?: string | null;
   isAllDay?: boolean;
   meetingLink?: string;
   attendeeEmails?: string[];

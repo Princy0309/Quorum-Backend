@@ -246,7 +246,7 @@ export const updateCalendarEvent = async (userId: string, eventId: string, input
             ...(input.title !== undefined && { title: input.title.trim() }),
             ...(input.description !== undefined && { description: input.description }),
             ...(input.eventType && { eventType: input.eventType }),
-            ...(input.startDate && { startDate: new Date(input.startDate) }),
+            ...(input.startDate != undefined && { startDate: new Date(input.startDate) }),
             ...(input.endDate !== undefined && { endDate: input.endDate ? new Date(input.endDate) : null }),
             ...(input.isAllDay !== undefined && { isAllDay: input.isAllDay }),
             ...(input.meetingLink !== undefined && { meetingLink: input.meetingLink }),

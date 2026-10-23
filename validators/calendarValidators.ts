@@ -21,7 +21,7 @@ export const updateCalendarEventSchema = z.object({
     description: z.string().max(1000).optional(),
     eventType: z.enum(['REMINDER', 'MEETING', 'DEADLINE', 'GENERAL']).optional(),
     startDate: z.string().datetime().optional(),
-    endDate: z.string().datetime().optional(),
+    endDate: z.string().datetime().nullable().optional(),
     isAllDay: z.boolean().optional(),
     meetingLink: z.string().max(500).optional(),
     attendeeEmails: z.array(z.string().email()).optional(),
@@ -32,7 +32,7 @@ export const updateCalendarEventSchema = z.object({
 
 export const monthQuerySchema = z.object({
   query: z.object({
-    year: z.coerce.number().int().min(2020).max(2100),
+    year: z.coerce.number().int().min(2020).max(2035),
     month: z.coerce.number().int().min(1).max(12),
   }),
 });
