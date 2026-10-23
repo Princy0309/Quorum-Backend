@@ -86,6 +86,15 @@ export const emailWorker = new Worker(
       return;
     }
 
+    if (job.name === 'sendMeetingInviteEmail') {
+      const { email, inviterName, meetingTitle, formattedDate, meetingLink } = job.data;
+      console.log(`[EmailWorker] Processing job #${job.id}: Sending meeting invite to ${email}`);
+      await sendMeetingInviteEmail(email, inviterName, meetingTitle, formattedDate, meetingLink);
+      console.log(`[EmailWorker] Job #${job.id} completed: Meeting invite sent to ${email}`);
+      return;
+    }
+
+
     const { email, otp, purpose } = job.data;
     console.log(`[EmailWorker] Processing job #${job.id}: Sending ${purpose} OTP to ${email}`);
 

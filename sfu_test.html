@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quorum SFU Live Test Tool</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0f172a; color: #f8fafc; padding: 24px; }
+    .header { margin-bottom: 24px; text-align: center; }
+    .header h1 { font-size: 26px; color: #38bdf8; margin-bottom: 8px; }
+    .header p { color: #94a3b8; font-size: 14px; }
+    .container { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 360px 1fr; gap: 24px; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-size: 12px; font-weight: 600; text-transform: uppercase; color: #94a3b8; margin-bottom: 6px; }
+    input, select { width: 100%; padding: 10px 12px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: #fff; font-size: 14px; }
+    input:focus { outline: none; border-color: #38bdf8; }
+    .btn { width: 100%; padding: 12px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+    .btn-primary { background: #0284c7; color: #fff; }
+    .btn-primary:hover { background: #0369a1; }
+    .btn-danger { background: #ef4444; color: #fff; margin-top: 10px; display: none; }
+    .btn-danger:hover { background: #dc2626; }
+    .video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .video-card { background: #0f172a; border: 1px solid #334155; border-radius: 10px; overflow: hidden; position: relative; aspect-ratio: 4/3; }
+    .video-card video { width: 100%; height: 100%; object-fit: cover; background: #000; }
+    .video-badge { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; color: #fff; }
+    .logs-card { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px; height: 260px; overflow-y: auto; font-family: monospace; font-size: 12px; color: #cbd5e1; }
+    .log-entry { margin-bottom: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; }
+    .log-success { color: #4ade80; }
+    .log-warn { color: #facc15; }
+    .log-error { color: #f87171; }
+    .log-info { color: #38bdf8; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>📡 Quorum SFU Real-Time Video Call Tester</h1>
+    <p>Open this file in <b>2 separate browser tabs</b> (or 2 devices) with the same Room Code to test multi-user audio & video!</p>
+  </div>
+
+  <div class="container">
+    <!-- Left Panel: Controls -->
+    <div class="card">
+      <div class="form-group">
+        <label>Backend URL</label>
+        <input type="text" id="backendUrl" value="https://api.newquorum.me" />
+      </div>
+
+      <div class="form-group">
+        <label>Room Code</label>
+        <input type="text" id="roomCode" value="quorum-test-room" />
+      </div>
+
+      <div class="form-group">
+        <label>User Name</label>
+        <input type="text" id="userName" value="User_A" />
+      </div>
+
+      <div class="form-group">
+        <label>Video / Audio Source</label>
+        <select id="mediaType">
+          <option value="webcam">Real Webcam & Microphone</option>
+          <option value="synthetic">Synthetic Canvas & Tone (No camera needed)</option>
+        </select>
+      </div>
+
+      <button class="btn btn-primary" id="btnJoin" onclick="startCall()">🚀 Join & Start Video Call</button>
+      <button class="btn btn-danger" id="btnLeave" onclick="leaveCall()">🛑 Leave Call</button>
+    </div>
+
+    <!-- Right Panel: Video Grid & Logs -->
+    <div class="card">
+      <h3 style="font-size: 16px; margin-bottom: 14px; color: #e2e8f0;">📹 Video Grid</h3>
+      <div class="video-grid" id="videoGrid">
+        <div class="video-card" id="localCard">
+          <video id="localVideo" autoplay playsinline muted></video>
+          <span class="video-badge" id="localBadge">You (Local)</span>
+        </div>
+      </div>
+
+      <h3 style="font-size: 14px; margin: 16px 0 8px 0; color: #94a3b8;">📋 Real-time Diagnostics Log</h3>
+      <div class="logs-card" id="logs"></div>
+    </div>
+  </div>
+
+  <script>
+    const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    let socket = null;
+    let localStream = null;
+    let publisherPc = null;
+    let consumerPcs = new Map(); // trackId -> RTCPeerConnection
+    let remoteStreams = new Map(); // peerId -> MediaStream
+    let myPeerId = 'usr_' + Math.floor(1000 + Math.random() * 9000);
+
+    // Randomize name for Tab 2 automatically if left default
+    if (Math.random() > 0.5) {
+      document.getElementById('userName').value = 'User_B';
+    }
+
+    function log(msg, type = 'info') {
+      const logs = document.getElementById('logs');
+      const d = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = `log-entry log-${type}`;
+      div.textContent = `[${d}] ${msg}`;
+      logs.appendChild(div);
+      logs.scrollTop = logs.scrollHeight;
+      console.log(`[${type.toUpperCase()}]`, msg);
+    }
+
+    async function getSyntheticStream() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 640;
+      canvas.height = 480;
+      const ctx = canvas.getContext('2d');
+      const userName = document.getElementById('userName').value;
+
+      let frame = 0;
+      function draw() {
+        frame++;
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(0, 0, 640, 480);
+        
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.arc(320 + Math.sin(frame / 20) * 150, 240, 40, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '24px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${userName} (Synthetic Stream)`, 320, 240);
+        ctx.font = '16px sans-serif';
+        ctx.fillText(`Frame: ${frame}`, 320, 280);
+
+        requestAnimationFrame(draw);
+      }
+      draw();
+
+      const videoTrack = canvas.captureStream(30).getVideoTracks()[0];
+
+      // Audio Tone
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const dst = audioCtx.createMediaStreamDestination();
+      osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+      osc.connect(dst);
+      osc.start();
+      const audioTrack = dst.stream.getAudioTracks()[0];
+
+      return new MediaStream([videoTrack, audioTrack]);
+    }
+
+    async function startCall() {
+      const backendUrl = document.getElementById('backendUrl').value.trim();
+      const roomCode = document.getElementById('roomCode').value.trim();
+      const userName = document.getElementById('userName').value.trim();
+      const mediaType = document.getElementById('mediaType').value;
+
+      document.getElementById('btnJoin').style.display = 'none';
+      document.getElementById('btnLeave').style.display = 'block';
+
+      log(`Connecting to ${backendUrl}...`, 'info');
+
+      // 1. Initialize Socket.IO
+      socket = io(backendUrl, {
+        auth: { userId: myPeerId, name: userName },
+        transports: ['websocket', 'polling'],
+        timeout: 10000,
+      });
+
+      socket.on('connect_error', (err) => {
+        log(`❌ Connection Error: ${err.message}`, 'error');
+        if (err.message && err.message.includes('CORS')) {
+          log('⚠️ CORS BLOCKED: The server at ' + backendUrl + ' does not allow connections from http://127.0.0.1:5500.', 'warn');
+          log('👉 FIX: Test against your local backend (http://localhost:5000) OR add http://127.0.0.1:5500 to ALLOWED_ORIGINS.', 'info');
+        }
+      });
+
+      socket.on('connect', async () => {
+        log(`✅ Socket connected! Socket ID: ${socket.id}`, 'success');
+
+        // 2. Get Media Stream
+        try {
+          if (mediaType === 'synthetic') {
+            localStream = await getSyntheticStream();
+            log('Generated Synthetic Canvas & Audio Tone', 'success');
+          } else {
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            log('Webcam & Microphone acquired', 'success');
+          }
+          document.getElementById('localVideo').srcObject = localStream;
+          document.getElementById('localBadge').textContent = `${userName} (You)`;
+        } catch (mediaErr) {
+          log(`Camera access failed: ${mediaErr.message}. Falling back to synthetic stream.`, 'warn');
+          localStream = await getSyntheticStream();
+          document.getElementById('localVideo').srcObject = localStream;
+        }
+
+        // 3. Setup Publisher WebRTC
+        publisherPc = new RTCPeerConnection(STUN);
+        localStream.getTracks().forEach((track) => publisherPc.addTrack(track, localStream));
+
+        publisherPc.onicecandidate = (e) => {
+          if (e.candidate) {
+            socket.emit('sfu:ice-candidate', {
+              roomCode,
+              peerId: myPeerId,
+              target: 'publisher',
+              candidate: e.candidate,
+            });
+          }
+        };
+
+        publisherPc.onconnectionstatechange = () => {
+          log(`Publisher Connection State: ${publisherPc.connectionState}`, publisherPc.connectionState === 'connected' ? 'success' : 'info');
+        };
+
+        // 4. Join SFU Room
+        log(`Joining SFU Room: ${roomCode} as ${myPeerId}...`, 'info');
+        socket.emit('sfu:join', { roomCode, peerId: myPeerId, name: userName });
+
+        // 5. Send Offer
+        const offer = await publisherPc.createOffer();
+        await publisherPc.setLocalDescription(offer);
+        socket.emit('sfu:offer', {
+          roomCode,
+          peerId: myPeerId,
+          sdp: { type: offer.type, sdp: offer.sdp },
+        });
+        log('Published SDP Offer sent to SFU', 'info');
+      });
+
+      // SFU Answer
+      socket.on('sfu:answer', async ({ sdp }) => {
+        log('Received SFU Publisher Answer', 'success');
+        await publisherPc.setRemoteDescription(new RTCSessionDescription(sdp));
+      });
+
+      // SFU Publisher ICE Candidate
+      socket.on('sfu:ice-candidate', async ({ target, candidate }) => {
+        if ((target === 'publisher' || !target) && candidate && publisherPc.remoteDescription) {
+          try {
+            await publisherPc.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {}
+        }
+      });
+
+      // Existing tracks in room
+      socket.on('sfu:joined', ({ existingTracks }) => {
+        log(`Room joined! ${existingTracks.length} existing track(s) present.`, 'success');
+        existingTracks.forEach((t) => {
+          if (t.peerId !== myPeerId) subscribeToTrack(t.trackId, t.kind, t.peerId);
+        });
+      });
+
+      // New peer produced a track
+      socket.on('sfu:new-producer', ({ trackId, kind, peerId }) => {
+        log(`New Remote Producer detected! Track: ${trackId} (${kind}) from ${peerId}`, 'info');
+        if (peerId !== myPeerId) subscribeToTrack(trackId, kind, peerId);
+      });
+
+      // Subscriber Answer
+      socket.on('sfu:subscribed', async ({ trackId, sdp }) => {
+        log(`Subscribed confirmed for track: ${trackId}`, 'success');
+        const pc = consumerPcs.get(trackId);
+        if (pc && pc.signalingState !== 'closed') {
+          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          // Request keyframe immediately
+          const producerPeerId = pc._producerPeerId;
+          socket.emit('sfu:request-keyframe', { roomCode, publisherPeerId: producerPeerId, trackId });
+          log(`Sent PLI keyframe request for producer ${producerPeerId}`, 'info');
+        }
+      });
+
+      // Subscriber ICE candidate from server
+      socket.on('sfu:subscribe-ice-candidate', async ({ trackId, candidate }) => {
+        const pc = consumerPcs.get(trackId);
+        if (pc && candidate && pc.remoteDescription) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {}
+        }
+      });
+
+      socket.on('sfu:error', ({ message }) => {
+        log(`SFU Error: ${message}`, 'error');
+      });
+
+      socket.on('sfu:peer-left', ({ peerId }) => {
+        log(`Peer ${peerId} left the call`, 'warn');
+        removeRemoteVideo(peerId);
+      });
+    }
+
+    async function subscribeToTrack(trackId, kind, producerPeerId) {
+      if (consumerPcs.has(trackId)) return;
+
+      log(`Initiating subscription for ${kind} track ${trackId} from ${producerPeerId}...`, 'info');
+      const roomCode = document.getElementById('roomCode').value.trim();
+
+      const consumerPc = new RTCPeerConnection(STUN);
+      consumerPc._producerPeerId = producerPeerId;
+      consumerPcs.set(trackId, consumerPc);
+
+      consumerPc.addTransceiver(kind, { direction: 'recvonly' });
+
+      consumerPc.ontrack = (event) => {
+        log(`🎉 ONTRACK FIRED! Received remote ${event.track.kind} from ${producerPeerId}`, 'success');
+        let stream = remoteStreams.get(producerPeerId);
+        if (!stream) {
+          stream = new MediaStream();
+          remoteStreams.set(producerPeerId, stream);
+        }
+        stream.addTrack(event.track);
+        attachRemoteVideo(producerPeerId, stream);
+      };
+
+      consumerPc.onicecandidate = (e) => {
+        if (e.candidate) {
+          socket.emit('sfu:ice-candidate', {
+            roomCode,
+            peerId: myPeerId,
+            target: 'subscriber',
+            trackId,
+            candidate: e.candidate,
+          });
+        }
+      };
+
+      consumerPc.onconnectionstatechange = () => {
+        log(`Subscriber (${kind}) Connection State: ${consumerPc.connectionState}`, consumerPc.connectionState === 'connected' ? 'success' : 'info');
+      };
+
+      const subOffer = await consumerPc.createOffer();
+      await consumerPc.setLocalDescription(subOffer);
+
+      socket.emit('sfu:subscribe', {
+        roomCode,
+        subscriberPeerId: myPeerId,
+        trackId,
+        sdp: { type: subOffer.type, sdp: subOffer.sdp },
+      });
+    }
+
+    function attachRemoteVideo(peerId, stream) {
+      let card = document.getElementById(`remote_${peerId}`);
+      if (!card) {
+        card = document.createElement('div');
+        card.className = 'video-card';
+        card.id = `remote_${peerId}`;
+        card.innerHTML = `
+          <video id="vid_${peerId}" autoplay playsinline></video>
+          <span class="video-badge">Remote: ${peerId}</span>
+        `;
+        document.getElementById('videoGrid').appendChild(card);
+      }
+      const vid = document.getElementById(`vid_${peerId}`);
+      vid.srcObject = stream;
+      vid.play().catch(e => log(`Autoplay blocked: click video to unmute/play (${e.message})`, 'warn'));
+    }
+
+    function removeRemoteVideo(peerId) {
+      const card = document.getElementById(`remote_${peerId}`);
+      if (card) card.remove();
+      remoteStreams.delete(peerId);
+    }
+
+    function leaveCall() {
+      if (socket) socket.emit('sfu:leave');
+      if (localStream) localStream.getTracks().forEach(t => t.stop());
+      if (publisherPc) publisherPc.close();
+      consumerPcs.forEach(pc => pc.close());
+      consumerPcs.clear();
+      remoteStreams.clear();
+      if (socket) socket.disconnect();
+
+      document.getElementById('btnJoin').style.display = 'block';
+      document.getElementById('btnLeave').style.display = 'none';
+      document.getElementById('localVideo').srcObject = null;
+      document.querySelectorAll('[id^="remote_"]').forEach(el => el.remove());
+      log('Left call and reset all connections', 'info');
+    }
+  </script>
+</body>
+</html>
