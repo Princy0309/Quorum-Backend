@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const createCalendarEventSchema = z.object({
-  body: z.object({
+
     title: z.string().min(1, 'Title is required').max(120),
     description: z.string().max(1000).optional(),
     eventType: z.enum(['REMINDER', 'MEETING', 'DEADLINE', 'GENERAL']).default('REMINDER'),
@@ -12,11 +12,9 @@ export const createCalendarEventSchema = z.object({
     attendeeEmails: z.array(z.string().email()).optional().default([]),
     hasReminder: z.boolean().optional().default(false),
     reminderMinutes: z.number().int().min(0).max(10080).optional().default(15),
-  }),
 });
 
 export const updateCalendarEventSchema = z.object({
-  body: z.object({
     title: z.string().min(1).max(120).optional(),
     description: z.string().max(1000).optional(),
     eventType: z.enum(['REMINDER', 'MEETING', 'DEADLINE', 'GENERAL']).optional(),
@@ -27,7 +25,6 @@ export const updateCalendarEventSchema = z.object({
     attendeeEmails: z.array(z.string().email()).optional(),
     hasReminder: z.boolean().optional(),
     reminderMinutes: z.number().int().min(0).max(10080).optional(),
-  }),
 });
 
 export const monthQuerySchema = z.object({
