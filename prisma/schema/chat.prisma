@@ -2,6 +2,7 @@ model Conversation {
   id           String                    @id @default(uuid())
   type         String                    @default("direct")
   directKey    String?                   @unique
+  teamId       String?                   @unique
   name         String?
   avatar       String?
   ownerId      String?
@@ -37,6 +38,7 @@ model Message {
   fileType        String?
   fileName        String?
   fileSize        Int?
+  isPinned        Boolean      @default(false)
   clientMessageId String?
   seq             Int          @default(0)
   createdAt       DateTime     @default(now())
