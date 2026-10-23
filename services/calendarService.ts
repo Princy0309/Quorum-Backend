@@ -4,6 +4,7 @@ import { getIO } from '../sockets/socketServer.js';
 import logger from '../utils/logger.js';
 import type { CreateEventInput, UpdateEventInput } from '../types/index.js';
 import { scheduleEventReminder, cancelEventReminder } from '../queues/reminderQueue.js';
+import { addMeetingInviteEmailToQueue } from '../queues/emailQueue.js';
 
 
 export const createCalendarEvent = async (userId: string, input: CreateEventInput) => {
@@ -80,6 +81,17 @@ export const createCalendarEvent = async (userId: string, input: CreateEventInpu
                     const msg = notifErr instanceof Error ? notifErr.message : String(notifErr);
                     logger.warn(`Could not create notification in DB for event ${event.id} and attendee ${attendee.id}: ${msg}`);
                 }
+                addMeetingInviteEmailToQueue({
+                    email: attendee.email,
+                    inviterName: creator.name,
+                    meetingTitle: input.title,
+                    formattedDate: `${start.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })} at ${start.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`,
+                    meetingLink: input.meetingLink,
+                }).catch((mailErr: unknown) => {
+                    const msg = mailErr instanceof Error ? mailErr.message : String(mailErr);
+                    logger.warn(`Could not queue meeting invite email for ${attendee.email}: ${msg}`);
+                });
+
             }
         } catch (lookupErr: unknown) {
             const msg = lookupErr instanceof Error ? lookupErr.message : String(lookupErr);
