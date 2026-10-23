@@ -234,14 +234,20 @@ export class RoomBroker extends EventEmitter {
       trackId,
       outboundSsrc: sender.ssrc,
       payloadType: sender.codec?.payloadType,
-      requireSrtp: true,
+      requireSrtp: false,
       transportSender: (buf: Buffer) => {
         try {
+          if (sender && typeof sender.sendRtp === 'function') {
+            return sender.sendRtp(buf).catch((err: any) => {
+              logger.debug(`[SFU Broker] sender.sendRtp error for peer ${subscriberPeerId}:`, err);
+              throw err;
+            });
+          }
           const pc = subscriberPeerConnection || (sender as any).peerConnection;
           const iceConn = pc?.iceTransports?.[0]?.connection;
           if (iceConn && typeof iceConn.send === 'function') {
             return iceConn.send(buf).catch((err: any) => {
-              logger.debug(`[SFU Broker] UDP send failed for subscriber ${subscriberPeerId}:`, err);
+              logger.debug(`[SFU Broker] UDP send fallback failed for subscriber ${subscriberPeerId}:`, err);
               throw err;
             });
           }

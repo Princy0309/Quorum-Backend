@@ -668,20 +668,13 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         for (const dtlsTransport of (consumerPc as any).dtlsTransports || []) {
           const onSubscriberDtlsConnected = () => {
             try {
-              const dtls = (dtlsTransport as any).dtls;
-              if (dtls && typeof dtls.extractSessionKeys === 'function') {
-                const { localKey, localSalt } = dtls.extractSessionKeys(16, 14);
-                const outboundContext = new SrtpContext(localKey, localSalt);
-                const outboundSession = new SrtpSession(outboundContext, true);
-                roomBroker.attachSubscriberSrtpSession(activeRoom, activePeerId, trackId, outboundSession);
-                roomBroker.markSubscriberReady(activeRoom, activePeerId, trackId);
-                if (publishedTrack.kind === 'video') {
-                  roomBroker.requestKeyframe(activeRoom, publishedTrack.peerId, trackId);
-                }
-                logger.info(`[Signaling] Subscriber DTLS connected and track-specific SRTP session attached for peer ${activePeerId} on track ${trackId}`);
+              roomBroker.markSubscriberReady(activeRoom, activePeerId, trackId);
+              if (publishedTrack.kind === 'video') {
+                roomBroker.requestKeyframe(activeRoom, publishedTrack.peerId, trackId);
               }
+              logger.info(`[Signaling] Subscriber DTLS connected and subscriber marked ready for peer ${activePeerId} on track ${trackId}`);
             } catch (err) {
-              logger.error(`[Signaling] Failed to extract subscriber SRTP session keys:`, err);
+              logger.error(`[Signaling] Error in onSubscriberDtlsConnected:`, err);
             }
           };
 
