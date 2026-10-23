@@ -30,6 +30,14 @@ import {
   pinTeamMessageController,
 } from '../controllers/teamController.js';
 
+import {
+  createTaskController,
+  getTeamTasksController,
+  updateTaskStatusController,
+  getMyTasksController,
+} from '../controllers/taskController.js';
+
+
 import { authMiddleware } from '../middlewares/authMiddleware.js';
 import { requireOrgMember } from '../middlewares/orgAuthMiddleware.js';
 
@@ -167,6 +175,35 @@ router.post(
   requireOrgMember(),
   pinTeamMessageController
 );
+
+router.post(
+  '/:id/teams/:teamId/tasks',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  createTaskController
+);
+
+router.get(
+  '/:id/teams/:teamId/tasks',
+  authMiddleware,
+  requireOrgMember(),
+  getTeamTasksController
+);
+
+router.patch(
+  '/:id/teams/:teamId/tasks/:taskId/status',
+  authMiddleware,
+  requireOrgMember(),
+  updateTaskStatusController
+);
+
+router.get(
+  '/:id/tasks/my',
+  authMiddleware,
+  requireOrgMember(),
+  getMyTasksController
+);
+
 
 
 

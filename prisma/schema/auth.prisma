@@ -45,6 +45,9 @@ model User {
   savedItems               SavedItem[]
   savedCollections         SavedCollection[]
   calendarEvents           CalendarEvent[]           @relation("UserCalendarEvents")
+  assignedTasks            TeamTask[]                @relation("AssignedTeamTasks")
+  createdTasks             TeamTask[]                @relation("CreatedTeamTasks")
+
 
 
 
