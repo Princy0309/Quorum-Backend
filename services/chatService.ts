@@ -266,7 +266,8 @@ export const saveMessage = async (
   fileType?: string,
   clientMessageId?: string,
   fileName?: string,
-  fileSize?: number
+  fileSize?: number,
+  mentions?: string[]
 ) => {
   const hasText = Boolean(content && content.trim().length > 0);
   const hasMedia = Boolean(fileUrl && fileUrl.trim().length > 0);
@@ -342,6 +343,41 @@ export const saveMessage = async (
       throw new ApiError(403, 'User is not a participant in this conversation');
     }
 
+    const participants = await tx.conversationParticipant.findMany({
+      where: { conversationId: resolvedConversationId },
+      select: {
+        userId: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            avatar: true
+          }
+        }
+      }
+    });
+
+    const participantUserMap = new Map(participants.map((p) => [p.userId, p.user]));
+
+    let validMentionedUserIds: string[] = [];
+    if (Array.isArray(mentions) && mentions.length > 0) {
+      validMentionedUserIds = Array.from(
+        new Set(
+          mentions.filter((id) => typeof id === 'string' && participantUserMap.has(id))
+        )
+      );
+    }
+
+    // Auto-detect mention if text contains @UserName
+    if (validMentionedUserIds.length === 0 && content) {
+      for (const p of participants) {
+        if (p.user?.name && content.toLowerCase().includes(`@${p.user.name.toLowerCase()}`)) {
+          validMentionedUserIds.push(p.userId);
+        }
+      }
+      validMentionedUserIds = Array.from(new Set(validMentionedUserIds));
+    }
+
     if (clientMessageId) {
       const existingMessage = await tx.message.findUnique({
         where: {
@@ -363,11 +399,16 @@ export const saveMessage = async (
       });
 
       if (existingMessage) {
-        const participants = await tx.conversationParticipant.findMany({
-          where: { conversationId: resolvedConversationId },
-          select: { userId: true }
-        });
-        return { message: existingMessage, participants, isDuplicate: true, conversationId: resolvedConversationId };
+        const existingMentionedUsers = ((existingMessage as any).mentionedUserIds || [])
+          .map((mId: string) => participantUserMap.get(mId))
+          .filter(Boolean);
+
+        return {
+          message: { ...existingMessage, mentionedUsers: existingMentionedUsers },
+          participants,
+          isDuplicate: true,
+          conversationId: resolvedConversationId
+        };
       }
     }
 
@@ -391,7 +432,8 @@ export const saveMessage = async (
           fileName: fileName ? fileName.trim() : null,
           fileSize: typeof fileSize === 'number' ? fileSize : null,
           clientMessageId,
-          seq: updatedConversation.lastSeq
+          seq: updatedConversation.lastSeq,
+          mentionedUserIds: validMentionedUserIds
         },
         include: {
           sender: {
@@ -425,22 +467,31 @@ export const saveMessage = async (
         });
 
         if (existingMessage) {
-          const participants = await tx.conversationParticipant.findMany({
-            where: { conversationId: resolvedConversationId },
-            select: { userId: true }
-          });
-          return { message: existingMessage, participants, isDuplicate: true, conversationId: resolvedConversationId };
+          const existingMentionedUsers = ((existingMessage as any).mentionedUserIds || [])
+            .map((mId: string) => participantUserMap.get(mId))
+            .filter(Boolean);
+
+          return {
+            message: { ...existingMessage, mentionedUsers: existingMentionedUsers },
+            participants,
+            isDuplicate: true,
+            conversationId: resolvedConversationId
+          };
         }
       }
       throw err;
     }
 
-    const participants = await tx.conversationParticipant.findMany({
-      where: { conversationId: resolvedConversationId },
-      select: { userId: true }
-    });
+    const mentionedUsers = ((message as any).mentionedUserIds || [])
+      .map((mId: string) => participantUserMap.get(mId))
+      .filter(Boolean);
 
-    return { message, participants, isDuplicate: false, conversationId: resolvedConversationId };
+    return {
+      message: { ...message, mentionedUsers },
+      participants,
+      isDuplicate: false,
+      conversationId: resolvedConversationId
+    };
   });
 };
 
@@ -501,8 +552,28 @@ export const getConversationMessages = async (
     nextCursor = messages[messages.length - 1]?.id ?? null;
   }
 
+  const allMentionedIds = Array.from(
+    new Set(messages.flatMap((m: any) => m.mentionedUserIds || []))
+  );
+
+  let mentionedUserMap = new Map<string, { id: string; name: string | null; avatar: string | null }>();
+  if (allMentionedIds.length > 0) {
+    const mentionedUsersList = await prisma.user.findMany({
+      where: { id: { in: allMentionedIds } },
+      select: { id: true, name: true, avatar: true }
+    });
+    mentionedUserMap = new Map(mentionedUsersList.map((u) => [u.id, u]));
+  }
+
+  const enrichedMessages = messages.map((msg: any) => ({
+    ...msg,
+    mentionedUsers: (msg.mentionedUserIds || [])
+      .map((mId: string) => mentionedUserMap.get(mId))
+      .filter(Boolean)
+  }));
+
   return {
-    messages,
+    messages: enrichedMessages,
     nextCursor,
     hasNextPage
   };
