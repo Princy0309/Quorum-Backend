@@ -11,6 +11,8 @@ import {
   removeTeamMember,
 } from '../services/teamService.js';
 import prisma from '../config/prisma.js';
+import { queueNotification } from '../queues/notificationQueue.js';
+
 
 const getParam = (param: unknown): string => {
   if (typeof param === 'string') return param.trim();
@@ -131,7 +133,7 @@ export const removeTeamMemberController = asyncHandler(
   }
 );
 
-// 💬 Team Chat Controllers
+
 export const getTeamMessagesController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const teamId = getParam(req.params.teamId);
@@ -185,7 +187,6 @@ export const sendTeamMessageController = asyncHandler(
       return next(new ApiError(404, 'Team conversation not found'));
     }
 
-    // Check membership
     const isMember = await prisma.teamMember.findUnique({
       where: {
         teamId_userId: {
@@ -225,11 +226,70 @@ export const sendTeamMessageController = asyncHandler(
       }),
     ]);
 
-    // Optional: Real-time broadcast if socket is connected
     const io = req.app.get('io');
     if (io) {
       io.to(conversation.id).emit('chat:message:new', message);
     }
+
+    if (content && typeof content === 'string') {
+      try {
+        const text = content.trim();
+        const hasTeamMention = /@(team|all)\b/i.test(text);
+
+       
+        if (hasTeamMention && isMember.role === 'LEAD') {
+          const allMembers = await prisma.teamMember.findMany({
+            where: {
+              teamId,
+              NOT: { userId: req.user.id },
+            },
+            select: { userId: true },
+          });
+
+          for (const member of allMembers) {
+            await queueNotification({
+              recipientId: member.userId,
+              type: 'TEAM_INVITE',
+              title: 'Team Announcement',
+              body: `${message.sender.name || 'Team Lead'} mentioned the team in chat: "${text.slice(0, 60)}"`,
+              data: { teamId, conversationId: conversation.id, messageId: message.id },
+            });
+          }
+        } else {
+          
+          const mentionMatches = text.match(/@(\w+)/g);
+          if (mentionMatches && mentionMatches.length > 0) {
+            const mentionedNames = mentionMatches.map((m) => m.slice(1).toLowerCase());
+
+            const teamMembers = await prisma.teamMember.findMany({
+              where: {
+                teamId,
+                NOT: { userId: req.user.id },
+              },
+              include: {
+                user: { select: { id: true, name: true } },
+              },
+            });
+
+            for (const member of teamMembers) {
+              const firstName = (member.user.name || '').split(' ')[0].toLowerCase();
+              if (mentionedNames.includes(firstName)) {
+                await queueNotification({
+                  recipientId: member.userId,
+                  type: 'TEAM_INVITE',
+                  title: 'Mentioned in Team Chat',
+                  body: `${message.sender.name || 'Someone'} mentioned you: "${text.slice(0, 60)}"`,
+                  data: { teamId, conversationId: conversation.id, messageId: message.id },
+                });
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        
+      }
+    }
+
 
     return res.status(201).json({
       success: true,
