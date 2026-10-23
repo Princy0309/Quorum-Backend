@@ -31,7 +31,7 @@ export class Publisher extends EventEmitter {
   public readonly peerId: string;
   public readonly kind: MediaKind;
   public ssrc: number;
-  public readonly payloadType: number;
+  public payloadType: number;
   private srtpSession: SrtpSession | null = null;
   private inboundSrtpSession: SrtpSession | null = null;
   private outboundSrtpSession: SrtpSession | null = null;
@@ -99,9 +99,8 @@ export class Publisher extends EventEmitter {
     }
 
     const payloadType = rtpBuffer[1] & 0x7f;
-    if (payloadType !== this.payloadType) {
-      this.stats.packetsDropped++;
-      return false;
+    if (!this.payloadType || this.payloadType === 0) {
+      this.payloadType = payloadType;
     }
 
     const ssrc = rtpBuffer.readUInt32BE(8);

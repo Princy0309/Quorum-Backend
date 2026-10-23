@@ -39,7 +39,7 @@ export const initSocketServer = (httpServer: any) => {
   io.use(async (socket, next) => {
     const auth = socket.handshake.auth || {};
     const query = socket.handshake.query || {};
-    let userId: string | null = null;
+    let userId: string | null = (typeof auth.userId === 'string' && auth.userId.trim()) || (typeof query.userId === 'string' && query.userId.trim()) || null;
     let name: string = auth.name || (typeof query.name === 'string' ? query.name : '') || 'Participant';
 
     let rawToken = auth.token ||

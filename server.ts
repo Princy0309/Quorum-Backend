@@ -8,6 +8,8 @@ import { emailWorker, queueRedisConnection } from './queues/emailQueue.js';
 import redis from './config/redis.js';
 import { initSocketServer } from './sockets/socketServer.js';
 import { startAiHistoryCleanupTask } from './services/aiHistoryService.js';
+import { reminderWorker, reminderRedisConnection } from './queues/reminderQueue.js';
+
 
 let server: any;
 
@@ -58,9 +60,11 @@ const gracefulShutdown = async (signal: string) => {
 
       try {
         await emailWorker.close();
+        await reminderWorker.close();
         console.log('Email worker closed.');
 
         queueRedisConnection.disconnect();
+        reminderRedisConnection.disconnect();
         console.log('Queue Redis disconnected.');
 
         redis.disconnect();

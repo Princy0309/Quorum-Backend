@@ -665,23 +665,35 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           return;
         }
 
-        for (const dtlsTransport of (consumerPc as any).dtlsTransports || []) {
+        const dtlsTransports = (consumerPc as any).dtlsTransports || [];
+        logger.info(`[Signaling] Subscriber PC for peer ${activePeerId} track ${trackId} has ${dtlsTransports.length} DTLS transports | PC.connectionState=${(consumerPc as any).connectionState || 'N/A'} | PC.iceConnectionState=${(consumerPc as any).iceConnectionState || 'N/A'}`);
+
+        if (dtlsTransports.length === 0) {
+          logger.warn(`[Signaling] ⚠️ No DTLS transports found for subscriber ${activePeerId} track ${trackId}! Marking ready immediately as fallback.`);
+          roomBroker.markSubscriberReady(activeRoom, activePeerId, trackId);
+          if (publishedTrack.kind === 'video') {
+            setTimeout(() => {
+              roomBroker.requestKeyframe(activeRoom, publishedTrack.peerId, trackId);
+            }, 1000);
+          }
+        }
+
+        for (const dtlsTransport of dtlsTransports) {
+          logger.info(`[Signaling] DTLS transport state for sub ${activePeerId} track ${trackId}: ${dtlsTransport.state}`);
+          
           const onSubscriberDtlsConnected = () => {
             try {
-              const dtls = (dtlsTransport as any).dtls;
-              if (dtls && typeof dtls.extractSessionKeys === 'function') {
-                const { localKey, localSalt } = dtls.extractSessionKeys(16, 14);
-                const outboundContext = new SrtpContext(localKey, localSalt);
-                const outboundSession = new SrtpSession(outboundContext, true);
-                roomBroker.attachSubscriberSrtpSession(activeRoom, activePeerId, trackId, outboundSession);
-                roomBroker.markSubscriberReady(activeRoom, activePeerId, trackId);
-                if (publishedTrack.kind === 'video') {
-                  roomBroker.requestKeyframe(activeRoom, publishedTrack.peerId, trackId);
-                }
-                logger.info(`[Signaling] Subscriber DTLS connected and track-specific SRTP session attached for peer ${activePeerId} on track ${trackId}`);
+              logger.info(`[Signaling] 🔗 Subscriber DTLS connected! Marking ready for peer ${activePeerId} on track ${trackId}`);
+              roomBroker.markSubscriberReady(activeRoom, activePeerId, trackId);
+              if (publishedTrack.kind === 'video') {
+                roomBroker.requestKeyframe(activeRoom, publishedTrack.peerId, trackId);
+                // Extra keyframe requests with delays
+                setTimeout(() => roomBroker.requestKeyframe(activeRoom, publishedTrack.peerId, trackId), 1000);
+                setTimeout(() => roomBroker.requestKeyframe(activeRoom, publishedTrack.peerId, trackId), 3000);
               }
+              logger.info(`[Signaling] Subscriber DTLS connected and subscriber marked ready for peer ${activePeerId} on track ${trackId}`);
             } catch (err) {
-              logger.error(`[Signaling] Failed to extract subscriber SRTP session keys:`, err);
+              logger.error(`[Signaling] Error in onSubscriberDtlsConnected:`, err);
             }
           };
 
@@ -689,12 +701,20 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
             onSubscriberDtlsConnected();
           } else {
             dtlsTransport.onStateChange.subscribe((state: string) => {
+              logger.info(`[Signaling] Subscriber DTLS state changed to '${state}' for peer ${activePeerId} track ${trackId}`);
               if (state === 'connected') {
                 onSubscriberDtlsConnected();
               }
             });
           }
         }
+
+        consumerPc.connectionStateChange.subscribe((state: string) => {
+          logger.info(`[Signaling] Subscriber PC connection state changed to '${state}' for peer ${activePeerId} track ${trackId}`);
+          if (state === 'connected') {
+            roomBroker.markSubscriberReady(activeRoom, activePeerId, trackId);
+          }
+        });
 
         if (subscriberRegistry.get(activeRoom, activePeerId, trackId) !== consumerPc) {
           logger.warn(`[Signaling] Subscription was cancelled prior to emitting response for track ${trackId}`);

@@ -44,6 +44,10 @@ model User {
   notificationPreferences  UserNotificationPreference[]
   savedItems               SavedItem[]
   savedCollections         SavedCollection[]
+  calendarEvents           CalendarEvent[]           @relation("UserCalendarEvents")
+
+
+
 }
 
 model RefreshToken {

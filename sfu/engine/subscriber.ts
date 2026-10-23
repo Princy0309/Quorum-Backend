@@ -69,6 +69,7 @@ export class Subscriber extends EventEmitter implements IRtpSubscriber {
     this.outboundSsrc = options.outboundSsrc;
     this.payloadType = options.payloadType;
     this.requireSrtp = options.requireSrtp ?? false;
+    this.lifecycleState = this.requireSrtp ? 'pending' : 'ready';
     this.rewriteSeq = options.rewriteSeq ?? false;
     this.nextSeqNum = Math.floor(Math.random() * 65535);
 
