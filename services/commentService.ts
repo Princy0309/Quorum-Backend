@@ -3,6 +3,8 @@ import { ApiError } from '../utils/ApiError.js';
 import { CommunityRole } from './communityService.js';
 import { queueNotification } from '../queues/notificationQueue.js';
 import logger from '../utils/logger.js';
+import { getIO } from '../sockets/socketServer.js';
+import { COMMUNITY_EVENTS } from '../utils/constants.js';
 
 export const createPostComment = async (
   userId: string,
@@ -65,6 +67,18 @@ export const createPostComment = async (
     } catch (err: any) {
       logger.warn('[CommunityComment] Notification trigger failed', { error: err.message });
     }
+  }
+
+  try {
+    const io = getIO();
+    const payload = { comment, postId, communityId: post.communityId };
+    io.to(`community:post:${postId}`).emit(COMMUNITY_EVENTS.COMMENT_NEW, payload);
+    io.to(`community:${post.communityId}`).emit(COMMUNITY_EVENTS.COMMENT_NEW, payload);
+    if (post.authorId !== userId) {
+      io.to(`user:${post.authorId}`).emit(COMMUNITY_EVENTS.COMMENT_NEW, payload);
+    }
+  } catch (err: any) {
+    logger.error('Failed to emit community comment creation event', { postId, commentId: comment.id, error: err.message });
   }
 
   return comment;
@@ -238,6 +252,15 @@ export const deletePostComment = async (
   await prisma.communityComment.delete({
     where: { id: commentId }
   });
+
+  try {
+    const io = getIO();
+    const payload = { commentId, postId: comment.postId, communityId: comment.post.communityId };
+    io.to(`community:post:${comment.postId}`).emit(COMMUNITY_EVENTS.COMMENT_DELETED, payload);
+    io.to(`community:${comment.post.communityId}`).emit(COMMUNITY_EVENTS.COMMENT_DELETED, payload);
+  } catch (err: any) {
+    logger.error('Failed to emit community comment delete event', { commentId, error: err.message });
+  }
 
   return { message: 'Comment deleted successfully' };
 };
