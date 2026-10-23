@@ -32,7 +32,7 @@ export const createTeam = async (
     throw new ApiError(409, 'A team with this name already exists in this organization');
   }
 
-    return await prisma.$transaction(async (tx) => {
+  return await prisma.$transaction(async (tx) => {
     const team = await tx.team.create({
       data: {
         organizationId,
@@ -49,7 +49,7 @@ export const createTeam = async (
       },
     });
 
-   
+
     await tx.conversation.create({
       data: {
         type: 'team',
@@ -69,7 +69,7 @@ export const createTeam = async (
   });
 
 };
- 
+
 export const getOrganizationTeams = async (organizationId: string) => {
   const teams = await prisma.team.findMany({
     where: { organizationId },
@@ -271,7 +271,7 @@ export const addTeamMember = async (
     throw new ApiError(409, 'User is already a member of this team');
   }
 
-    const createdMember = await prisma.teamMember.create({
+  const createdMember = await prisma.teamMember.create({
     data: {
       teamId,
       userId: targetUserId,
@@ -310,6 +310,24 @@ export const addTeamMember = async (
         role: role === 'LEAD' ? 'admin' : 'member',
       },
     });
+
+    const memberName = createdMember.user?.name || 'A member';
+    const nextSeq = teamConversation.lastSeq + 1;
+
+    await prisma.$transaction([
+      prisma.message.create({
+        data: {
+          conversationId: teamConversation.id,
+          senderId: targetUserId,
+          content: ` ${memberName} joined the team`,
+          seq: nextSeq,
+        },
+      }),
+      prisma.conversation.update({
+        where: { id: teamConversation.id },
+        data: { lastSeq: nextSeq },
+      }),
+    ]);
   }
 
 
@@ -361,7 +379,7 @@ export const removeTeamMember = async (
     throw new ApiError(404, 'User is not a member of this team');
   }
 
-    await prisma.teamMember.delete({
+  await prisma.teamMember.delete({
     where: {
       teamId_userId: {
         teamId,
@@ -381,7 +399,29 @@ export const removeTeamMember = async (
         userId: targetUserId,
       },
     });
+
+    const removedUser = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { name: true },
+    });
+    const nextSeq = teamConv.lastSeq + 1;
+
+    await prisma.$transaction([
+      prisma.message.create({
+        data: {
+          conversationId: teamConv.id,
+          senderId: targetUserId,
+          content: ` ${removedUser?.name || 'A member'} left the team`,
+          seq: nextSeq,
+        },
+      }),
+      prisma.conversation.update({
+        where: { id: teamConv.id },
+        data: { lastSeq: nextSeq },
+      }),
+    ]);
   }
+
 
 
   return { message: 'Member removed from team successfully' };
