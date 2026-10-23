@@ -4569,12 +4569,236 @@ const swaggerDocument = {
           }
         }
       }
+    },
+    "/api/saved-items": {
+      "post": {
+        "tags": ["Saved Items"],
+        "summary": "Save an item (Bookmark)",
+        "description": "Saves a message, file, chat conversation, document, or resource. Idempotent upsert.",
+        "security": [{ "BearerAuth": [] }, { "CSRFAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["itemType", "itemId"],
+                "properties": {
+                  "itemType": { "type": "string", "enum": ["MESSAGE", "FILE", "CHAT", "DOCUMENT", "RESOURCE"] },
+                  "itemId": { "type": "string" },
+                  "note": { "type": "string", "nullable": true },
+                  "collectionId": { "type": "string", "format": "uuid", "nullable": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Item saved successfully" },
+          "400": { "description": "Invalid item or missing attachment" },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "Item not found or inaccessible" }
+        }
+      },
+      "get": {
+        "tags": ["Saved Items"],
+        "summary": "List saved items",
+        "description": "Retrieves cursor-paginated saved items enriched with original metadata.",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "itemType", "in": "query", "schema": { "type": "string", "enum": ["MESSAGE", "FILE", "CHAT", "DOCUMENT", "RESOURCE"] } },
+          { "name": "collectionId", "in": "query", "schema": { "type": "string", "format": "uuid" } },
+          { "name": "search", "in": "query", "schema": { "type": "string" } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string", "format": "uuid" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of saved items. Items whose underlying content was deleted or access revoked have isAccessible: false and content: null.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": { "type": "string", "format": "uuid" },
+                              "itemType": { "type": "string", "enum": ["MESSAGE", "FILE", "CHAT", "DOCUMENT", "RESOURCE"] },
+                              "itemId": { "type": "string" },
+                              "note": { "type": "string", "nullable": true },
+                              "isAccessible": { "type": "boolean", "example": true },
+                              "title": { "type": "string", "example": "Important message" },
+                              "content": { "type": "object", "nullable": true },
+                              "collection": {
+                                "type": "object",
+                                "nullable": true,
+                                "properties": {
+                                  "id": { "type": "string", "format": "uuid" },
+                                  "name": { "type": "string" },
+                                  "color": { "type": "string", "nullable": true }
+                                }
+                              },
+                              "createdAt": { "type": "string", "format": "date-time" },
+                              "updatedAt": { "type": "string", "format": "date-time" }
+                            }
+                          }
+                        },
+                        "nextCursor": { "type": "string", "nullable": true, "format": "uuid" },
+                        "hasNextPage": { "type": "boolean" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/saved-items/{id}": {
+      "patch": {
+        "tags": ["Saved Items"],
+        "summary": "Update saved item",
+        "description": "Updates note or collection assignment of a saved item.",
+        "security": [{ "BearerAuth": [] }, { "CSRFAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": { "type": "string", "nullable": true },
+                  "collectionId": { "type": "string", "format": "uuid", "nullable": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Saved item updated" },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "Saved item not found" }
+        }
+      },
+      "delete": {
+        "tags": ["Saved Items"],
+        "summary": "Remove saved item",
+        "description": "Deletes a saved item bookmark.",
+        "security": [{ "BearerAuth": [] }, { "CSRFAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": { "description": "Saved item removed" },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "Saved item not found" }
+        }
+      }
+    },
+    "/api/saved-items/collections": {
+      "post": {
+        "tags": ["Saved Items"],
+        "summary": "Create collection",
+        "description": "Creates a new personal saved collection/folder.",
+        "security": [{ "BearerAuth": [] }, { "CSRFAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "description": { "type": "string", "nullable": true },
+                  "color": { "type": "string", "nullable": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Collection created" },
+          "401": { "description": "Unauthorized" },
+          "409": { "description": "Collection name conflict" }
+        }
+      },
+      "get": {
+        "tags": ["Saved Items"],
+        "summary": "List collections",
+        "description": "Retrieves all personal collections for the user with item counts.",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "List of collections" },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/saved-items/collections/{id}": {
+      "patch": {
+        "tags": ["Saved Items"],
+        "summary": "Update collection",
+        "description": "Updates collection name, description, or color.",
+        "security": [{ "BearerAuth": [] }, { "CSRFAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "description": { "type": "string", "nullable": true },
+                  "color": { "type": "string", "nullable": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Collection updated" },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "Collection not found" },
+          "409": { "description": "Collection name conflict" }
+        }
+      },
+      "delete": {
+        "tags": ["Saved Items"],
+        "summary": "Delete collection",
+        "description": "Deletes a collection. Its saved items remain intact without collection.",
+        "security": [{ "BearerAuth": [] }, { "CSRFAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": { "description": "Collection deleted" },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "Collection not found" }
+        }
+      }
     }
   },
   "tags": [
     {
       "name": "AI Assistant",
       "description": "Workplace intelligence, generative assistant, contextual quick replies, grounded workspace search, and interaction history."
+    },
+    {
+      "name": "Saved Items",
+      "description": "Personal bookmarks, saved messages, files, documents, chats, and custom collections."
     }
   ]
 };
