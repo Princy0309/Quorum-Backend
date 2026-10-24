@@ -52,6 +52,7 @@ export const emailDigestWorker = new Worker(
       where: {
         recipientId: userId,
         isRead: false,
+        type: { not: 'COMMUNITY_POST_COMMENT' },
       },
       orderBy: { createdAt: 'desc' },
       take: 10,

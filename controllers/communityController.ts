@@ -191,7 +191,7 @@ export const createInviteLinkController = async (req: Request, res: Response, ne
 
 export const validateInviteTokenController = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { token } = req.params;
+    const token = req.params.token || req.params.identifier;
     if (!token || typeof token !== 'string' || token.trim().length === 0) {
       throw new ApiError(400, 'Invalid invitation token');
     }
@@ -213,7 +213,7 @@ export const joinCommunityViaInviteController = async (req: Request, res: Respon
       throw new ApiError(401, 'Unauthorized');
     }
 
-    const { token } = req.params;
+    const token = req.params.token || req.params.identifier;
     if (!token || typeof token !== 'string' || token.trim().length === 0) {
       throw new ApiError(400, 'Invalid invitation token');
     }
@@ -256,7 +256,20 @@ export const inviteUserToCommunityController = async (req: Request, res: Respons
     }
 
     const id = validateCommunityId(req.params.id);
-    const { userId: targetUserId, email, role, expiresInDays } = req.body || {};
+    const body = req.body || {};
+    const rawTargetUserId = body.invitedUserId || body.userId || body.targetUserId || body.inviteeId;
+    const targetUserId = typeof rawTargetUserId === 'string' && rawTargetUserId.trim() ? rawTargetUserId.trim() : undefined;
+    const rawEmail = body.email || body.invitedEmail;
+    const email = typeof rawEmail === 'string' && rawEmail.trim() ? rawEmail.trim() : undefined;
+    const role = body.role;
+
+    let expiresInDays = body.expiresInDays;
+    if (!expiresInDays && body.expiresInHours) {
+      expiresInDays = Math.max(1, Math.ceil(body.expiresInHours / 24));
+    }
+    if (!expiresInDays) {
+      expiresInDays = 7;
+    }
 
     if (!targetUserId && !email) {
       const result = await createInviteLink(userId, id, expiresInDays);
@@ -405,7 +418,10 @@ export const searchUsersToInviteController = async (req: Request, res: Response,
     const result = await searchUsersToInvite(userId, id, query, cursor, limit);
     res.status(200).json({
       success: true,
-      data: result
+      data: result,
+      users: result.users,
+      nextCursor: result.nextCursor,
+      hasNextPage: result.hasNextPage
     });
   } catch (err) {
     next(err);

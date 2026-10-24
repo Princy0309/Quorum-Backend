@@ -327,5 +327,64 @@ export const aiRateLimiterMiddleware = (req: Request, res: Response, next: NextF
     });
 };
 
+export const uploadBurstRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'upload_burst_v1',
+  points: 10,
+  duration: 60,
+  blockDuration: 5 * 60,
+  insuranceLimiter: new RateLimiterMemory({
+    points: 10,
+    duration: 60,
+    blockDuration: 5 * 60
+  })
+});
+
+export const uploadDailyQuotaLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'upload_daily_v1',
+  points: 100,
+  duration: 24 * 60 * 60,
+  blockDuration: 60 * 60,
+  insuranceLimiter: new RateLimiterMemory({
+    points: 100,
+    duration: 24 * 60 * 60,
+    blockDuration: 60 * 60
+  })
+});
+
+export const uploadLimiterMiddleware = async (req: Request, res: Response, next: NextFunction): Promise<any> => {
+  const key = (req.user?.id || req.ip || '127.0.0.1').toString();
+
+  try {
+    const burstRes = await uploadBurstRateLimiter.consume(key);
+    const dailyRes = await uploadDailyQuotaLimiter.consume(key);
+
+    res.setHeader('X-RateLimit-Limit', '10');
+    res.setHeader('X-RateLimit-Remaining', String(burstRes.remainingPoints));
+    res.setHeader('X-RateLimit-Daily-Remaining', String(dailyRes.remainingPoints));
+    return next();
+  } catch (err: any) {
+    if (err && typeof err.msBeforeNext === 'number') {
+      const waitSeconds = Math.ceil(err.msBeforeNext / 1000);
+      const isDaily = err.msBeforeNext > 60 * 1000;
+      const message = isDaily
+        ? `Daily upload quota reached (maximum 100 files per 24 hours). Please try again in ${Math.ceil(waitSeconds / 60)} minutes.`
+        : `Upload rate limit exceeded. You can only upload up to 10 files per minute. Please wait ${waitSeconds} seconds.`;
+
+      res.setHeader('Retry-After', String(waitSeconds));
+      return res.status(429).json({
+        success: false,
+        statusCode: 429,
+        message,
+        retryAfterSeconds: waitSeconds
+      });
+    }
+
+    logger.warn('Upload rate limiter error, failing open:', err);
+    return next();
+  }
+};
+
 
 
