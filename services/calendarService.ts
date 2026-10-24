@@ -61,7 +61,7 @@ export const createCalendarEvent = async (userId: string, input: CreateEventInpu
                             actorId: userId,
                             type: 'EVENT_REMINDER',
                             title: `Meeting Scheduled: ${input.title}`,
-                            body: `${creator.name} scheduled a meeting for ${start.toLocaleDateString()} at ${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+                            body: `${creator.name} scheduled a meeting for ${start.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })} at ${start.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`,
                             data: {
                                 eventId: event.id,
                                 meetingLink: input.meetingLink || '',
@@ -108,7 +108,7 @@ export const createCalendarEvent = async (userId: string, input: CreateEventInpu
                     actorId: userId,
                     type: 'EVENT_REMINDER',
                     title: `Reminder Set: ${input.title}`,
-                    body: `Scheduled for ${start.toLocaleDateString()} at ${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+                    body: `Scheduled for ${start.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })} at ${start.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`,
                     data: {
                         eventId: event.id,
                         startDate: start.toISOString(),
@@ -303,7 +303,7 @@ export const updateCalendarEvent = async (userId: string, eventId: string, input
                             actorId: userId,
                             type: 'EVENT_REMINDER',
                             title: `Meeting Updated: ${updated.title}`,
-                            body: `${creator?.name || 'Organizer'} updated the meeting scheduled for ${effectiveStart.toLocaleDateString()} at ${effectiveStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+                            body: `${creator?.name || 'Organizer'} updated the meeting scheduled for ${effectiveStart.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })} at ${effectiveStart.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`,
                             data: {
                                 eventId: updated.id,
                                 meetingLink: updated.meetingLink || '',
