@@ -1,6 +1,6 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket } from '../socketAuth.js';
-import { saveMessage, markMessageAsRead, isParticipant, resolveConversationId } from '../../services/chatService.js';
+import { saveMessage, markMessageAsRead, isParticipant, resolveConversationId, editMessage, deleteMessage } from '../../services/chatService.js';
 import { sendPushToOfflineUsers } from '../../services/notificationService.js';
 import { checkSocketMessageRateLimit } from '../../middlewares/rateLimiter.js';
 import { sendMessageSchema, readMessageSchema } from '../../validators/chatValidators.js';
@@ -196,10 +196,12 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           (id) => !mentionedRecipientIds.includes(id)
         );
 
+        const senderName = (message as any).sender?.name || 'Someone';
+
         if (mentionedRecipientIds.length > 0) {
           sendPushToOfflineUsers(
             mentionedRecipientIds,
-            `${message.sender.name} mentioned you`,
+            `${senderName} mentioned you`,
             rawContent || 'Mentioned you in a message',
             {
               conversationId: message.conversationId,
@@ -215,7 +217,7 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         if (standardRecipientIds.length > 0) {
           sendPushToOfflineUsers(
             standardRecipientIds,
-            `New message from ${message.sender.name}`,
+            `New message from ${senderName}`,
             rawContent || 'Sent an attachment',
             { conversationId: message.conversationId, messageId: message.id }
           ).catch((err) => {
@@ -305,6 +307,78 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
             callback(formatErrorResponse(code, err.message));
           } else {
             callback(formatErrorResponse('SERVER_ERROR', 'Failed to mark message as read'));
+          }
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.MESSAGE_EDIT,
+    async (
+      payload: { conversationId: string; messageId: string; content: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId || !socket.data.user?.isAuthenticated) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
+          return;
+        }
+
+        if (!payload?.conversationId || !payload?.messageId || !payload?.content?.trim()) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId, messageId, and non-empty content are required'));
+          return;
+        }
+
+        const updated = await editMessage(userId, payload.conversationId, payload.messageId, payload.content);
+        if (callback) {
+          callback({ success: true, data: updated });
+        }
+      } catch (err: any) {
+        logger.error('Error editing message via socket', { error: err.message });
+        if (callback) {
+          if (err instanceof ApiError) {
+            const code = err.statusCode === 403 ? 'FORBIDDEN' : err.statusCode === 404 ? 'NOT_FOUND' : 'INVALID_PAYLOAD';
+            callback(formatErrorResponse(code, err.message));
+          } else {
+            callback(formatErrorResponse('SERVER_ERROR', 'Failed to edit message'));
+          }
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.MESSAGE_DELETE,
+    async (
+      payload: { conversationId: string; messageId: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId || !socket.data.user?.isAuthenticated) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
+          return;
+        }
+
+        if (!payload?.conversationId || !payload?.messageId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId and messageId are required'));
+          return;
+        }
+
+        const result = await deleteMessage(userId, payload.conversationId, payload.messageId);
+        if (callback) {
+          callback({ success: true, data: result });
+        }
+      } catch (err: any) {
+        logger.error('Error deleting message via socket', { error: err.message });
+        if (callback) {
+          if (err instanceof ApiError) {
+            const code = err.statusCode === 403 ? 'FORBIDDEN' : err.statusCode === 404 ? 'NOT_FOUND' : 'INVALID_PAYLOAD';
+            callback(formatErrorResponse(code, err.message));
+          } else {
+            callback(formatErrorResponse('SERVER_ERROR', 'Failed to delete message'));
           }
         }
       }

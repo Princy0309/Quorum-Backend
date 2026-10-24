@@ -1363,6 +1363,185 @@ export const dismissGroupAdmin = async (
   return updated;
 };
 
+export const editMessage = async (
+  userId: string,
+  conversationIdOrTarget: string,
+  messageId: string,
+  newContent: string
+) => {
+  if (!newContent || !newContent.trim()) {
+    throw new ApiError(400, 'Message content cannot be empty');
+  }
+
+  const resolvedConversationId = await resolveConversationId(userId, conversationIdOrTarget);
+  if (!resolvedConversationId) {
+    throw new ApiError(404, 'Conversation not found or you are not a participant');
+  }
+
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    include: {
+      sender: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      }
+    }
+  });
+
+  if (!message || message.conversationId !== resolvedConversationId) {
+    throw new ApiError(404, 'Message not found');
+  }
+
+  if (message.senderId !== userId) {
+    throw new ApiError(403, 'You can only edit your own messages');
+  }
+
+  const updatedMessage = await prisma.message.update({
+    where: { id: messageId },
+    data: {
+      content: newContent.trim(),
+      updatedAt: new Date()
+    },
+    include: {
+      sender: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      }
+    }
+  });
+
+  const mentionedUserIds = (updatedMessage as any).mentionedUserIds || [];
+  let mentionedUsers: any[] = [];
+  if (mentionedUserIds.length > 0) {
+    mentionedUsers = await prisma.user.findMany({
+      where: { id: { in: mentionedUserIds } },
+      select: { id: true, name: true, avatar: true }
+    });
+  }
+
+  const enrichedMessage = { ...updatedMessage, mentionedUsers };
+
+  try {
+    const io = getIO();
+    const rooms = [`conversation:${resolvedConversationId}`];
+    if (conversationIdOrTarget !== resolvedConversationId) {
+      rooms.push(`conversation:${conversationIdOrTarget}`);
+    }
+    io.to(rooms).emit(CHAT_EVENTS.MESSAGE_UPDATED, enrichedMessage);
+
+    const participants = await prisma.conversationParticipant.findMany({
+      where: { conversationId: resolvedConversationId },
+      select: { userId: true }
+    });
+
+    const latestMessage = await prisma.message.findFirst({
+      where: { conversationId: resolvedConversationId },
+      orderBy: [{ seq: 'desc' }, { id: 'desc' }]
+    });
+
+    if (latestMessage && latestMessage.id === messageId) {
+      participants.forEach((p) => {
+        io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+          conversationId: resolvedConversationId,
+          lastMessage: enrichedMessage
+        });
+      });
+    }
+  } catch (err: any) {
+    logger.error('Failed to emit message:updated event', { messageId, error: err.message });
+  }
+
+  return enrichedMessage;
+};
+
+export const deleteMessage = async (
+  userId: string,
+  conversationIdOrTarget: string,
+  messageId: string
+) => {
+  const resolvedConversationId = await resolveConversationId(userId, conversationIdOrTarget);
+  if (!resolvedConversationId) {
+    throw new ApiError(404, 'Conversation not found or you are not a participant');
+  }
+
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    include: {
+      conversation: {
+        include: {
+          participants: true
+        }
+      }
+    }
+  });
+
+  if (!message || message.conversationId !== resolvedConversationId) {
+    throw new ApiError(404, 'Message not found');
+  }
+
+  const participant = message.conversation.participants.find((p) => p.userId === userId);
+  if (!participant) {
+    throw new ApiError(403, 'You are not a participant in this conversation');
+  }
+
+  const isSender = message.senderId === userId;
+  const isGroupAdmin =
+    message.conversation.ownerId === userId ||
+    participant.role === 'admin' ||
+    participant.role === 'owner';
+
+  if (!isSender && !isGroupAdmin) {
+    throw new ApiError(403, 'You do not have permission to delete this message');
+  }
+
+  await prisma.message.delete({
+    where: { id: messageId }
+  });
+
+  const lastMessage = await prisma.message.findFirst({
+    where: { conversationId: resolvedConversationId },
+    orderBy: [{ seq: 'desc' }, { id: 'desc' }],
+    include: {
+      sender: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      }
+    }
+  });
+
+  try {
+    const io = getIO();
+    const rooms = [`conversation:${resolvedConversationId}`];
+    if (conversationIdOrTarget !== resolvedConversationId) {
+      rooms.push(`conversation:${conversationIdOrTarget}`);
+    }
+    io.to(rooms).emit(CHAT_EVENTS.MESSAGE_DELETED, {
+      conversationId: resolvedConversationId,
+      messageId
+    });
+
+    message.conversation.participants.forEach((p) => {
+      io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+        conversationId: resolvedConversationId,
+        lastMessage: lastMessage || null
+      });
+    });
+  } catch (err: any) {
+    logger.error('Failed to emit message:deleted event', { messageId, error: err.message });
+  }
+
+  return { success: true, messageId, conversationId: resolvedConversationId };
+};
+
 
 
 

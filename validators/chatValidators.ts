@@ -67,6 +67,15 @@ export const readMessageSchema = z.object({
   messageId: z.string().trim().min(1).max(100)
 }).passthrough();
 
+export const editMessageSchema = z.object({
+  content: z.string().trim().min(1, 'Message content cannot be empty').max(10000)
+}).passthrough();
+
+export const deleteMessageSchema = z.object({
+  conversationId: z.string().trim().min(1).max(100).optional(),
+  messageId: z.string().trim().min(1).max(100).optional()
+}).passthrough();
+
 export const typingSchema = z.object({
   conversationId: z.string().trim().min(1).max(100)
 }).passthrough();

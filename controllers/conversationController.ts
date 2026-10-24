@@ -9,7 +9,9 @@ import {
   updateGroupConversation,
   getConversationById,
   makeGroupAdmin,
-  dismissGroupAdmin
+  dismissGroupAdmin,
+  editMessage,
+  deleteMessage
 } from '../services/chatService.js';
 import { ApiError } from '../utils/ApiError.js';
 
@@ -346,5 +348,68 @@ export const dismissGroupAdminController = async (req: Request, res: Response, n
     next(err);
   }
 };
+
+export const editMessageController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const rawMsgId = req.params.messageId;
+    const messageId = Array.isArray(rawMsgId) ? rawMsgId[0] : rawMsgId;
+    if (!messageId) {
+      throw new ApiError(400, 'messageId is required');
+    }
+
+    const { content } = req.body;
+    const updated = await editMessage(userId, conversationId, messageId, content);
+
+    res.status(200).json({
+      success: true,
+      data: updated
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteMessageController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const rawMsgId = req.params.messageId;
+    const messageId = Array.isArray(rawMsgId) ? rawMsgId[0] : rawMsgId;
+    if (!messageId) {
+      throw new ApiError(400, 'messageId is required');
+    }
+
+    const result = await deleteMessage(userId, conversationId, messageId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Message deleted successfully',
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 
 
