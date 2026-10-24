@@ -57,7 +57,7 @@ export const notificationWorker = new Worker(
     });
     const allowInApp = preference ? preference.inApp : true;
     const allowPush = preference ? preference.push : true;
-    const allowEmail = preference ? preference.email : true;
+    const allowEmail = type === 'COMMUNITY_POST_COMMENT' ? false : (preference ? preference.email : true);
 
     if (!allowInApp && !allowPush && !allowEmail) {
       logger.info(`[NotificationWorker] User ${recipientId} muted all alerts for ${type}`);
@@ -129,7 +129,7 @@ export const notificationWorker = new Worker(
       }
     }
 
-    if (allowEmail) {
+    if (allowEmail && type !== 'COMMUNITY_POST_COMMENT') {
       try {
         await queueEmailDigest(recipientId);
       } catch (digestErr: any) {
