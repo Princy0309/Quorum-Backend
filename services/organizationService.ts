@@ -357,6 +357,34 @@ export const createOrganizationInvite = async (
     throw new ApiError(400, `Invalid role. Allowed roles: ${Object.values(OrgRole).join(', ')}`);
   }
 
+  // Verify team if teamId is provided
+  let targetTeam: { id: string; name: string } | null = null;
+  const targetTeamRole = data.teamRole ? data.teamRole.toUpperCase() : (data.teamId ? 'MEMBER' : null);
+
+  if (data.teamId) {
+    const team = await prisma.team.findFirst({
+      where: { id: data.teamId, organizationId: orgId },
+      select: { id: true, name: true },
+    });
+    if (!team) {
+      throw new ApiError(404, 'Team not found in this organization');
+    }
+    targetTeam = team;
+
+    // Permissions: Only ORG_ADMIN or the LEAD of this team can invite
+    const inviterOrgMember = await prisma.organizationMember.findUnique({
+      where: { organizationId_userId: { organizationId: orgId, userId: inviterId } },
+    });
+    if (inviterOrgMember?.role !== OrgRole.ORG_ADMIN) {
+      const inviterTeamMember = await prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId: data.teamId, userId: inviterId } },
+      });
+      if (inviterTeamMember?.role !== 'LEAD') {
+        throw new ApiError(403, 'Only org admins or the team lead of this team can invite members');
+      }
+    }
+  }
+
   const normalizedEmail = data.email?.trim().toLowerCase();
 
   if (normalizedEmail) {
@@ -403,7 +431,9 @@ export const createOrganizationInvite = async (
       organizationId: orgId,
       inviterId,
       email: normalizedEmail || null,
-      role: targetRole,
+      role: targetTeamRole === 'LEAD' ? OrgRole.TEAM_HEAD : targetRole,
+      teamId: data.teamId || null,
+      teamRole: targetTeamRole,
       token,
       expiresAt,
       maxUses: data.maxUses && data.maxUses > 0 ? data.maxUses : 1,
@@ -415,10 +445,13 @@ export const createOrganizationInvite = async (
       inviter: {
         select: { id: true, name: true, email: true, avatar: true },
       },
+      team: {
+        select: { id: true, name: true },
+      },
     },
   });
 
-    if (normalizedEmail) {
+  if (normalizedEmail) {
     const inviteLink = `${env.CLIENT_URL}/join/${invite.token}`;
 
     try {
@@ -429,6 +462,8 @@ export const createOrganizationInvite = async (
         role: invite.role,
         inviteLink,
         expiresInDays: days,
+        teamName: targetTeam?.name,
+        teamRole: targetTeamRole || undefined,
       });
     } catch (err: any) {
       logger.warn('[OrganizationInvite] Email queue failed', { error: err.message });
@@ -441,16 +476,24 @@ export const createOrganizationInvite = async (
 
     if (existingUser) {
       try {
+        const notifBody = targetTeam
+          ? (targetTeamRole === 'LEAD'
+              ? `${invite.inviter.name} invited you to lead ${targetTeam.name} at ${invite.organization.name}`
+              : `${invite.inviter.name} invited you to join ${targetTeam.name} at ${invite.organization.name}`)
+          : `${invite.inviter.name} invited you to join ${invite.organization.name}`;
+
         await queueNotification({
           recipientId: existingUser.id,
           actorId: inviterId,
           type: 'ORG_INVITE',
           title: 'Organization Invitation',
-          body: `${invite.inviter.name} invited you to join ${invite.organization.name}`,
+          body: notifBody,
           data: {
             organizationId: orgId,
             token: invite.token,
             role: invite.role,
+            teamId: invite.teamId,
+            teamRole: invite.teamRole,
           },
         });
       } catch (err: any) {
@@ -460,8 +503,8 @@ export const createOrganizationInvite = async (
   }
 
   return invite;
-
 };
+
 
 export const getInvitePreview = async (token: string) => {
   const invite = await prisma.organizationInvite.findUnique({
@@ -472,6 +515,9 @@ export const getInvitePreview = async (token: string) => {
       },
       inviter: {
         select: { id: true, name: true, email: true, avatar: true },
+      },
+      team: {
+        select: { id: true, name: true },
       },
     },
   });
@@ -497,10 +543,14 @@ export const getInvitePreview = async (token: string) => {
     organization: invite.organization,
     inviter: invite.inviter,
     role: invite.role,
+    teamId: invite.teamId,
+    teamName: invite.team?.name || null,
+    teamRole: invite.teamRole,
     email: invite.email,
     expiresAt: invite.expiresAt,
   };
 };
+
 
 export const acceptOrganizationInvite = async (
   token: string,
@@ -582,6 +632,9 @@ export const getOrganizationInvites = async (orgId: string) => {
       inviter: {
         select: { id: true, name: true, email: true },
       },
+      team: {
+        select: { id: true, name: true },
+      },
     },
     orderBy: {
       createdAt: 'desc',
@@ -590,6 +643,7 @@ export const getOrganizationInvites = async (orgId: string) => {
 
   return invites;
 };
+
 
 export const revokeOrganizationInvite = async (orgId: string, inviteId: string) => {
   const invite = await prisma.organizationInvite.findFirst({

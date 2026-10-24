@@ -222,11 +222,13 @@ export const createInviteController = asyncHandler(
       return next(new ApiError(400, 'Valid Organization ID is required'));
     }
 
-    const { email, role, maxUses, expiresInDays } = req.body;
+    const { email, role, teamId, teamRole, maxUses, expiresInDays } = req.body;
 
     const invite = await createOrganizationInvite(orgId, req.user.id, {
       email,
       role,
+      teamId,
+      teamRole,
       maxUses,
       expiresInDays,
     });
