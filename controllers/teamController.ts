@@ -101,6 +101,10 @@ export const deleteTeamController = asyncHandler(
 
 export const addTeamMemberController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id || !req.orgMembership) {
+      return next(new ApiError(401, 'Unauthorized'));
+    }
+
     const orgId = getParam(req.params.id);
     const teamId = getParam(req.params.teamId);
     const { userId, role } = req.body;
@@ -109,7 +113,14 @@ export const addTeamMemberController = asyncHandler(
       return next(new ApiError(400, 'userId is required'));
     }
 
-    const member = await addTeamMember(orgId, teamId, String(userId).trim(), role);
+    const member = await addTeamMember(
+      orgId,
+      teamId,
+      req.user.id,
+      req.orgMembership.role,
+      String(userId).trim(),
+      role
+    );
 
     return res.status(201).json({
       success: true,
@@ -120,11 +131,21 @@ export const addTeamMemberController = asyncHandler(
 
 export const removeTeamMemberController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id || !req.orgMembership) {
+      return next(new ApiError(401, 'Unauthorized'));
+    }
+
     const orgId = getParam(req.params.id);
     const teamId = getParam(req.params.teamId);
     const userId = getParam(req.params.userId);
 
-    const result = await removeTeamMember(orgId, teamId, userId);
+    const result = await removeTeamMember(
+      orgId,
+      teamId,
+      req.user.id,
+      req.orgMembership.role,
+      userId
+    );
 
     return res.status(200).json({
       success: true,
@@ -132,6 +153,7 @@ export const removeTeamMemberController = asyncHandler(
     });
   }
 );
+
 
 
 export const getTeamMessagesController = asyncHandler(

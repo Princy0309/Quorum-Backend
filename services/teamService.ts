@@ -1,4 +1,5 @@
 import prisma from '../config/prisma.js';
+import { OrgRole } from '@prisma/client';
 import { ApiError } from '../utils/ApiError.js';
 import type { CreateTeamInput, UpdateTeamInput } from '../types/team.js';
 import { queueNotification } from '../queues/notificationQueue.js';
@@ -228,9 +229,12 @@ export const deleteTeam = async (organizationId: string, teamId: string) => {
   return { message: 'Team deleted successfully' };
 };
 
+
 export const addTeamMember = async (
   organizationId: string,
   teamId: string,
+  callerUserId: string,
+  callerOrgRole: OrgRole,
   targetUserId: string,
   role: string = 'member'
 ) => {
@@ -243,6 +247,22 @@ export const addTeamMember = async (
 
   if (!team) {
     throw new ApiError(404, 'Team not found in this organization');
+  }
+
+  // Scoped check: Must be Org Admin OR Lead of THIS team
+  if (callerOrgRole !== OrgRole.ORG_ADMIN) {
+    const callerMembership = await prisma.teamMember.findUnique({
+      where: {
+        teamId_userId: {
+          teamId,
+          userId: callerUserId,
+        },
+      },
+    });
+
+    if (callerMembership?.role !== 'LEAD') {
+      throw new ApiError(403, 'Only the team lead of this team or organization admin can add members');
+    }
   }
 
   const orgMember = await prisma.organizationMember.findUnique({
@@ -330,7 +350,6 @@ export const addTeamMember = async (
     ]);
   }
 
-
   try {
     await queueNotification({
       recipientId: targetUserId,
@@ -353,6 +372,8 @@ export const addTeamMember = async (
 export const removeTeamMember = async (
   organizationId: string,
   teamId: string,
+  callerUserId: string,
+  callerOrgRole: OrgRole,
   targetUserId: string
 ) => {
   const team = await prisma.team.findFirst({
@@ -364,6 +385,22 @@ export const removeTeamMember = async (
 
   if (!team) {
     throw new ApiError(404, 'Team not found in this organization');
+  }
+
+  // Scoped check: Must be Org Admin OR Lead of THIS team (or user removing themselves)
+  if (callerOrgRole !== OrgRole.ORG_ADMIN && callerUserId !== targetUserId) {
+    const callerMembership = await prisma.teamMember.findUnique({
+      where: {
+        teamId_userId: {
+          teamId,
+          userId: callerUserId,
+        },
+      },
+    });
+
+    if (callerMembership?.role !== 'LEAD') {
+      throw new ApiError(403, 'Only the team lead of this team or organization admin can remove members');
+    }
   }
 
   const membership = await prisma.teamMember.findUnique({
@@ -422,24 +459,5 @@ export const removeTeamMember = async (
     ]);
   }
 
-
-
   return { message: 'Member removed from team successfully' };
 };
-
-
-export const getTeamConversation = async (teamId: string) => {
-  return await prisma.conversation.findUnique({
-    where: { teamId },
-    include: {
-      participants: {
-        include: {
-          user: {
-            select: { id: true, name: true, email: true, avatar: true },
-          },
-        },
-      },
-    },
-  });
-};
-
