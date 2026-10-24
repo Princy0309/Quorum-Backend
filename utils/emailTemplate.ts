@@ -41,14 +41,26 @@ export const getOrgInviteEmailHtml = (
   orgName: string,
   role: string,
   inviteLink: string,
-  expiresInDays: number = 7
+  expiresInDays: number = 7,
+  teamName?: string,
+  teamRole?: string
 ): string => {
+  let invitationText = `<strong>${inviterName}</strong> has invited you to join <strong>${orgName}</strong> as a <strong>${role}</strong> on Quorum.`;
+
+  if (teamName) {
+    if (teamRole?.toUpperCase() === 'LEAD') {
+      invitationText = `<strong>${inviterName}</strong> has invited you to be the <strong>Team Lead</strong> of <strong>${teamName}</strong> at <strong>${orgName}</strong> on Quorum.`;
+    } else {
+      invitationText = `<strong>${inviterName}</strong> has invited you to join <strong>${teamName}</strong> at <strong>${orgName}</strong> on Quorum.`;
+    }
+  }
+
   return `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px; max-width: 500px; margin: 0 auto; color: #1f2937;">
       <h2 style="color: #4F46E5; margin-bottom: 8px;">Quorum</h2>
       <p style="font-size: 15px; margin-top: 16px;">Hello,</p>
       <p style="font-size: 15px; line-height: 1.5;">
-        <strong>${inviterName}</strong> has invited you to join <strong>${orgName}</strong> as a <strong>${role}</strong> on Quorum.
+        ${invitationText}
       </p>
       <div style="text-align: center; margin: 28px 0;">
         <a href="${inviteLink}" style="background-color: #4F46E5; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px; display: inline-block;">
@@ -66,6 +78,7 @@ export const getOrgInviteEmailHtml = (
     </div>
   `;
 };
+
 
 export const getMeetingInviteEmailHtml = (
   inviterName: string,

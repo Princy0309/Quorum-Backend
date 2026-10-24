@@ -77,10 +77,10 @@ export const emailWorker = new Worker(
   'emailQueue',
   async (job: Job) => {
     if (job.name === 'sendOrgInviteEmail') {
-      const { email, inviterName, orgName, role, inviteLink, expiresInDays } = job.data;
+      const { email, inviterName, orgName, role, inviteLink, expiresInDays, teamName, teamRole } = job.data;
       console.log(`[EmailWorker] Processing job #${job.id}: Sending org invite email to ${email}`);
 
-      await sendOrgInviteEmail(email, inviterName, orgName, role, inviteLink, expiresInDays);
+      await sendOrgInviteEmail(email, inviterName, orgName, role, inviteLink, expiresInDays, teamName, teamRole);
 
       console.log(`[EmailWorker] Job #${job.id} completed: Org invite sent to ${email}`);
       return;

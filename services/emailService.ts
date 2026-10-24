@@ -64,10 +64,28 @@ export const sendOrgInviteEmail = async (
   orgName: string,
   role: string,
   inviteLink: string,
-  expiresInDays: number = 7
+  expiresInDays: number = 7,
+  teamName?: string,
+  teamRole?: string
 ): Promise<any> => {
-  const html = getOrgInviteEmailHtml(inviterName, orgName, role, inviteLink, expiresInDays);
-  const subject = `${inviterName} invited you to join ${orgName} on Quorum`;
+  const html = getOrgInviteEmailHtml(
+    inviterName,
+    orgName,
+    role,
+    inviteLink,
+    expiresInDays,
+    teamName,
+    teamRole
+  );
+
+  let subject = `${inviterName} invited you to join ${orgName} on Quorum`;
+  if (teamName) {
+    if (teamRole?.toUpperCase() === 'LEAD') {
+      subject = `${inviterName} invited you to lead ${teamName} at ${orgName} on Quorum`;
+    } else {
+      subject = `${inviterName} invited you to join ${teamName} at ${orgName} on Quorum`;
+    }
+  }
 
   return await transporter.sendMail({
     from: `"Quorum" <${process.env.SMTP_USER}>`,
@@ -76,6 +94,7 @@ export const sendOrgInviteEmail = async (
     html,
   });
 };
+
 
 export const sendMeetingInviteEmail = async (
   to: string,
