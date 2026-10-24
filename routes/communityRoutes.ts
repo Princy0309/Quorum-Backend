@@ -60,10 +60,18 @@ router.post('/invitations/:identifier/accept', authMiddleware, acceptCommunityIn
 router.post('/invitations/:identifier/decline', authMiddleware, declineCommunityInviteController);
 router.post('/invitations/:identifier/respond', authMiddleware, validate(respondInviteSchema), respondToCommunityInviteController);
 
+router.post('/join/:token', authMiddleware, joinCommunityViaInviteController);
+router.get('/join/:token', validateInviteTokenController);
+router.post('/join/:token/accept', authMiddleware, acceptCommunityInviteController);
+router.post('/join/:token/decline', authMiddleware, declineCommunityInviteController);
+
 router.get('/invites/:token', validateInviteTokenController);
 router.post('/invites/:token/join', authMiddleware, joinCommunityViaInviteController);
 router.post('/invites/:token/accept', authMiddleware, acceptCommunityInviteController);
 router.post('/invites/:token/decline', authMiddleware, declineCommunityInviteController);
+
+router.get('/invitations/:token', validateInviteTokenController);
+router.post('/invitations/:token/join', authMiddleware, joinCommunityViaInviteController);
 
 router.get('/:id/users/search', authMiddleware, searchUsersToInviteController);
 router.get('/:id/invitable-users', authMiddleware, searchUsersToInviteController);

@@ -191,7 +191,7 @@ export const createInviteLinkController = async (req: Request, res: Response, ne
 
 export const validateInviteTokenController = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { token } = req.params;
+    const token = req.params.token || req.params.identifier;
     if (!token || typeof token !== 'string' || token.trim().length === 0) {
       throw new ApiError(400, 'Invalid invitation token');
     }
@@ -213,7 +213,7 @@ export const joinCommunityViaInviteController = async (req: Request, res: Respon
       throw new ApiError(401, 'Unauthorized');
     }
 
-    const { token } = req.params;
+    const token = req.params.token || req.params.identifier;
     if (!token || typeof token !== 'string' || token.trim().length === 0) {
       throw new ApiError(400, 'Invalid invitation token');
     }
