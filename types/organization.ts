@@ -35,3 +35,23 @@ export interface OrgInviteEmailJobData {
   inviteLink: string;
   expiresInDays?: number;
 }
+
+export interface CreateInviteInput {
+  email?: string;
+  role?: OrgRole;
+  teamId?: string;
+  teamRole?: 'LEAD' | 'MEMBER' | 'member';
+  maxUses?: number;
+  expiresInDays?: number;
+}
+
+export interface OrgInviteEmailJobData {
+  email: string;
+  inviterName: string;
+  orgName: string;
+  role: string;
+  inviteLink: string;
+  expiresInDays?: number;
+  teamName?: string;
+  teamRole?: string;
+}

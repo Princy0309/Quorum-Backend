@@ -54,8 +54,12 @@ model OrganizationInvite {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
+  teamId          String?
+  teamRole        String?      @default("MEMBER")
+
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   inviter         User         @relation("OrgInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+  team            Team?        @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([token])
@@ -73,6 +77,7 @@ model Team {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   members        TeamMember[]
   tasks          TeamTask[]
+  invites        OrganizationInvite[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
