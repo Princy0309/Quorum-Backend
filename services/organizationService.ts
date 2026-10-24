@@ -593,10 +593,100 @@ export const acceptOrganizationInvite = async (
     },
   });
 
+  // If already a member of the organization:
   if (existingMember) {
+    // If this invite is for a specific team, allow them to join this team
+    if (invite.teamId) {
+      const existingTeamMember = await prisma.teamMember.findUnique({
+        where: {
+          teamId_userId: {
+            teamId: invite.teamId,
+            userId,
+          },
+        },
+      });
+
+      if (existingTeamMember) {
+        throw new ApiError(400, 'You are already a member of this team');
+      }
+
+      const teamRole = invite.teamRole || 'MEMBER';
+
+      await prisma.$transaction(async (tx) => {
+        await tx.teamMember.create({
+          data: {
+            teamId: invite.teamId!,
+            userId,
+            role: teamRole,
+          },
+        });
+
+        if (teamRole === 'LEAD' && existingMember.role === OrgRole.MEMBER) {
+          await tx.organizationMember.update({
+            where: { id: existingMember.id },
+            data: { role: OrgRole.TEAM_HEAD },
+          });
+        }
+
+        await tx.organizationInvite.update({
+          where: { id: invite.id },
+          data: { usedCount: { increment: 1 } },
+        });
+
+        // Add to team chat conversation if it exists
+        const teamConv = await tx.conversation.findUnique({
+          where: { teamId: invite.teamId! },
+        });
+
+        if (teamConv) {
+          await tx.conversationParticipant.upsert({
+            where: {
+              conversationId_userId: {
+                conversationId: teamConv.id,
+                userId,
+              },
+            },
+            create: {
+              conversationId: teamConv.id,
+              userId,
+              role: teamRole === 'LEAD' ? 'admin' : 'member',
+            },
+            update: {
+              role: teamRole === 'LEAD' ? 'admin' : 'member',
+            },
+          });
+
+          const user = await tx.user.findUnique({
+            where: { id: userId },
+            select: { name: true },
+          });
+
+          const memberName = user?.name || 'A member';
+          const nextSeq = teamConv.lastSeq + 1;
+
+          await tx.message.create({
+            data: {
+              conversationId: teamConv.id,
+              senderId: userId,
+              content: ` ${memberName} joined the team`,
+              seq: nextSeq,
+            },
+          });
+
+          await tx.conversation.update({
+            where: { id: teamConv.id },
+            data: { lastSeq: nextSeq },
+          });
+        }
+      });
+
+      return existingMember;
+    }
+
     throw new ApiError(400, 'You are already a member of this organization');
   }
 
+  // New member joining organization (and team if invite has teamId)
   const result = await prisma.$transaction(async (tx) => {
     const member = await tx.organizationMember.create({
       data: {
@@ -615,6 +705,70 @@ export const acceptOrganizationInvite = async (
         usedCount: { increment: 1 },
       },
     });
+
+    // If invite is linked to a team, join team + conversation
+    if (invite.teamId) {
+      const team = await tx.team.findUnique({
+        where: { id: invite.teamId },
+      });
+
+      if (team && team.organizationId === invite.organizationId) {
+        const teamRole = invite.teamRole || 'MEMBER';
+
+        await tx.teamMember.create({
+          data: {
+            teamId: invite.teamId,
+            userId,
+            role: teamRole,
+          },
+        });
+
+        const teamConv = await tx.conversation.findUnique({
+          where: { teamId: invite.teamId },
+        });
+
+        if (teamConv) {
+          await tx.conversationParticipant.upsert({
+            where: {
+              conversationId_userId: {
+                conversationId: teamConv.id,
+                userId,
+              },
+            },
+            create: {
+              conversationId: teamConv.id,
+              userId,
+              role: teamRole === 'LEAD' ? 'admin' : 'member',
+            },
+            update: {
+              role: teamRole === 'LEAD' ? 'admin' : 'member',
+            },
+          });
+
+          const user = await tx.user.findUnique({
+            where: { id: userId },
+            select: { name: true },
+          });
+
+          const memberName = user?.name || 'A member';
+          const nextSeq = teamConv.lastSeq + 1;
+
+          await tx.message.create({
+            data: {
+              conversationId: teamConv.id,
+              senderId: userId,
+              content: ` ${memberName} joined the team`,
+              seq: nextSeq,
+            },
+          });
+
+          await tx.conversation.update({
+            where: { id: teamConv.id },
+            data: { lastSeq: nextSeq },
+          });
+        }
+      }
+    }
 
     return member;
   });
