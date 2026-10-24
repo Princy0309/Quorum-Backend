@@ -5,7 +5,8 @@ import { validate } from '../middlewares/validate.js';
 import {
   createGroupSchema,
   addParticipantsSchema,
-  updateGroupSchema
+  updateGroupSchema,
+  editMessageSchema
 } from '../validators/chatValidators.js';
 import {
   getUserConversationsController,
@@ -19,7 +20,9 @@ import {
   leaveGroupConversationController,
   getConversationDetailsController,
   makeGroupAdminController,
-  dismissGroupAdminController
+  dismissGroupAdminController,
+  editMessageController,
+  deleteMessageController
 } from '../controllers/conversationController.js';
 import { createOrGetDMController } from '../controllers/dmController.js';
 
@@ -34,6 +37,8 @@ router.get('/search', authMiddleware, searchLimiter, getUserConversationsControl
 router.post('/group', authMiddleware, validate(createGroupSchema), createGroupConversationController);
 router.get('/:id', authMiddleware, getConversationDetailsController);
 router.get('/:id/messages', authMiddleware, getConversationMessagesController);
+router.patch('/:id/messages/:messageId', authMiddleware, validate(editMessageSchema), editMessageController);
+router.delete('/:id/messages/:messageId', authMiddleware, deleteMessageController);
 router.get('/:id/search', authMiddleware, searchConversationMessagesController);
 router.patch('/:id', authMiddleware, validate(updateGroupSchema), updateGroupConversationController);
 router.post('/:id/participants', authMiddleware, validate(addParticipantsSchema), addGroupParticipantsController);

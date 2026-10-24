@@ -9,7 +9,11 @@ export const CHAT_EVENTS = {
   CONVERSATION_JOIN: 'conversation:join',
   CONVERSATION_LEAVE: 'conversation:leave',
   CONVERSATION_UPDATE: 'conversation:update',
-  CONVERSATION_REMOVED: 'conversation:removed'
+  CONVERSATION_REMOVED: 'conversation:removed',
+  MESSAGE_EDIT: 'message:edit',
+  MESSAGE_UPDATED: 'message:updated',
+  MESSAGE_DELETE: 'message:delete',
+  MESSAGE_DELETED: 'message:deleted'
 } as const;
 
 export const COMMUNITY_EVENTS = {

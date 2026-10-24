@@ -931,6 +931,128 @@ const swaggerDocument = {
         }
       }
     },
+    "/api/conversations/{id}/messages/{messageId}": {
+      "patch": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Edit chat message",
+        "description": "Edits the text content of a message sent by the authenticated user in a 1-to-1 or group chat. Broadcasts message:updated event.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Conversation ID or recipient user ID"
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Message ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "content"
+                ],
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "example": "Updated message content"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Message updated successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Can only edit your own messages"
+          },
+          "404": {
+            "description": "Message or conversation not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Delete chat message",
+        "description": "Deletes a message from a 1-to-1 or group conversation. Can be performed by the message sender or group admin. Broadcasts message:deleted event.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Conversation ID or recipient user ID"
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Message ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Message deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - no permission to delete this message"
+          },
+          "404": {
+            "description": "Message or conversation not found"
+          }
+        }
+      }
+    },
     "/api/conversations/{id}/search": {
       "get": {
         "tags": [
@@ -4789,9 +4911,1313 @@ const swaggerDocument = {
           "404": { "description": "Collection not found" }
         }
       }
+    },
+    "/api/notifications": {
+      "get": {
+        "tags": [
+          "Notifications & Devices"
+        ],
+        "summary": "Get notifications",
+        "description": "Retrieves paginated notifications for the current user, optionally filtered by read/unread state.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            },
+            "description": "Page number"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            },
+            "description": "Items per page"
+          },
+          {
+            "name": "unreadOnly",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Filter by unread notifications only"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated notifications list"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/notifications/unread-count": {
+      "get": {
+        "tags": [
+          "Notifications & Devices"
+        ],
+        "summary": "Get unread notification count",
+        "description": "Returns the number of unread notifications for badge counters.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unread count object",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "unreadCount": {
+                      "type": "integer",
+                      "example": 3
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/notifications/read-all": {
+      "patch": {
+        "tags": [
+          "Notifications & Devices"
+        ],
+        "summary": "Mark all notifications as read",
+        "description": "Marks all active unread notifications as read for the authenticated user.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All notifications marked as read"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/notifications/{id}/read": {
+      "patch": {
+        "tags": [
+          "Notifications & Devices"
+        ],
+        "summary": "Mark single notification as read",
+        "description": "Marks a specific notification as read by ID.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Notification ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notification marked as read"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Notification not found"
+          }
+        }
+      }
+    },
+    "/api/notifications/{id}": {
+      "delete": {
+        "tags": [
+          "Notifications & Devices"
+        ],
+        "summary": "Delete notification",
+        "description": "Deletes a notification from user history.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Notification ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notification deleted"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Notification not found"
+          }
+        }
+      }
+    },
+    "/api/notifications/preferences": {
+      "get": {
+        "tags": [
+          "Notifications & Devices"
+        ],
+        "summary": "Get notification preferences",
+        "description": "Retrieves user preferences for email digests, push notifications, and in-app alerts.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User notification preferences"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Notifications & Devices"
+        ],
+        "summary": "Update notification preferences",
+        "description": "Updates channel delivery preferences for notifications.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "emailNotifications": {
+                    "type": "boolean"
+                  },
+                  "pushNotifications": {
+                    "type": "boolean"
+                  },
+                  "inAppNotifications": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preferences updated"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/communities/invitations/pending": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Get pending invitations for user",
+        "description": "Fetches all pending community invitations addressed to the authenticated user.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of pending community invitations"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/communities/join/{token}": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Preview community invite by token",
+        "description": "Retrieves public metadata and inviter details for a community invite token without requiring authentication.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Invitation token"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Community invite preview details"
+          },
+          "400": {
+            "description": "Invalid or expired token"
+          },
+          "404": {
+            "description": "Invite not found"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Accept and join community via token",
+        "description": "Accepts a pending community invitation token and joins the authenticated user as a member.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Invitation token"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully joined community"
+          },
+          "400": {
+            "description": "Invalid token or expired"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "409": {
+            "description": "Already a member"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/invitable-users": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List invitable users for community",
+        "description": "Searches and lists platform users who are not yet members of this community to invite them.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search query for name or email"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of eligible invitable users"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Requires admin privileges"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/channels": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List community channels",
+        "description": "Retrieves all discussion channels within a community.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of community channels"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Community not found"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Create community channel",
+        "description": "Creates a new topic or discussion channel within a community. Requires ADMIN or OWNER.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "announcements"
+                  },
+                  "description": {
+                    "type": "string",
+                    "example": "Official announcements and updates"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Channel created successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/channels/{channelId}": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Get channel details",
+        "description": "Retrieves specific community channel information.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Channel details"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Channel not found"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Update community channel",
+        "description": "Modifies a channel name or description. Requires ADMIN or OWNER.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Channel updated successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Delete community channel",
+        "description": "Deletes a community channel and all associated posts. Requires ADMIN or OWNER.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Channel deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/channels/{channelId}/posts": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List posts in channel",
+        "description": "Retrieves paginated feed of posts within a designated community channel.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Cursor for pagination"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of posts in channel"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Create post in channel",
+        "description": "Publishes a new post inside the specified channel.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "content"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "mediaUrls": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Post published successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/conversations/unread-count": {
+      "get": {
+        "tags": [
+          "Direct & Group Conversations"
+        ],
+        "summary": "Get aggregate unread message count",
+        "description": "Calculates total unread messages across all 1-on-1 direct messages and group conversations.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unread conversations message count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "unreadCount": {
+                      "type": "integer",
+                      "example": 7
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/calendar": {
+      "post": {
+        "tags": [
+          "Calendar & Events"
+        ],
+        "summary": "Create calendar event",
+        "description": "Creates a scheduled calendar event, reminder, meeting, or deadline with optional BullMQ automated email reminders.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "startDate"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Product Architecture Review"
+                  },
+                  "description": {
+                    "type": "string",
+                    "example": "Quarterly system scalability and architecture discussion"
+                  },
+                  "eventType": {
+                    "type": "string",
+                    "enum": [
+                      "REMINDER",
+                      "MEETING",
+                      "DEADLINE",
+                      "GENERAL"
+                    ],
+                    "default": "REMINDER"
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "format": "date-time",
+                    "example": "2026-10-30T10:00:00Z"
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "format": "date-time",
+                    "example": "2026-10-30T11:00:00Z"
+                  },
+                  "isAllDay": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "meetingLink": {
+                    "type": "string",
+                    "example": "https://quorum.me/call/arch-rev-101"
+                  },
+                  "attendeeEmails": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "email"
+                    }
+                  },
+                  "hasReminder": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "reminderMinutes": {
+                    "type": "integer",
+                    "default": 15,
+                    "description": "Minutes before event to dispatch reminder"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Calendar event created successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/calendar/month": {
+      "get": {
+        "tags": [
+          "Calendar & Events"
+        ],
+        "summary": "Get calendar events by month",
+        "description": "Retrieves all events occurring within the requested month and year.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 2026
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 12,
+              "example": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Month events array"
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/calendar/date": {
+      "get": {
+        "tags": [
+          "Calendar & Events"
+        ],
+        "summary": "Get calendar events by specific date",
+        "description": "Retrieves events scheduled for a single date.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "2026-10-30"
+            },
+            "description": "Format: YYYY-MM-DD"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Date events array"
+          },
+          "400": {
+            "description": "Invalid date format"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/calendar/upcoming": {
+      "get": {
+        "tags": [
+          "Calendar & Events"
+        ],
+        "summary": "Get upcoming calendar events",
+        "description": "Retrieves upcoming scheduled events sorted chronologically.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upcoming events array"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/calendar/{id}": {
+      "get": {
+        "tags": [
+          "Calendar & Events"
+        ],
+        "summary": "Get calendar event details",
+        "description": "Retrieves specific calendar event details by ID.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Calendar event ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event details"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Event not found"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Calendar & Events"
+        ],
+        "summary": "Update calendar event",
+        "description": "Modifies calendar event fields and dynamically reschedules reminder jobs in BullMQ.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Calendar event ID"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "eventType": {
+                    "type": "string",
+                    "enum": [
+                      "REMINDER",
+                      "MEETING",
+                      "DEADLINE",
+                      "GENERAL"
+                    ]
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "isAllDay": {
+                    "type": "boolean"
+                  },
+                  "meetingLink": {
+                    "type": "string"
+                  },
+                  "attendeeEmails": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "hasReminder": {
+                    "type": "boolean"
+                  },
+                  "reminderMinutes": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Event updated successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Event not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Calendar & Events"
+        ],
+        "summary": "Delete calendar event",
+        "description": "Deletes a calendar event and cancels its scheduled reminder BullMQ job.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Calendar event ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Event not found"
+          }
+        }
+      }
+    },
+    "/api/ai/chat/{conversationId}/summary": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Generate conversation summary",
+        "description": "Analyzes the conversation transcript using Gemini AI and returns key discussion points, decisions made, and follow-up action items.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Conversation ID to summarize"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Generated summary and action items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "summary": {
+                      "type": "string"
+                    },
+                    "actionItems": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Conversation not found"
+          }
+        }
+      }
     }
   },
   "tags": [
+    {
+      "name": "System & Health",
+      "description": "System health checks, database status, Redis readiness, and CSRF token endpoints."
+    },
+    {
+      "name": "Authentication",
+      "description": "User registration, password login, JWT refresh tokens, multi-device sessions, and current user profile."
+    },
+    {
+      "name": "OTP & Verification",
+      "description": "Email OTP verification and secure forgot/reset password flows."
+    },
+    {
+      "name": "User Management",
+      "description": "Global user search, user profile queries, profile updates, and avatar management."
+    },
+    {
+      "name": "Direct & Group Conversations",
+      "description": "Real-time 1-on-1 direct messaging, group chats, message history, full-text search, typing indicators, and read receipts."
+    },
+    {
+      "name": "Communities",
+      "description": "Community workspaces, channels, invitations, role-based member administration (OWNER, ADMIN, MODERATOR, MEMBER), and activity feeds."
+    },
+    {
+      "name": "Community Posts & Comments",
+      "description": "Rich discussion posts, multi-media attachments, nested comments, and engagement within community channels."
+    },
+    {
+      "name": "Organizations & Teams",
+      "description": "Enterprise workspace hierarchy with multi-tenant organizations, scoped teams, RBAC roles (ORG_ADMIN, TEAM_HEAD, MEMBER), and team task tracking."
+    },
+    {
+      "name": "Calendar & Events",
+      "description": "Personal and collaborative calendar scheduling, monthly/daily queries, meeting links, and automated BullMQ reminder dispatch."
+    },
+    {
+      "name": "Meetings & Video Calling",
+      "description": "High-performance multi-party WebRTC meetings powered by Werift SFU, RTP forwarding, DTLS/SRTP encryption, and call life-cycle control."
+    },
+    {
+      "name": "Media & Storage",
+      "description": "Secure AWS S3 presigned URL generation and direct uploads protected by burst and daily rate limits."
+    },
+    {
+      "name": "Notifications & Devices",
+      "description": "Real-time in-app alerts, unread counts, push notification device token registration, and delivery preference management."
+    },
     {
       "name": "AI Assistant",
       "description": "Workplace intelligence, generative assistant, contextual quick replies, grounded workspace search, and interaction history."
