@@ -11,11 +11,11 @@ interface CreateTaskInput {
   assigneeId: string;
 }
 
-
 export const createTask = async (
   organizationId: string,
   teamId: string,
   createdById: string,
+  currentUserOrgRole: OrgRole,
   input: CreateTaskInput
 ) => {
   const { title, description, dueDate, assigneeId } = input;
@@ -37,7 +37,6 @@ export const createTask = async (
     parsedDueDate = parsed;
   }
 
-
   const team = await prisma.team.findFirst({
     where: { id: teamId, organizationId },
   });
@@ -46,7 +45,6 @@ export const createTask = async (
     throw new ApiError(404, 'Team not found in this organization');
   }
 
-  
   const isTeamMember = await prisma.teamMember.findUnique({
     where: {
       teamId_userId: {
@@ -60,7 +58,25 @@ export const createTask = async (
     throw new ApiError(400, 'Assignee must be a member of this specific team');
   }
 
+  const assigneeMembership = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId,
+        userId: assigneeId,
+      },
+    },
+    select: { role: true },
+  });
+
  
+  if (
+    assigneeMembership?.role === OrgRole.ORG_ADMIN &&
+    currentUserOrgRole !== OrgRole.ORG_ADMIN
+  ) {
+    throw new ApiError(403, 'Team leads cannot assign tasks to the organization admin');
+  }
+  // -------------------------------------------------
+
   const task = await prisma.teamTask.create({
     data: {
       teamId,
@@ -120,7 +136,6 @@ export const getTeamTasks = async (organizationId: string, teamId: string) => {
   });
 };
 
-
 export const updateTaskStatus = async (
   organizationId: string,
   teamId: string,
@@ -129,7 +144,6 @@ export const updateTaskStatus = async (
   userOrgRole: OrgRole,
   status: string
 ) => {
- 
   if (!Object.values(TaskStatus).includes(status as TaskStatus)) {
     throw new ApiError(
       400,
@@ -146,11 +160,9 @@ export const updateTaskStatus = async (
     throw new ApiError(404, 'Task not found in this team');
   }
 
-  
   const isAssignee = task.assigneeId === userId;
-  
   const isOrgAdmin = userOrgRole === OrgRole.ORG_ADMIN;
-  
+
   const userTeamMember = await prisma.teamMember.findUnique({
     where: {
       teamId_userId: {

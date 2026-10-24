@@ -16,7 +16,7 @@ const getParam = (param: unknown): string => {
 
 export const createTaskController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user?.id) {
+    if (!req.user?.id || !req.orgMembership) {
       return next(new ApiError(401, 'Unauthorized, login required'));
     }
 
@@ -24,12 +24,18 @@ export const createTaskController = asyncHandler(
     const teamId = getParam(req.params.teamId);
     const { title, description, dueDate, assigneeId } = req.body;
 
-    const task = await createTask(orgId, teamId, req.user.id, {
-      title,
-      description,
-      dueDate,
-      assigneeId,
-    });
+    const task = await createTask(
+      orgId,
+      teamId,
+      req.user.id,
+      req.orgMembership.role,
+      {
+        title,
+        description,
+        dueDate,
+        assigneeId,
+      }
+    );
 
     return res.status(201).json({
       success: true,
