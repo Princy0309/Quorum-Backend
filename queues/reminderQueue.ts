@@ -35,7 +35,7 @@ export const scheduleEventReminder = async (event: {
     return;
   }
 
-  const jobId = `reminder:${event.id}`;
+  const jobId = `reminder-${event.id}`;
 
   try {
     const existingJob = await reminderQueue.getJob(jobId);
@@ -60,7 +60,7 @@ export const scheduleEventReminder = async (event: {
 };
 
 export const cancelEventReminder = async (eventId: string) => {
-  const jobId = `reminder:${eventId}`;
+  const jobId = `reminder-${eventId}`;
   try {
     const existingJob = await reminderQueue.getJob(jobId);
     if (existingJob) {

@@ -9,7 +9,7 @@ export const emailDigestQueue = new Queue('emailDigestQueue', {
 });
 
 export const queueEmailDigest = async (userId: string) => {
-  const jobId = `digest:${userId}`;
+  const jobId = `digest-${userId}`;
   try {
     await emailDigestQueue.add(
       'send-digest',
@@ -22,8 +22,13 @@ export const queueEmailDigest = async (userId: string) => {
       }
     );
   } catch (err: any) {
-    logger.debug('[EmailDigestQueue] Digest job already scheduled', { userId });
+    if (err?.message?.includes('already exists') || err?.message?.includes('duplicate')) {
+      logger.debug('[EmailDigestQueue] Digest job already scheduled', { userId });
+    } else {
+      logger.error('[EmailDigestQueue] Failed to queue digest', { userId, error: err?.message });
+    }
   }
+
 };
 
 const workerRedisConnection = queueRedisConnection.duplicate();
