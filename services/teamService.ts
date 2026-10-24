@@ -291,64 +291,68 @@ export const addTeamMember = async (
     throw new ApiError(409, 'User is already a member of this team');
   }
 
-  const createdMember = await prisma.teamMember.create({
-    data: {
-      teamId,
-      userId: targetUserId,
-      role: role.trim() || 'member',
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          avatar: true,
-        },
-      },
-    },
-  });
-
-  const teamConversation = await prisma.conversation.findUnique({
-    where: { teamId },
-  });
-
-  if (teamConversation) {
-    await prisma.conversationParticipant.upsert({
-      where: {
-        conversationId_userId: {
-          conversationId: teamConversation.id,
-          userId: targetUserId,
-        },
-      },
-      create: {
-        conversationId: teamConversation.id,
+  // Fully atomic transaction
+  const createdMember = await prisma.$transaction(async (tx) => {
+    const member = await tx.teamMember.create({
+      data: {
+        teamId,
         userId: targetUserId,
-        role: role === 'LEAD' ? 'admin' : 'member',
+        role: role.trim() || 'member',
       },
-      update: {
-        role: role === 'LEAD' ? 'admin' : 'member',
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            avatar: true,
+          },
+        },
       },
     });
 
-    const memberName = createdMember.user?.name || 'A member';
-    const nextSeq = teamConversation.lastSeq + 1;
+    const teamConversation = await tx.conversation.findUnique({
+      where: { teamId },
+    });
 
-    await prisma.$transaction([
-      prisma.message.create({
+    if (teamConversation) {
+      await tx.conversationParticipant.upsert({
+        where: {
+          conversationId_userId: {
+            conversationId: teamConversation.id,
+            userId: targetUserId,
+          },
+        },
+        create: {
+          conversationId: teamConversation.id,
+          userId: targetUserId,
+          role: role === 'LEAD' ? 'admin' : 'member',
+        },
+        update: {
+          role: role === 'LEAD' ? 'admin' : 'member',
+        },
+      });
+
+      const memberName = member.user?.name || 'A member';
+      const nextSeq = teamConversation.lastSeq + 1;
+
+      await tx.message.create({
         data: {
           conversationId: teamConversation.id,
           senderId: targetUserId,
-          content: ` ${memberName} joined the team`,
+          content: `${memberName} joined the team`,
           seq: nextSeq,
         },
-      }),
-      prisma.conversation.update({
+      });
+
+      await tx.conversation.update({
         where: { id: teamConversation.id },
         data: { lastSeq: nextSeq },
-      }),
-    ]);
-  }
+      });
+    }
+
+    return member;
+  });
 
   try {
     await queueNotification({
@@ -416,48 +420,50 @@ export const removeTeamMember = async (
     throw new ApiError(404, 'User is not a member of this team');
   }
 
-  await prisma.teamMember.delete({
-    where: {
-      teamId_userId: {
-        teamId,
-        userId: targetUserId,
-      },
-    },
-  });
-
-  const teamConv = await prisma.conversation.findUnique({
-    where: { teamId },
-  });
-
-  if (teamConv) {
-    await prisma.conversationParticipant.deleteMany({
+  // Fully atomic transaction
+  await prisma.$transaction(async (tx) => {
+    await tx.teamMember.delete({
       where: {
-        conversationId: teamConv.id,
-        userId: targetUserId,
+        teamId_userId: {
+          teamId,
+          userId: targetUserId,
+        },
       },
     });
 
-    const removedUser = await prisma.user.findUnique({
-      where: { id: targetUserId },
-      select: { name: true },
+    const teamConv = await tx.conversation.findUnique({
+      where: { teamId },
     });
-    const nextSeq = teamConv.lastSeq + 1;
 
-    await prisma.$transaction([
-      prisma.message.create({
+    if (teamConv) {
+      await tx.conversationParticipant.deleteMany({
+        where: {
+          conversationId: teamConv.id,
+          userId: targetUserId,
+        },
+      });
+
+      const removedUser = await tx.user.findUnique({
+        where: { id: targetUserId },
+        select: { name: true },
+      });
+      const nextSeq = teamConv.lastSeq + 1;
+
+      await tx.message.create({
         data: {
           conversationId: teamConv.id,
           senderId: targetUserId,
-          content: ` ${removedUser?.name || 'A member'} left the team`,
+          content: `${removedUser?.name || 'A member'} left the team`,
           seq: nextSeq,
         },
-      }),
-      prisma.conversation.update({
+      });
+
+      await tx.conversation.update({
         where: { id: teamConv.id },
         data: { lastSeq: nextSeq },
-      }),
-    ]);
-  }
+      });
+    }
+  });
 
   return { message: 'Member removed from team successfully' };
 };

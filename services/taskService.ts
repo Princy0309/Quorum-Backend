@@ -171,7 +171,7 @@ export const updateTaskStatus = async (
       },
     },
   });
-  const isTeamLead = userTeamMember?.role === 'LEAD' || userOrgRole === OrgRole.TEAM_HEAD;
+  const isTeamLead = userTeamMember?.role === 'LEAD';
 
   if (!isAssignee && !isOrgAdmin && !isTeamLead) {
     throw new ApiError(403, 'Only the assignee, team lead, or org admin can update this task');

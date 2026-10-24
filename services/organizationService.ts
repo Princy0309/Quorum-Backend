@@ -393,7 +393,7 @@ export const createOrganizationInvite = async (
       select: { id: true },
     });
 
-    if (existingUser) {
+        if (existingUser) {
       const existingMember = await prisma.organizationMember.findUnique({
         where: {
           organizationId_userId: {
@@ -404,7 +404,23 @@ export const createOrganizationInvite = async (
       });
 
       if (existingMember) {
-        throw new ApiError(400, 'This user is already a member of this organization');
+        if (data.teamId) {
+          // Allow if they are not yet in this specific team
+          const existingTeamMember = await prisma.teamMember.findUnique({
+            where: {
+              teamId_userId: {
+                teamId: data.teamId,
+                userId: existingUser.id,
+              },
+            },
+          });
+
+          if (existingTeamMember) {
+            throw new ApiError(400, 'This user is already a member of this team');
+          }
+        } else {
+          throw new ApiError(400, 'This user is already a member of this organization');
+        }
       }
     }
 
@@ -412,13 +428,14 @@ export const createOrganizationInvite = async (
       where: {
         organizationId: orgId,
         email: normalizedEmail,
+        teamId: data.teamId || null,
         isRevoked: false,
         expiresAt: { gt: new Date() },
       },
     });
 
     if (pendingInvite) {
-      throw new ApiError(400, 'An active invite has already been sent to this email');
+      throw new ApiError(400, 'An active invite has already been sent to this email for this team');
     }
   }
 
