@@ -1047,7 +1047,10 @@ export const searchUsersToInvite = async (
 
   const whereClause: any = {
     id: { notIn: excludedUserIds },
-    name: { contains: cleanQuery, mode: 'insensitive' }
+    OR: [
+      { name: { contains: cleanQuery, mode: 'insensitive' } },
+      { email: { contains: cleanQuery, mode: 'insensitive' } }
+    ]
   };
 
   const users = await prisma.user.findMany({
@@ -1059,6 +1062,7 @@ export const searchUsersToInvite = async (
     select: {
       id: true,
       name: true,
+      email: true,
       avatar: true
     }
   });

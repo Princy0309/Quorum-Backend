@@ -66,10 +66,15 @@ router.post('/invites/:token/accept', authMiddleware, acceptCommunityInviteContr
 router.post('/invites/:token/decline', authMiddleware, declineCommunityInviteController);
 
 router.get('/:id/users/search', authMiddleware, searchUsersToInviteController);
+router.get('/:id/invitable-users', authMiddleware, searchUsersToInviteController);
+router.get('/:id/invitable_users', authMiddleware, searchUsersToInviteController);
+router.get('/:id/search-users', authMiddleware, searchUsersToInviteController);
 router.get('/:id/invites', authMiddleware, getCommunityInvitesController);
+router.get('/:id/invitations', authMiddleware, getCommunityInvitesController);
 router.post('/:id/invites', authMiddleware, validate(inviteOrLinkSchema), inviteUserToCommunityController);
 router.post('/:id/invitations', authMiddleware, validate(inviteOrLinkSchema), inviteUserToCommunityController);
 router.delete('/:id/invites/:inviteId', authMiddleware, revokeInviteLinkController);
+router.delete('/:id/invitations/:inviteId', authMiddleware, revokeInviteLinkController);
 
 router.get('/:id/members', authMiddleware, getCommunityMembersController);
 router.patch('/:id/members/:userId/role', authMiddleware, validate(updateMemberRoleSchema), changeMemberRoleController);
