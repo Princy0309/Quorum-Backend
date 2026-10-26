@@ -42,11 +42,9 @@ export const isOriginAllowed = (origin?: string | null): boolean => {
   if (origin === 'null') return false;
   if (process.env.NODE_ENV !== 'production') return true;
   if (allowedOrigins.includes(origin)) return true;
-  if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
-    return true;
-  }
   return false;
 };
+
 
 export const env = {
   PORT: data?.PORT || 5000,
