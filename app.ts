@@ -30,7 +30,7 @@ app.use(cors({
     }
   },
   credentials: true,
-  exposedHeaders: ['authorization'],
+  
 }));
 
 app.use(helmet({
