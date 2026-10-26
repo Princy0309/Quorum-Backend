@@ -44,6 +44,5 @@ jobs:
              sudo docker compose up -d --force-recreate
 
 
-             sudo docker compose exec -T app npx prisma migrate deploy || true
-             sudo docker compose exec -T app npx prisma db push --accept-data-loss
+             sudo docker compose exec -T app npx prisma migrate deploy
              sudo docker compose logs --tail=50 app
