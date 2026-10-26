@@ -38,7 +38,8 @@ export const allowedOrigins: string[] = (data?.ALLOWED_ORIGINS || '')
   .filter(Boolean);
 
 export const isOriginAllowed = (origin?: string | null): boolean => {
-  if (!origin || origin === 'null') return true;
+  if (!origin) return true;
+  if (origin === 'null') return false;
   if (process.env.NODE_ENV !== 'production') return true;
   if (allowedOrigins.includes(origin)) return true;
   if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
