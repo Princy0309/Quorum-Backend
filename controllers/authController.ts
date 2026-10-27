@@ -6,7 +6,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { sendSuccess } from '../utils/ApiResponse.js';
 import { rotateRefreshToken, revokeRefreshToken, revokeAllSessions, revokeAccessToken } from '../services/tokenService.js';
 import { registerUser, loginUser } from '../services/authService.js';
-import { refreshCookieOptions } from '../utils/cookieOptions.js';
+import { accessCookieOptions, refreshCookieOptions } from '../utils/cookieOptions.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
 export const register = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
@@ -44,6 +44,7 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
   if (isMobile) {
     responseData.refreshToken = refreshToken;
   } else {
+    res.cookie('accessToken', accessToken, accessCookieOptions);
     res.cookie('refreshToken', refreshToken, refreshCookieOptions);
   }
 
@@ -52,7 +53,7 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
 
 export const refreshToken = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const isMobile = req.headers['x-client-platform'] === 'mobile';
-  const incomingToken = isMobile ? req.body?.refreshToken : req.cookies?.refreshToken;
+  const incomingToken = isMobile ? req.body?.refreshToken : (req.cookies?.refreshToken || req.body?.refreshToken);
 
   if (!incomingToken) throw new ApiError(401, 'Refresh token required');
 
@@ -64,6 +65,7 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
     if (isMobile) {
       responseData.refreshToken = newRefreshToken;
     } else {
+      res.cookie('accessToken', accessToken, accessCookieOptions);
       res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
     }
 
@@ -78,11 +80,11 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
 
 export const logout = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const isMobile = req.headers['x-client-platform'] === 'mobile';
-  const incomingToken = isMobile ? req.body?.refreshToken : req.cookies?.refreshToken;
+  const incomingToken = isMobile ? req.body?.refreshToken : (req.cookies?.refreshToken || req.body?.refreshToken);
   
   const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const accessToken = authHeader.split(' ')[1];
+  const accessToken = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : req.cookies?.accessToken;
+  if (accessToken) {
     await revokeAccessToken(accessToken);
   }
 
@@ -91,6 +93,7 @@ export const logout = asyncHandler(async (req: Request, res: Response, next: Nex
   }
 
   if (!isMobile) {
+    res.clearCookie('accessToken', accessCookieOptions);
     res.clearCookie('refreshToken', refreshCookieOptions);
   }
 
@@ -99,14 +102,15 @@ export const logout = asyncHandler(async (req: Request, res: Response, next: Nex
 
 export const logoutAll = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const accessToken = authHeader.split(' ')[1];
+  const accessToken = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : req.cookies?.accessToken;
+  if (accessToken) {
     await revokeAccessToken(accessToken);
   }
 
   if (req.user && req.user.id) {
     await revokeAllSessions(req.user.id);
   }
+  res.clearCookie('accessToken', accessCookieOptions);
   res.clearCookie('refreshToken', refreshCookieOptions);
   return sendSuccess(res, 200, 'Logged out of all sessions successfully');
 });

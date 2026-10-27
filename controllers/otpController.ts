@@ -7,7 +7,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { sendSuccess } from '../utils/ApiResponse.js';
 import { storeAndSendOTP, verifyOTPFromRedis } from '../services/otpService.js';
 import { issueTokens, revokeAllSessions } from '../services/tokenService.js';
-import { refreshCookieOptions } from '../utils/cookieOptions.js';
+import { accessCookieOptions, refreshCookieOptions } from '../utils/cookieOptions.js';
 import logger from '../utils/logger.js';
 
 import { verifyEmailSchema, sendResetSchema, resetPasswordSchema } from '../validators/otpValidators.js';
@@ -101,6 +101,7 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response, next
     if (isMobile) {
       responseData.refreshToken = refreshToken;
     } else {
+      res.cookie('accessToken', accessToken, accessCookieOptions);
       res.cookie('refreshToken', refreshToken, refreshCookieOptions);
     }
 
