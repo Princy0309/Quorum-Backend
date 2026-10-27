@@ -42,9 +42,16 @@ export const initSocketServer = (httpServer: any) => {
     let userId: string | null = (typeof auth.userId === 'string' && auth.userId.trim()) || (typeof query.userId === 'string' && query.userId.trim()) || null;
     let name: string = auth.name || (typeof query.name === 'string' ? query.name : '') || 'Participant';
 
+    const parseCookieToken = (cookieHeader?: string): string | null => {
+      if (!cookieHeader) return null;
+      const match = cookieHeader.match(/(?:^|;\s*)accessToken=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : null;
+    };
+
     let rawToken = auth.token ||
       (typeof socket.handshake.headers.authorization === 'string' ? socket.handshake.headers.authorization : '') ||
-      (typeof query.token === 'string' ? query.token : '');
+      (typeof query.token === 'string' ? query.token : '') ||
+      parseCookieToken(socket.handshake.headers.cookie);
 
     let token = typeof rawToken === 'string' ? rawToken.replace(/^Bearer\s+/i, '').trim() : '';
 
