@@ -22,6 +22,13 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional().default(''),
   ALLOWED_ORIGINS: z.string().min(1, 'ALLOWED_ORIGINS is required in environment configuration'),
   REDIS_URL: z.string().url(),
+
+  JIRA_CLIENT_ID: z.string().min(1, 'JIRA_CLIENT_ID is required'),
+  JIRA_CLIENT_SECRET: z.string().min(16, 'JIRA_CLIENT_SECRET must be at least 16 chars'),
+  JIRA_REDIRECT_URI: z.string().url(),
+  JIRA_ENCRYPTION_KEY: z.string().length(64, 'JIRA_ENCRYPTION_KEY must be 64 hex chars (32 bytes)'),
+  JIRA_STATE_SECRET: z.string().min(32, 'JIRA_STATE_SECRET must be at least 32 chars'),
+
 }).passthrough();
 
 const envVars = envSchema.safeParse(process.env);
@@ -67,6 +74,13 @@ export const env = {
   GEMINI_API_KEY: data?.GEMINI_API_KEY || process.env.GEMINI_API_KEY || '',
   GEMINI_MODEL: data?.GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
   AI_HISTORY_RETENTION_DAYS: Number(process.env.AI_HISTORY_RETENTION_DAYS || 30),
+
+  JIRA_CLIENT_ID: data?.JIRA_CLIENT_ID,
+  JIRA_CLIENT_SECRET: data?.JIRA_CLIENT_SECRET,
+  JIRA_REDIRECT_URI: data?.JIRA_REDIRECT_URI,
+  JIRA_ENCRYPTION_KEY: data?.JIRA_ENCRYPTION_KEY,
+  JIRA_STATE_SECRET: data?.JIRA_STATE_SECRET,
+
 };
 
 export default env;
