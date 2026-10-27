@@ -15,16 +15,38 @@ const generateCode = (): string => {
   return `${part()}-${part()}-${part()}`;
 };
 
-export const createMeeting = async (hostId: string) => {
+export const createMeeting = async (hostId: string, organizationId?: string) => {
   let code: string;
   do {
     code = generateCode();
   } while (await prisma.meeting.findUnique({ where: { code } }));
 
+  if (organizationId) {
+    const org = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { id: true, ownerId: true },
+    });
+    if (!org) {
+      throw new ApiError(404, 'Organization not found');
+    }
+    const member = await prisma.organizationMember.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId,
+          userId: hostId,
+        },
+      },
+    });
+    if (!member && org.ownerId !== hostId) {
+      throw new ApiError(403, 'You do not have permission to create meetings for this organization');
+    }
+  }
+
   const meeting = await prisma.meeting.create({
     data: {
       code,
       hostId,
+      organizationId: organizationId || null,
       waitingRoom: true,
       status: MeetingStatus.ACTIVE,
       admitted: [hostId],
@@ -33,6 +55,7 @@ export const createMeeting = async (hostId: string) => {
 
   return {
     code: meeting.code,
+    organizationId: meeting.organizationId,
     link: `${env.CLIENT_URL}/meet/${meeting.code}`,
   };
 };
@@ -52,6 +75,13 @@ export const getMeeting = async (code: string) => {
           avatar: true,
         },
       },
+      organization: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+        },
+      },
     },
   });
 
@@ -65,6 +95,8 @@ export const getMeeting = async (code: string) => {
     hostId: meeting.hostId,
     host: meeting.host,
     admitted: meeting.admitted,
+    organizationId: meeting.organizationId,
+    organization: meeting.organization,
   };
 };
 

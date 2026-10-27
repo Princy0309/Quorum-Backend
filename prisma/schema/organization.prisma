@@ -20,6 +20,8 @@ model Organization {
   members      OrganizationMember[]
   invites      OrganizationInvite[]
   teams        Team[]
+  meetings     Meeting[]
+  whiteboards  Whiteboard[]
 
   @@index([slug])
   @@index([ownerId])

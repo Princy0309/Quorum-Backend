@@ -5,6 +5,7 @@ import { registerMessageHandler } from './handlers/messageHandler.js';
 import { registerTypingHandler } from './handlers/typingHandler.js';
 import { registerPresenceHandler } from './handlers/presenceHandler.js';
 import { registerCommunityHandler } from './handlers/communityHandler.js';
+import { registerWhiteboardHandler } from './handlers/whiteboardHandler.js';
 import env, { isOriginAllowed } from '../config/env.js';
 import prisma from '../config/prisma.js';
 import redis from '../config/redis.js';
@@ -42,6 +43,7 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
     registerTypingHandler(io!, socket);
     registerPresenceHandler(io!, socket);
     registerCommunityHandler(io!, socket);
+    registerWhiteboardHandler(io!, socket as any);
   });
 
   return io;

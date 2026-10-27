@@ -17,6 +17,7 @@ import calendarRoutes from './calendarRoutes.js';
 
 
 import savedItemRoutes from './savedItemRoutes.js';
+import whiteboardRoutes from './whiteboardRoutes.js';
 
 const router = Router();
 
@@ -71,5 +72,7 @@ router.use('/uploads', uploadRoutes);
 router.use('/devices', deviceRoutes);
 router.use('/saved-items', savedItemRoutes);
 router.use('/v1/saved-items', savedItemRoutes);
+router.use('/whiteboards', whiteboardRoutes);
+router.use('/v1/whiteboards', whiteboardRoutes);
 
 export default router;

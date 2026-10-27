@@ -47,10 +47,7 @@ model User {
   calendarEvents           CalendarEvent[]           @relation("UserCalendarEvents")
   assignedTasks            TeamTask[]                @relation("AssignedTeamTasks")
   createdTasks             TeamTask[]                @relation("CreatedTeamTasks")
-
-
-
-
+  createdWhiteboards       Whiteboard[]              @relation("WhiteboardCreator")
 }
 
 model RefreshToken {
