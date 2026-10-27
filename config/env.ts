@@ -15,7 +15,7 @@ const envSchema = z.object({
   JWT_ISSUER: z.string().default('quorum-api'),
   JWT_AUDIENCE: z.string().default('quorum-app'),
 
-  CLIENT_URL: z.string().url().default(process.env.NODE_ENV === 'production' ? 'https://newquorum.me' : 'http://localhost:3000'),
+  CLIENT_URL: z.string().url().default(process.env.CLIENT_URL || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000')).optional(),
   SMTP_HOST: z.string().default('smtp.gmail.com'),
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional().default(''),
@@ -56,7 +56,7 @@ export const env = {
   REFRESH_TOKEN_TTL_SECONDS: data?.REFRESH_TOKEN_TTL_SECONDS || 604800,
   JWT_ISSUER: data?.JWT_ISSUER || 'quorum-api',
   JWT_AUDIENCE: data?.JWT_AUDIENCE || 'quorum-app',
-  CLIENT_URL: data?.CLIENT_URL || allowedOrigins[0] || 'http://localhost:3000',
+  CLIENT_URL: data?.CLIENT_URL || allowedOrigins[0] || (data?.NODE_ENV === 'production' ? '' : 'http://localhost:3000'),
   SMTP_HOST: data?.SMTP_HOST || 'smtp.gmail.com',
   SMTP_PORT: data?.SMTP_PORT || 587,
   SMTP_USER: data?.SMTP_USER || '',

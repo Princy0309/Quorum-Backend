@@ -3,7 +3,30 @@ import env from '../config/env.js';
 
 const isProduction = env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true';
 
-const cookieDomain = process.env.COOKIE_DOMAIN || (env.NODE_ENV === 'production' && env.CLIENT_URL?.includes('newquorum.me') ? '.newquorum.me' : undefined);
+const getCookieDomain = (): string | undefined => {
+  if (process.env.COOKIE_DOMAIN) {
+    return process.env.COOKIE_DOMAIN;
+  }
+  if (!isProduction || !env.CLIENT_URL) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(env.CLIENT_URL);
+    const hostname = parsed.hostname;
+    if (hostname === 'localhost' || /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+      return undefined;
+    }
+    const parts = hostname.split('.');
+    if (parts.length >= 2) {
+      return '.' + parts.slice(-2).join('.');
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+};
+
+const cookieDomain = getCookieDomain();
 
 export const accessCookieOptions: CookieOptions = {
   httpOnly: true,

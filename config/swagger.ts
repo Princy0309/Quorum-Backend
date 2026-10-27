@@ -10,12 +10,8 @@ const swaggerDocument = {
   },
   "servers": [
     {
-      "url": "https://api.newquorum.me",
-      "description": "AWS EC2 (Live Production)"
-    },
-    {
-      "url": "http://localhost:5000",
-      "description": "Local Development Server"
+      "url": process.env.API_BASE_URL || "/",
+      "description": "API Server"
     }
   ],
   "components": {

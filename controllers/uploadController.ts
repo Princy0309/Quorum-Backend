@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import { getSignedUploadUrl, authorizeChatFileUpload, uploadBufferToS3 } from '../services/uploadService.js';
 import { signUploadSchema } from '../validators/chatValidators.js';
 import { ApiError } from '../utils/ApiError.js';
+import env from '../config/env.js';
 
 const storage = multer.memoryStorage();
 export const uploadMiddleware = multer({
@@ -46,7 +47,7 @@ export const signUploadController = async (req: Request, res: Response, next: Ne
     const { folder } = req.body || {};
     const folderStr = typeof folder === 'string' ? folder : 'chat';
     const timestamp = Math.floor(Date.now() / 1000);
-    const secret = process.env.JWT_SECRET || 'quorum-secret';
+    const secret = env.JWT_SECRET;
     const signature = crypto
       .createHmac('sha256', secret)
       .update(`${userId}:${timestamp}:${folderStr}`)
@@ -91,10 +92,12 @@ export const directS3UploadController = async (req: Request, res: Response, next
 
     let authenticated = false;
     const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.split(' ')[1];
+    const tokenFromHeader = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : null;
+    const token = tokenFromHeader || req.cookies?.accessToken;
+
+    if (token) {
       try {
-        jwt.verify(token, process.env.JWT_SECRET || 'quorum-secret');
+        jwt.verify(token, env.JWT_SECRET);
         authenticated = true;
       } catch {
         authenticated = false;
@@ -103,12 +106,12 @@ export const directS3UploadController = async (req: Request, res: Response, next
 
     if (!authenticated) {
       if (signature && apiKey && timestamp) {
-        const secret = process.env.JWT_SECRET || 'quorum-secret';
+        const secret = env.JWT_SECRET;
         const expectedSig = crypto
           .createHmac('sha256', secret)
           .update(`${apiKey}:${timestamp}:${folder}`)
           .digest('hex');
-        if (signature === expectedSig || signature === 's3') {
+        if (signature === expectedSig) {
           authenticated = true;
         }
       }
