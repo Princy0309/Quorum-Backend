@@ -40,9 +40,7 @@ export const allowedOrigins: string[] = (data?.ALLOWED_ORIGINS || '')
 export const isOriginAllowed = (origin?: string | null): boolean => {
   if (!origin) return true;
   if (origin === 'null') return false;
-  if (process.env.NODE_ENV !== 'production') return true;
-  if (allowedOrigins.includes(origin)) return true;
-  return false;
+  return allowedOrigins.includes(origin);
 };
 
 
