@@ -14,6 +14,8 @@ import deviceRoutes from './deviceRoutes.js';
 import aiRoutes from './aiRoutes.js';
 import notificationRoutes from './notificationRoutes.js';
 import calendarRoutes from './calendarRoutes.js';
+import jiraRoutes from './jiraRoutes.js';
+
 
 
 import savedItemRoutes from './savedItemRoutes.js';
@@ -71,5 +73,9 @@ router.use('/uploads', uploadRoutes);
 router.use('/devices', deviceRoutes);
 router.use('/saved-items', savedItemRoutes);
 router.use('/v1/saved-items', savedItemRoutes);
+
+router.use('/integrations/jira', jiraRoutes);
+router.use('/v1/integrations/jira', jiraRoutes);
+
 
 export default router;
