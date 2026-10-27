@@ -46,4 +46,12 @@ export const refreshCookieOptions: CookieOptions = {
   ...(cookieDomain ? { domain: cookieDomain } : {}),
 };
 
-export default { accessCookieOptions, refreshCookieOptions };
+export const csrfCookieOptions: CookieOptions = {
+  httpOnly: false,
+  secure: isProduction,
+  sameSite: isProduction ? 'none' : 'lax',
+  path: '/',
+  ...(cookieDomain ? { domain: cookieDomain } : {}),
+};
+
+export default { accessCookieOptions, refreshCookieOptions, csrfCookieOptions };
