@@ -18,6 +18,14 @@ import {
 } from '../controllers/organizationController.js';
 
 import {
+  createTeamTicketController,
+  getTeamTicketsController,
+  getTicketDetailsController,
+  transitionTicketStatusController,
+} from '../controllers/jiraTicketController.js';
+
+
+import {
   setupOrgJiraController,
   getOrgJiraStatusController,
   disconnectOrgJiraController,
@@ -231,6 +239,34 @@ router.delete(
   authMiddleware,
   requireOrgMember([OrgRole.ORG_ADMIN]),
   disconnectOrgJiraController
+);
+
+router.post(
+  '/:id/teams/:teamId/jira/tickets',
+  authMiddleware,
+  requireOrgMember(),
+  createTeamTicketController
+);
+
+router.get(
+  '/:id/teams/:teamId/jira/tickets',
+  authMiddleware,
+  requireOrgMember(),
+  getTeamTicketsController
+);
+
+router.get(
+  '/:id/teams/:teamId/jira/tickets/:key',
+  authMiddleware,
+  requireOrgMember(),
+  getTicketDetailsController
+);
+
+router.patch(
+  '/:id/teams/:teamId/jira/tickets/:key/status',
+  authMiddleware,
+  requireOrgMember(),
+  transitionTicketStatusController
 );
 
 export default router;

@@ -8,6 +8,9 @@ import {
   getJiraStatusController,
 } from '../controllers/jiraOAuthController.js';
 
+import { getMyTicketsController } from '../controllers/jiraTicketController.js';
+
+
 const router = Router();
 
 const authorizeLimiter = rateLimit({
@@ -27,5 +30,6 @@ router.get('/oauth/authorize-url', authMiddleware, authorizeLimiter, getAuthoriz
 router.get('/oauth/callback', handleOAuthCallbackController);
 router.post('/disconnect', authMiddleware, disconnectJiraController);
 router.get('/oauth/status', authMiddleware, getJiraStatusController);
+router.get('/tickets/my', authMiddleware, getMyTicketsController);
 
 export default router;
