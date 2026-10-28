@@ -26,6 +26,11 @@ router.get('/csrf-token', (req: Request, res: Response) => {
   res.json({ csrfToken: res.locals.csrfToken || req.cookies['XSRF-TOKEN'] });
 });
 
+router.get('/v1/csrf-token', (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.json({ csrfToken: res.locals.csrfToken || req.cookies['XSRF-TOKEN'] });
+});
+
 router.use('/auth', authRoutes);
 router.use('/v1/auth', authRoutes);
 router.use('/otp', otpRoutes);
