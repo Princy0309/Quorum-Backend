@@ -39,7 +39,8 @@ export const getWhiteboardsQuerySchema = z.object({
   organizationId: z
     .string()
     .trim()
-    .uuid('organizationId query parameter is required and must be a valid UUID'),
+    .uuid('Valid organizationId is required')
+    .optional(),
   search: z.string().trim().max(100).optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),

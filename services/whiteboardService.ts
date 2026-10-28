@@ -206,14 +206,50 @@ export const getOrganizationWhiteboards = async (
   userId: string,
   query: GetWhiteboardsQuery
 ) => {
-  await assertUserBelongsToOrganization(userId, query.organizationId);
+  let targetOrgId = query.organizationId;
+
+  if (!targetOrgId) {
+    const userMembership = await prisma.organizationMember.findFirst({
+      where: { userId },
+      select: { organizationId: true },
+      orderBy: { joinedAt: 'desc' },
+    });
+
+    if (userMembership) {
+      targetOrgId = userMembership.organizationId;
+    } else {
+      const ownedOrg = await prisma.organization.findFirst({
+        where: { ownerId: userId },
+        select: { id: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (ownedOrg) {
+        targetOrgId = ownedOrg.id;
+      }
+    }
+  }
+
+  if (!targetOrgId) {
+    return {
+      whiteboards: [],
+      pagination: {
+        total: 0,
+        page: query.page ?? 1,
+        limit: query.limit ?? 20,
+        totalPages: 0,
+        hasMore: false,
+      },
+    };
+  }
+
+  await assertUserBelongsToOrganization(userId, targetOrgId);
 
   const page = query.page ?? 1;
   const limit = query.limit ?? 20;
   const skip = (page - 1) * limit;
 
   const where: Prisma.WhiteboardWhereInput = {
-    organizationId: query.organizationId,
+    organizationId: targetOrgId,
     ...(query.search
       ? {
           name: {
