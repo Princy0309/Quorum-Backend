@@ -13,6 +13,11 @@ model Meeting {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
   host        User          @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  organizationId String?
+  organization   Organization?       @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  whiteboards    WhiteboardMeeting[]
+  originWhiteboards Whiteboard[]     @relation("MeetingOriginWhiteboards")
 
   @@index([code])
+  @@index([organizationId])
 }
