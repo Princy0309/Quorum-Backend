@@ -10,6 +10,7 @@ import { isOriginAllowed } from '../config/env.js';
 import { registerMessageHandler } from './handlers/messageHandler.js';
 import { registerTypingHandler } from './handlers/typingHandler.js';
 import { registerPresenceHandler } from './handlers/presenceHandler.js';
+import { registerWhiteboardHandler } from './handlers/whiteboardHandler.js';
 
 let ioInstance: Server | null = null;
 
@@ -102,6 +103,7 @@ export const initSocketServer = (httpServer: any) => {
     registerMessageHandler(io, socket as any);
     registerTypingHandler(io, socket as any);
     registerPresenceHandler(io, socket as any);
+    registerWhiteboardHandler(io, socket as any);
 
     const handleDynamicAuth = async (data: { token?: string }, ack?: (res: any) => void) => {
       try {

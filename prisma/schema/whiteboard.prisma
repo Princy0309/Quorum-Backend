@@ -1,0 +1,33 @@
+model Whiteboard {
+  id             String              @id @default(uuid())
+  organizationId String
+  name           String
+  content        Json                @default("{\"elements\":[],\"viewState\":{}}")
+  createdById    String
+  meetingId      String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy      User                @relation("WhiteboardCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  meeting        Meeting?            @relation("MeetingOriginWhiteboards", fields: [meetingId], references: [id], onDelete: SetNull)
+  meetings       WhiteboardMeeting[]
+
+  @@index([organizationId])
+  @@index([createdById])
+  @@index([meetingId])
+}
+
+model WhiteboardMeeting {
+  id           String     @id @default(uuid())
+  whiteboardId String
+  meetingId    String
+  createdAt    DateTime   @default(now())
+
+  whiteboard   Whiteboard @relation(fields: [whiteboardId], references: [id], onDelete: Cascade)
+  meeting      Meeting    @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@unique([whiteboardId, meetingId])
+  @@index([whiteboardId])
+  @@index([meetingId])
+}
