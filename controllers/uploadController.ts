@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import crypto from 'crypto';
-import jwt from 'jsonwebtoken';
+import { verifyAccessToken } from '../services/tokenService.js';
 import { getSignedUploadUrl, authorizeChatFileUpload, uploadBufferToS3 } from '../services/uploadService.js';
 import { signUploadSchema } from '../validators/chatValidators.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -97,7 +97,7 @@ export const directS3UploadController = async (req: Request, res: Response, next
 
     if (token) {
       try {
-        jwt.verify(token, env.JWT_SECRET);
+        verifyAccessToken(token);
         authenticated = true;
       } catch {
         authenticated = false;
