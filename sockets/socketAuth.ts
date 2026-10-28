@@ -14,7 +14,16 @@ export interface AuthenticatedSocket extends Socket {
 }
 
 export const socketAuthMiddleware = async (socket: Socket, next: (err?: Error) => void) => {
-  const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
+  const parseCookieToken = (cookieHeader?: string): string | null => {
+    if (!cookieHeader) return null;
+    const match = cookieHeader.match(/(?:^|;\s*)accessToken=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+  };
+
+  const token =
+    socket.handshake.auth?.token ||
+    socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, '') ||
+    parseCookieToken(socket.handshake.headers?.cookie);
 
   if (!token) {
     return next(new Error('Authentication error: Missing token'));
@@ -58,7 +67,10 @@ export const socketAuthMiddleware = async (socket: Socket, next: (err?: Error) =
     }
 
     const { passwordHash, ...safeUser } = user;
-    socket.data.user = safeUser;
+    socket.data.user = {
+      ...safeUser,
+      isAuthenticated: true
+    };
     socket.data.tokenPayload = decoded;
 
     next();

@@ -71,7 +71,6 @@ export const getMeeting = async (code: string) => {
         select: {
           id: true,
           name: true,
-          email: true,
           avatar: true,
         },
       },
@@ -94,7 +93,6 @@ export const getMeeting = async (code: string) => {
     waitingRoom: meeting.waitingRoom,
     hostId: meeting.hostId,
     host: meeting.host,
-    admitted: meeting.admitted,
     organizationId: meeting.organizationId,
     organization: meeting.organization,
   };

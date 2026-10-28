@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import path from 'path';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
-import { generateS3PresignedUpload, getS3Client, getBucketName } from '../config/s3.js';
+import { generateS3PresignedUpload, getS3Client, getBucketName, getRegion } from '../config/s3.js';
 import { ApiError } from '../utils/ApiError.js';
 import { resolveConversationId } from './chatService.js';
 
@@ -139,7 +139,7 @@ export const uploadBufferToS3 = async (
 
   const s3Key = `uploads/${folder}/${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${cleanName}`;
   const currentBucket = getBucketName();
-  const region = process.env.AWS_REGION || 'ap-south-1';
+  const region = getRegion();
   const customDomain = process.env.AWS_S3_CUSTOM_DOMAIN || '';
   const client = getS3Client();
 
@@ -152,7 +152,9 @@ export const uploadBufferToS3 = async (
 
   const publicUrl = customDomain
     ? `https://${customDomain.replace(/^https?:\/\//, '')}/${s3Key}`
-    : `https://${currentBucket}.s3.${region}.amazonaws.com/${s3Key}`;
+    : (region
+        ? `https://${currentBucket}.s3.${region}.amazonaws.com/${s3Key}`
+        : `https://${currentBucket}.s3.amazonaws.com/${s3Key}`);
 
   return {
     publicUrl,

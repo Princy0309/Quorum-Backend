@@ -4,11 +4,17 @@ dotenv.config();
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-const getRegion = () => process.env.AWS_REGION || 'ap-south-1';
-const getAccessKeyId = () => process.env.AWS_ACCESS_KEY_ID || '';
-const getSecretAccessKey = () => process.env.AWS_SECRET_ACCESS_KEY || '';
-export const getBucketName = () => process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || 'quorumuploads';
-export const bucketName = getBucketName();
+export const getRegion = () => process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || '';
+export const getAccessKeyId = () => process.env.AWS_ACCESS_KEY_ID || '';
+export const getSecretAccessKey = () => process.env.AWS_SECRET_ACCESS_KEY || '';
+export const getBucketName = () => {
+  const bucket = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || '';
+  if (!bucket) {
+    throw new Error('AWS_S3_BUCKET is not configured in environment variables');
+  }
+  return bucket;
+};
+export const bucketName = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || '';
 
 export const getS3Client = () => {
   const region = getRegion();
@@ -16,7 +22,7 @@ export const getS3Client = () => {
   const secretAccessKey = getSecretAccessKey();
 
   return new S3Client({
-    region,
+    ...(region ? { region } : {}),
     credentials: accessKeyId && secretAccessKey ? {
       accessKeyId,
       secretAccessKey
@@ -45,7 +51,9 @@ export const generateS3PresignedUpload = async (
   const uploadUrl = await getSignedUrl(client, command, { expiresIn: expiresInSeconds });
   const fileUrl = customDomain
     ? `https://${customDomain.replace(/^https?:\/\//, '')}/${key}`
-    : `https://${currentBucket}.s3.${region}.amazonaws.com/${key}`;
+    : (region
+        ? `https://${currentBucket}.s3.${region}.amazonaws.com/${key}`
+        : `https://${currentBucket}.s3.amazonaws.com/${key}`);
 
   return {
     uploadUrl,

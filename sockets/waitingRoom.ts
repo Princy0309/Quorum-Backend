@@ -8,7 +8,7 @@ export const handleAdmitParticipant = (
   ack?: (res: SocketAckResponse) => void
 ) => {
   const user = socket.data.user;
-  if (!user || !user.id) {
+  if (!user || !user.id || !user.isAuthenticated) {
     const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
@@ -128,7 +128,7 @@ export const handleRejectParticipant = (
   ack?: (res: SocketAckResponse) => void
 ) => {
   const user = socket.data.user;
-  if (!user || !user.id) {
+  if (!user || !user.id || !user.isAuthenticated) {
     const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });

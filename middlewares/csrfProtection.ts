@@ -1,7 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { ApiError } from '../utils/ApiError.js';
 import crypto from 'crypto';
-import env, { isOriginAllowed } from '../config/env.js';
+import { isOriginAllowed } from '../config/env.js';
+import { csrfCookieOptions } from '../utils/cookieOptions.js';
 
 export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
   const isMobile = req.headers['x-client-platform'] === 'mobile';
@@ -11,8 +12,13 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
 
   const originHeader = req.headers.origin;
   const host = req.get('host');
-  if (originHeader && host && originHeader.includes(host)) {
-    return next();
+  if (originHeader && host) {
+    try {
+      const parsedOrigin = new URL(originHeader);
+      if (parsedOrigin.host === host) {
+        return next();
+      }
+    } catch {}
   }
 
   const isAuthEndpoint = 
@@ -30,11 +36,7 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
   let csrfToken = req.cookies['XSRF-TOKEN'];
   if (!csrfToken) {
     csrfToken = crypto.randomBytes(32).toString('hex');
-    res.cookie('XSRF-TOKEN', csrfToken, {
-      secure: env.NODE_ENV === 'production',
-      sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
-      httpOnly: false,
-    });
+    res.cookie('XSRF-TOKEN', csrfToken, csrfCookieOptions);
   }
   res.locals.csrfToken = csrfToken;
 
@@ -56,7 +58,7 @@ export const verifyCSRF = (req: Request, res: Response, next: NextFunction) => {
       return next(new ApiError(403, 'CSRF validation failed: Unauthorized origin'));
     }
 
-    const hasAuthCookie = !!req.cookies['refreshToken'];
+    const hasAuthCookie = !!(req.cookies['refreshToken'] || req.cookies['accessToken']);
     if (hasAuthCookie) {
       const headerToken = req.headers['x-xsrf-token'] || req.headers['x-csrf-token'];
       if (!headerToken || headerToken !== csrfToken) {

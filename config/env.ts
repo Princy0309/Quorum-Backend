@@ -6,7 +6,14 @@ dotenv.config();
 const envSchema = z.object({
   PORT: z.coerce.number().default(5000),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  DATABASE_URL: z.string(),
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required in environment configuration').refine((url) => {
+    if (process.env.NODE_ENV === 'production') {
+      return !url.includes('sslmode=disable');
+    }
+    return true;
+  }, {
+    message: 'DATABASE_URL in production must enforce SSL encryption and cannot use sslmode=disable',
+  }),
 
   JWT_SECRET: z.string(),
   JWT_REFRESH_SECRET: z.string(),
@@ -15,7 +22,7 @@ const envSchema = z.object({
   JWT_ISSUER: z.string().default('quorum-api'),
   JWT_AUDIENCE: z.string().default('quorum-app'),
 
-  CLIENT_URL: z.string().url().default(process.env.NODE_ENV === 'production' ? 'https://newquorum.me' : 'http://localhost:3000'),
+  CLIENT_URL: z.string().url().default(process.env.CLIENT_URL || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000')).optional(),
   SMTP_HOST: z.string().default('smtp.gmail.com'),
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional().default(''),
@@ -40,9 +47,7 @@ export const allowedOrigins: string[] = (data?.ALLOWED_ORIGINS || '')
 export const isOriginAllowed = (origin?: string | null): boolean => {
   if (!origin) return true;
   if (origin === 'null') return false;
-  if (process.env.NODE_ENV !== 'production') return true;
-  if (allowedOrigins.includes(origin)) return true;
-  return false;
+  return allowedOrigins.includes(origin);
 };
 
 
@@ -56,7 +61,7 @@ export const env = {
   REFRESH_TOKEN_TTL_SECONDS: data?.REFRESH_TOKEN_TTL_SECONDS || 604800,
   JWT_ISSUER: data?.JWT_ISSUER || 'quorum-api',
   JWT_AUDIENCE: data?.JWT_AUDIENCE || 'quorum-app',
-  CLIENT_URL: data?.CLIENT_URL || allowedOrigins[0] || 'http://localhost:3000',
+  CLIENT_URL: data?.CLIENT_URL || allowedOrigins[0] || (data?.NODE_ENV === 'production' ? '' : 'http://localhost:3000'),
   SMTP_HOST: data?.SMTP_HOST || 'smtp.gmail.com',
   SMTP_PORT: data?.SMTP_PORT || 587,
   SMTP_USER: data?.SMTP_USER || '',

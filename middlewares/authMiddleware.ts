@@ -22,12 +22,17 @@ export const authMiddleware = async (
   res: Response,
   next: NextFunction,
 ) => {
+  let token: string | undefined;
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return next(new ApiError(401, "Unauthorized, missing token"));
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.split(" ")[1];
+  } else if (req.cookies?.accessToken) {
+    token = req.cookies.accessToken;
   }
 
-  const token = authHeader.split(" ")[1];
+  if (!token) {
+    return next(new ApiError(401, "Unauthorized, missing token"));
+  }
 
   let decoded: AccessTokenPayload;
   try {
@@ -130,12 +135,17 @@ export const optionalAuth = async (
   res: Response,
   next: NextFunction,
 ) => {
+  let token: string | undefined;
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return next();
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.split(" ")[1];
+  } else if (req.cookies?.accessToken) {
+    token = req.cookies.accessToken;
   }
 
-  const token = authHeader.split(" ")[1];
+  if (!token) {
+    return next();
+  }
 
   let decoded: AccessTokenPayload;
   try {
