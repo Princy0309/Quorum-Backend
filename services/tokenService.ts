@@ -58,8 +58,8 @@ export const verifyAccessToken = (token: string): AccessTokenPayload => {
   return decoded as AccessTokenPayload;
 };
 
-export const generateRefreshToken = (userId: string): string => {
-  return jwt.sign({ id: userId, type: 'refresh', jti: crypto.randomUUID() }, JWT_REFRESH_SECRET, {
+export const generateRefreshToken = (userId: string, rememberMe: boolean = true): string => {
+  return jwt.sign({ id: userId, type: 'refresh', jti: crypto.randomUUID(), rem: rememberMe }, JWT_REFRESH_SECRET, {
     algorithm: 'HS256',
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
@@ -135,9 +135,13 @@ export const deleteSessionFromRedis = async (familyId: string, userId: string) =
   }
 };
 
-export const issueTokens = async (user: { id: string }, req?: any): Promise<{ accessToken: string; refreshToken: string }> => {
+export const issueTokens = async (
+  user: { id: string },
+  req?: any,
+  rememberMe: boolean = true
+): Promise<{ accessToken: string; refreshToken: string; rememberMe: boolean }> => {
   const device = req?.headers?.['user-agent']?.slice(0, 200) || 'unknown';
-  const refreshToken = generateRefreshToken(user.id);
+  const refreshToken = generateRefreshToken(user.id, rememberMe);
   const tokenHash = hashToken(refreshToken);
   
   const familyId = crypto.randomUUID();
@@ -157,7 +161,7 @@ export const issueTokens = async (user: { id: string }, req?: any): Promise<{ ac
     throw err;
   }
 
-  return { accessToken, refreshToken };
+  return { accessToken, refreshToken, rememberMe };
 };
 
 const performReuseRevocation = async (storedToken: any) => {
@@ -177,12 +181,15 @@ const performReuseRevocation = async (storedToken: any) => {
   }
 };
 
-export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{ accessToken: string; refreshToken: string }> => {
+export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{ accessToken: string; refreshToken: string; rememberMe: boolean }> => {
+  let decoded: RefreshTokenPayload;
   try {
-    verifyRefreshToken(rawToken);
+    decoded = verifyRefreshToken(rawToken);
   } catch (err) {
     throw new ApiError(401, 'Invalid or expired refresh token');
   }
+
+  const rememberMe = Boolean(decoded.rem ?? true);
 
   const tokenHash = hashToken(rawToken);
 
@@ -207,7 +214,7 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
     ) {
       try {
         const parsed = decryptPayload(rawToken, storedToken.rotationCache);
-        return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
+        return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken, rememberMe };
       } catch (e) {
         throw new ApiError(401, 'Invalid or expired refresh token');
       }
@@ -229,7 +236,7 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
       }
 
       const device = req?.headers?.['user-agent']?.slice(0, 200) || storedToken.device;
-      const refreshToken = generateRefreshToken(storedToken.userId);
+      const refreshToken = generateRefreshToken(storedToken.userId, rememberMe);
       const newTokenHash = hashToken(refreshToken);
       const accessToken = generateAccessToken(storedToken.userId, storedToken.familyId);
       const expiresAt = new Date(Date.now() + REFRESH_TTL_SECONDS * 1000);
@@ -275,7 +282,7 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
         ) {
           try {
             const parsed = decryptPayload(rawToken, updatedOldToken.rotationCache);
-            return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
+            return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken, rememberMe };
           } catch (e) {
             throw new ApiError(401, 'Invalid or expired refresh token');
           }
@@ -292,7 +299,7 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
     console.error('Failed to update Redis during rotation. DB transaction succeeded.', err);
   }
 
-  return { accessToken: result.accessToken, refreshToken: result.refreshToken };
+  return { accessToken: result.accessToken, refreshToken: result.refreshToken, rememberMe };
 };
 
 export const revokeAccessToken = async (accessToken: string): Promise<void> => {

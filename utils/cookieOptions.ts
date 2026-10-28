@@ -28,20 +28,41 @@ const getCookieDomain = (): string | undefined => {
 
 const cookieDomain = getCookieDomain();
 
-export const accessCookieOptions: CookieOptions = {
-  httpOnly: true,
-  secure: isProduction,
-  sameSite: isProduction ? 'none' : 'lax',
-  maxAge: 15 * 60 * 1000,
-  path: '/',
-  ...(cookieDomain ? { domain: cookieDomain } : {}),
+export const getAccessCookieOptions = (rememberMe: boolean = true): CookieOptions => {
+  const options: CookieOptions = {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
+    path: '/',
+    ...(cookieDomain ? { domain: cookieDomain } : {}),
+  };
+  if (rememberMe) {
+    options.maxAge = 15 * 60 * 1000;
+  }
+  return options;
 };
 
-export const refreshCookieOptions: CookieOptions = {
+export const getRefreshCookieOptions = (rememberMe: boolean = true): CookieOptions => {
+  const options: CookieOptions = {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
+    path: '/',
+    ...(cookieDomain ? { domain: cookieDomain } : {}),
+  };
+  if (rememberMe) {
+    options.maxAge = env.REFRESH_TOKEN_TTL_SECONDS * 1000;
+  }
+  return options;
+};
+
+export const accessCookieOptions: CookieOptions = getAccessCookieOptions(true);
+export const refreshCookieOptions: CookieOptions = getRefreshCookieOptions(true);
+
+export const clearCookieOptions: CookieOptions = {
   httpOnly: true,
   secure: isProduction,
   sameSite: isProduction ? 'none' : 'lax',
-  maxAge: env.REFRESH_TOKEN_TTL_SECONDS * 1000,
   path: '/',
   ...(cookieDomain ? { domain: cookieDomain } : {}),
 };
@@ -54,4 +75,11 @@ export const csrfCookieOptions: CookieOptions = {
   ...(cookieDomain ? { domain: cookieDomain } : {}),
 };
 
-export default { accessCookieOptions, refreshCookieOptions, csrfCookieOptions };
+export default {
+  accessCookieOptions,
+  refreshCookieOptions,
+  getAccessCookieOptions,
+  getRefreshCookieOptions,
+  clearCookieOptions,
+  csrfCookieOptions
+};

@@ -82,7 +82,7 @@ export const registerUser = async (name: string, email: string, passwordUnHashed
   return { user, isNew: true, isVerified: false };
 };
 
-export const loginUser = async (email: string, password: string, ip: string, req: Request) => {
+export const loginUser = async (email: string, password: string, ip: string, req: Request, rememberMe: boolean = false) => {
   const user = await prisma.user.findUnique({ where: { email } });
   
   let isMatch = false;
@@ -116,7 +116,7 @@ export const loginUser = async (email: string, password: string, ip: string, req
     },
   });
 
-  const tokens = await issueTokens(user, req);
+  const tokens = await issueTokens(user, req, rememberMe);
 
   return { user, ...tokens };
 };
