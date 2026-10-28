@@ -6,7 +6,14 @@ dotenv.config();
 const envSchema = z.object({
   PORT: z.coerce.number().default(5000),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  DATABASE_URL: z.string(),
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required in environment configuration').refine((url) => {
+    if (process.env.NODE_ENV === 'production') {
+      return !url.includes('sslmode=disable');
+    }
+    return true;
+  }, {
+    message: 'DATABASE_URL in production must enforce SSL encryption and cannot use sslmode=disable',
+  }),
 
   JWT_SECRET: z.string(),
   JWT_REFRESH_SECRET: z.string(),
