@@ -27,21 +27,26 @@ export const createWhiteboardSchema = z.object({
     .trim()
     .min(1, 'Board name is required')
     .max(100, 'Board name cannot exceed 100 characters'),
-  organizationId: z
-    .string()
-    .trim()
-    .uuid('Valid organizationId is required'),
+  organizationId: z.preprocess(
+    (val) => (typeof val === 'string' && (val.trim() === '' || val === 'null' || val === 'undefined') ? undefined : val),
+    z.string().trim().uuid('Valid organizationId is required').optional()
+  ),
   content: whiteboardContentSchema.optional(),
-  meetingId: z.string().trim().uuid('Invalid meeting ID').optional().nullable(),
+  meetingId: z.preprocess(
+    (val) => (typeof val === 'string' && (val.trim() === '' || val === 'null' || val === 'undefined') ? undefined : val),
+    z.string().trim().uuid('Invalid meeting ID').optional().nullable()
+  ),
 });
 
 export const getWhiteboardsQuerySchema = z.object({
-  organizationId: z
-    .string()
-    .trim()
-    .uuid('Valid organizationId is required')
-    .optional(),
-  search: z.string().trim().max(100).optional(),
+  organizationId: z.preprocess(
+    (val) => (typeof val === 'string' && (val.trim() === '' || val === 'null' || val === 'undefined') ? undefined : val),
+    z.string().trim().uuid('Valid organizationId is required').optional()
+  ),
+  search: z.preprocess(
+    (val) => (typeof val === 'string' && val.trim() === '' ? undefined : val),
+    z.string().trim().max(100).optional()
+  ),
   page: z.coerce.number().int().min(1).optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
 });
@@ -62,11 +67,10 @@ export const createMeetingWhiteboardSchema = z.object({
     .trim()
     .min(1, 'Board name is required')
     .max(100, 'Board name cannot exceed 100 characters'),
-  organizationId: z
-    .string()
-    .trim()
-    .uuid('Valid organizationId is required')
-    .optional(),
+  organizationId: z.preprocess(
+    (val) => (typeof val === 'string' && (val.trim() === '' || val === 'null' || val === 'undefined') ? undefined : val),
+    z.string().trim().uuid('Valid organizationId is required').optional()
+  ),
   content: whiteboardContentSchema.optional(),
 });
 

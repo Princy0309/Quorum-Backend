@@ -9,6 +9,7 @@ import redis from './config/redis.js';
 import { initSocketServer } from './sockets/socketServer.js';
 import { startAiHistoryCleanupTask } from './services/aiHistoryService.js';
 import { reminderWorker, reminderRedisConnection } from './queues/reminderQueue.js';
+import { ensureWhiteboardSchema } from './services/whiteboardService.js';
 
 
 let server: any;
@@ -39,6 +40,12 @@ const startServer = async (): Promise<void> => {
 
   if (!isConnected) {
     process.exit(1);
+  }
+
+  try {
+    await ensureWhiteboardSchema();
+  } catch (err) {
+    console.warn('Whiteboard schema initialization warning:', err);
   }
 
   const httpServer = createServer(app);

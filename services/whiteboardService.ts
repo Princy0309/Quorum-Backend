@@ -10,11 +10,132 @@ import {
   coordinatedUpdateWhiteboard,
   cleanupWhiteboardSession,
 } from '../sockets/handlers/whiteboardHandler.js';
+import logger from '../utils/logger.js';
 
 export interface OrgPermissionResult {
   role: OrgRole;
   isOwner: boolean;
 }
+
+let isSchemaEnsured = false;
+
+export const ensureWhiteboardSchema = async (): Promise<void> => {
+  if (isSchemaEnsured) {
+    return;
+  }
+
+  const ddlStatements = [
+    `DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'Meeting' AND column_name = 'organizationId'
+        ) THEN
+            ALTER TABLE "Meeting" ADD COLUMN "organizationId" TEXT;
+        END IF;
+    END $$;`,
+
+    `CREATE INDEX IF NOT EXISTS "Meeting_organizationId_idx" ON "Meeting"("organizationId");`,
+
+    `DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'Meeting_organizationId_fkey'
+        ) THEN
+            ALTER TABLE "Meeting" ADD CONSTRAINT "Meeting_organizationId_fkey" 
+                FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+
+    `CREATE TABLE IF NOT EXISTS "Whiteboard" (
+        "id" TEXT NOT NULL,
+        "organizationId" TEXT NOT NULL,
+        "name" TEXT NOT NULL,
+        "content" JSONB NOT NULL DEFAULT '{"elements":[],"viewState":{}}'::jsonb,
+        "createdById" TEXT NOT NULL,
+        "meetingId" TEXT,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Whiteboard_pkey" PRIMARY KEY ("id")
+    );`,
+
+    `CREATE INDEX IF NOT EXISTS "Whiteboard_organizationId_idx" ON "Whiteboard"("organizationId");`,
+    `CREATE INDEX IF NOT EXISTS "Whiteboard_createdById_idx" ON "Whiteboard"("createdById");`,
+    `CREATE INDEX IF NOT EXISTS "Whiteboard_meetingId_idx" ON "Whiteboard"("meetingId");`,
+
+    `DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'Whiteboard_organizationId_fkey'
+        ) THEN
+            ALTER TABLE "Whiteboard" ADD CONSTRAINT "Whiteboard_organizationId_fkey" 
+                FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+
+    `DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'Whiteboard_createdById_fkey'
+        ) THEN
+            ALTER TABLE "Whiteboard" ADD CONSTRAINT "Whiteboard_createdById_fkey" 
+                FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+
+    `DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'Whiteboard_meetingId_fkey'
+        ) THEN
+            ALTER TABLE "Whiteboard" ADD CONSTRAINT "Whiteboard_meetingId_fkey" 
+                FOREIGN KEY ("meetingId") REFERENCES "Meeting"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+
+    `CREATE TABLE IF NOT EXISTS "WhiteboardMeeting" (
+        "id" TEXT NOT NULL,
+        "whiteboardId" TEXT NOT NULL,
+        "meetingId" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "WhiteboardMeeting_pkey" PRIMARY KEY ("id")
+    );`,
+
+    `CREATE UNIQUE INDEX IF NOT EXISTS "WhiteboardMeeting_whiteboardId_meetingId_key" ON "WhiteboardMeeting"("whiteboardId", "meetingId");`,
+    `CREATE INDEX IF NOT EXISTS "WhiteboardMeeting_whiteboardId_idx" ON "WhiteboardMeeting"("whiteboardId");`,
+    `CREATE INDEX IF NOT EXISTS "WhiteboardMeeting_meetingId_idx" ON "WhiteboardMeeting"("meetingId");`,
+
+    `DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'WhiteboardMeeting_whiteboardId_fkey'
+        ) THEN
+            ALTER TABLE "WhiteboardMeeting" ADD CONSTRAINT "WhiteboardMeeting_whiteboardId_fkey" 
+                FOREIGN KEY ("whiteboardId") REFERENCES "Whiteboard"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+
+    `DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'WhiteboardMeeting_meetingId_fkey'
+        ) THEN
+            ALTER TABLE "WhiteboardMeeting" ADD CONSTRAINT "WhiteboardMeeting_meetingId_fkey" 
+                FOREIGN KEY ("meetingId") REFERENCES "Meeting"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+  ];
+
+  for (const query of ddlStatements) {
+    try {
+      await prisma.$executeRawUnsafe(query);
+    } catch (e: any) {
+      logger.warn(`Schema self-healing warning: ${e?.message}`);
+    }
+  }
+
+  isSchemaEnsured = true;
+};
 
 export const assertUserBelongsToOrganization = async (
   userId: string,
@@ -54,7 +175,51 @@ export const createWhiteboard = async (
   userId: string,
   input: CreateWhiteboardInput
 ) => {
-  await assertUserBelongsToOrganization(userId, input.organizationId);
+  let targetOrgId = input.organizationId;
+  if (!targetOrgId) {
+    const userMembership = await prisma.organizationMember.findFirst({
+      where: { userId },
+      select: { organizationId: true },
+      orderBy: { joinedAt: 'desc' },
+    });
+    if (userMembership) {
+      targetOrgId = userMembership.organizationId;
+    } else {
+      const ownedOrg = await prisma.organization.findFirst({
+        where: { ownerId: userId },
+        select: { id: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (ownedOrg) {
+        targetOrgId = ownedOrg.id;
+      }
+    }
+  }
+
+  if (!targetOrgId) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true },
+    });
+    const orgName = user?.name ? `${user.name}'s Workspace` : 'Personal Workspace';
+    const slug = `workspace-${userId.slice(0, 8)}-${Date.now()}`;
+    const newOrg = await prisma.organization.create({
+      data: {
+        name: orgName,
+        slug,
+        ownerId: userId,
+        members: {
+          create: {
+            userId,
+            role: OrgRole.ORG_ADMIN,
+          },
+        },
+      },
+    });
+    targetOrgId = newOrg.id;
+  }
+
+  await assertUserBelongsToOrganization(userId, targetOrgId);
 
   const targetMeetingId = input.meetingId;
   if (targetMeetingId) {
@@ -74,7 +239,7 @@ export const createWhiteboard = async (
 
     await assertUserCanAccessMeeting(userId, meeting);
 
-    if (meeting.organizationId && meeting.organizationId !== input.organizationId) {
+    if (meeting.organizationId && meeting.organizationId !== targetOrgId) {
       throw new ApiError(400, 'Meeting and whiteboard must belong to the same organization');
     }
 
@@ -101,63 +266,70 @@ export const createWhiteboard = async (
 
     const initialContent = (input.content ?? defaultContent) as Prisma.InputJsonValue;
 
-    const whiteboard = await prisma.$transaction(async (tx) => {
-      if (shouldUpdateMeetingOrg) {
-        await tx.meeting.update({
-          where: { id: meeting.id },
-          data: { organizationId: input.organizationId },
-        });
-      }
+    const executeCreateWithMeeting = async () => {
+      return prisma.$transaction(async (tx) => {
+        if (shouldUpdateMeetingOrg) {
+          await tx.meeting.update({
+            where: { id: meeting.id },
+            data: { organizationId: targetOrgId },
+          });
+        }
 
-      const createdBoard = await tx.whiteboard.create({
-        data: {
-          name: input.name,
-          organizationId: input.organizationId,
-          createdById: userId,
-          meetingId: targetMeetingId,
-          content: initialContent,
-          meetings: {
-            create: {
+        const createdBoard = await tx.whiteboard.create({
+          data: {
+            name: input.name,
+            organizationId: targetOrgId!,
+            createdById: userId,
+            meetingId: targetMeetingId,
+            content: initialContent,
+            meetings: {
+              create: {
+                meetingId: targetMeetingId,
+              },
+            },
+          },
+          include: {
+            createdBy: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                avatar: true,
+              },
+            },
+            organization: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+              },
+            },
+          },
+        });
+
+        const link = await tx.whiteboardMeeting.findUnique({
+          where: {
+            whiteboardId_meetingId: {
+              whiteboardId: createdBoard.id,
               meetingId: targetMeetingId,
             },
           },
-        },
-        include: {
-          createdBy: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              avatar: true,
-            },
-          },
-          organization: {
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-            },
-          },
-        },
+        });
+
+        if (!link) {
+          throw new ApiError(500, 'Failed to link whiteboard to meeting');
+        }
+
+        return createdBoard;
       });
+    };
 
-      const link = await tx.whiteboardMeeting.findUnique({
-        where: {
-          whiteboardId_meetingId: {
-            whiteboardId: createdBoard.id,
-            meetingId: targetMeetingId,
-          },
-        },
-      });
-
-      if (!link) {
-        throw new ApiError(500, 'Failed to link whiteboard to meeting');
-      }
-
-      return createdBoard;
-    });
-
-    return whiteboard;
+    try {
+      return await executeCreateWithMeeting();
+    } catch (err: any) {
+      await ensureWhiteboardSchema();
+      return await executeCreateWithMeeting();
+    }
   }
 
   const defaultContent: Prisma.InputJsonObject = {
@@ -172,34 +344,41 @@ export const createWhiteboard = async (
 
   const initialContent = (input.content ?? defaultContent) as Prisma.InputJsonValue;
 
-  const whiteboard = await prisma.whiteboard.create({
-    data: {
-      name: input.name,
-      organizationId: input.organizationId,
-      createdById: userId,
-      meetingId: null,
-      content: initialContent,
-    },
-    include: {
-      createdBy: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          avatar: true,
+  const executeCreateSolo = async () => {
+    return prisma.whiteboard.create({
+      data: {
+        name: input.name,
+        organizationId: targetOrgId!,
+        createdById: userId,
+        meetingId: null,
+        content: initialContent,
+      },
+      include: {
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            avatar: true,
+          },
+        },
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
         },
       },
-      organization: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-        },
-      },
-    },
-  });
+    });
+  };
 
-  return whiteboard;
+  try {
+    return await executeCreateSolo();
+  } catch (err: any) {
+    await ensureWhiteboardSchema();
+    return await executeCreateSolo();
+  }
 };
 
 export const getOrganizationWhiteboards = async (
@@ -242,7 +421,42 @@ export const getOrganizationWhiteboards = async (
     };
   }
 
-  await assertUserBelongsToOrganization(userId, targetOrgId);
+  try {
+    await assertUserBelongsToOrganization(userId, targetOrgId);
+  } catch (err: any) {
+    if (query.organizationId) {
+      const userMembership = await prisma.organizationMember.findFirst({
+        where: { userId },
+        select: { organizationId: true },
+        orderBy: { joinedAt: 'desc' },
+      });
+      if (userMembership) {
+        targetOrgId = userMembership.organizationId;
+      } else {
+        return {
+          whiteboards: [],
+          pagination: {
+            total: 0,
+            page: query.page ?? 1,
+            limit: query.limit ?? 20,
+            totalPages: 0,
+            hasMore: false,
+          },
+        };
+      }
+    } else {
+      return {
+        whiteboards: [],
+        pagination: {
+          total: 0,
+          page: query.page ?? 1,
+          limit: query.limit ?? 20,
+          totalPages: 0,
+          hasMore: false,
+        },
+      };
+    }
+  }
 
   const page = query.page ?? 1;
   const limit = query.limit ?? 20;
@@ -260,14 +474,112 @@ export const getOrganizationWhiteboards = async (
       : {}),
   };
 
-  const [total, whiteboards] = await Promise.all([
-    prisma.whiteboard.count({ where }),
-    prisma.whiteboard.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: { updatedAt: 'desc' },
+  try {
+    const [total, whiteboards] = await Promise.all([
+      prisma.whiteboard.count({ where }),
+      prisma.whiteboard.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { updatedAt: 'desc' },
+        include: {
+          createdBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              avatar: true,
+            },
+          },
+          meetings: {
+            select: {
+              meetingId: true,
+              createdAt: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      whiteboards,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        hasMore: page * limit < total,
+      },
+    };
+  } catch (err: any) {
+    logger.warn(`Failed to query whiteboards, executing schema ensure: ${err?.message}`);
+    await ensureWhiteboardSchema();
+    try {
+      const [total, whiteboards] = await Promise.all([
+        prisma.whiteboard.count({ where }),
+        prisma.whiteboard.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { updatedAt: 'desc' },
+          include: {
+            createdBy: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                avatar: true,
+              },
+            },
+            meetings: {
+              select: {
+                meetingId: true,
+                createdAt: true,
+              },
+            },
+          },
+        }),
+      ]);
+
+      return {
+        whiteboards,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+          hasMore: page * limit < total,
+        },
+      };
+    } catch (retryErr: any) {
+      logger.error('Error fetching whiteboards after schema ensure', { error: retryErr?.message });
+      return {
+        whiteboards: [],
+        pagination: {
+          total: 0,
+          page,
+          limit,
+          totalPages: 0,
+          hasMore: false,
+        },
+      };
+    }
+  }
+};
+
+export const getWhiteboardById = async (userId: string, whiteboardId: string) => {
+  const queryBoard = async () => {
+    return prisma.whiteboard.findUnique({
+      where: { id: whiteboardId },
       include: {
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            ownerId: true,
+          },
+        },
         createdBy: {
           select: {
             id: true,
@@ -277,60 +589,27 @@ export const getOrganizationWhiteboards = async (
           },
         },
         meetings: {
-          select: {
-            meetingId: true,
-            createdAt: true,
-          },
-        },
-      },
-    }),
-  ]);
-
-  return {
-    whiteboards,
-    pagination: {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-      hasMore: page * limit < total,
-    },
-  };
-};
-
-export const getWhiteboardById = async (userId: string, whiteboardId: string) => {
-  const whiteboard = await prisma.whiteboard.findUnique({
-    where: { id: whiteboardId },
-    include: {
-      organization: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          ownerId: true,
-        },
-      },
-      createdBy: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          avatar: true,
-        },
-      },
-      meetings: {
-        include: {
-          meeting: {
-            select: {
-              id: true,
-              code: true,
-              status: true,
+          include: {
+            meeting: {
+              select: {
+                id: true,
+                code: true,
+                status: true,
+              },
             },
           },
         },
       },
-    },
-  });
+    });
+  };
+
+  let whiteboard;
+  try {
+    whiteboard = await queryBoard();
+  } catch (err: any) {
+    await ensureWhiteboardSchema();
+    whiteboard = await queryBoard();
+  }
 
   if (!whiteboard) {
     throw new ApiError(404, 'Whiteboard not found');
@@ -560,33 +839,49 @@ export const getMeetingWhiteboards = async (
   const meeting = await findMeetingByCodeOrId(meetingCodeOrId);
   await assertUserCanAccessMeeting(userId, meeting);
 
-  const whiteboards = await prisma.whiteboard.findMany({
-    where: {
-      meetings: {
-        some: {
-          meetingId: meeting.id,
+  const queryMeetingBoards = async () => {
+    return prisma.whiteboard.findMany({
+      where: {
+        meetings: {
+          some: {
+            meetingId: meeting.id,
+          },
         },
       },
-    },
-    orderBy: { updatedAt: 'desc' },
-    include: {
-      createdBy: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          avatar: true,
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            avatar: true,
+          },
+        },
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
         },
       },
-      organization: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-        },
-      },
-    },
-  });
+    });
+  };
+
+  let whiteboards: any[] = [];
+  try {
+    whiteboards = await queryMeetingBoards();
+  } catch (err: any) {
+    logger.warn(`Failed to query meeting whiteboards, executing schema ensure: ${err?.message}`);
+    await ensureWhiteboardSchema();
+    try {
+      whiteboards = await queryMeetingBoards();
+    } catch (retryErr: any) {
+      logger.error('Error fetching meeting whiteboards after schema ensure', { error: retryErr?.message });
+      whiteboards = [];
+    }
+  }
 
   return {
     meeting: {
