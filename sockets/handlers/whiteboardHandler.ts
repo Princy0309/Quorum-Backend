@@ -988,7 +988,7 @@ export const registerWhiteboardHandler = (io: Server, socket: Socket) => {
   const CURSOR_THROTTLE_MS = 40;
 
   const getUserId = (): string | null => {
-    return socket.data.user?.id || null;
+    return (socket.data.user?.isAuthenticated && socket.data.user?.id) || null;
   };
 
   const getUserName = (): string => {

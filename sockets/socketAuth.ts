@@ -67,7 +67,10 @@ export const socketAuthMiddleware = async (socket: Socket, next: (err?: Error) =
     }
 
     const { passwordHash, ...safeUser } = user;
-    socket.data.user = safeUser;
+    socket.data.user = {
+      ...safeUser,
+      isAuthenticated: true
+    };
     socket.data.tokenPayload = decoded;
 
     next();

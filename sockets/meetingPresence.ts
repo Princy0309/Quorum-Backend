@@ -145,7 +145,7 @@ export const handleJoinMeeting = async (
     ack?: (res: SocketAckResponse) => void
 ) => {
     const user = socket.data.user;
-    if (!user || !user.id) {
+    if (!user || !user.id || !user.isAuthenticated) {
         const errorPayload = { code: 'UNAUTHORIZED', message: 'Authentication required' };
         socket.emit('meeting:error', errorPayload);
         ack?.({ success: false, ...errorPayload });
@@ -299,7 +299,7 @@ export const handleLeaveMeeting = (
     ack?: (res: SocketAckResponse) => void
 ) => {
     const user = socket.data.user;
-    if (!user || !user.id) {
+    if (!user || !user.id || !user.isAuthenticated) {
         ack?.({ success: false, code: 'UNAUTHORIZED', message: 'Authentication required' });
         return;
     }
@@ -400,7 +400,7 @@ export const handleEndMeeting = async (
     ack?: (res: SocketAckResponse) => void
 ) => {
     const user = socket.data.user;
-    if (!user || !user.id) {
+    if (!user || !user.id || !user.isAuthenticated) {
         const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
         socket.emit('meeting:error', err);
         ack?.({ success: false, ...err });

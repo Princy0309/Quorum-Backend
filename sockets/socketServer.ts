@@ -6,10 +6,12 @@ import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.j
 import logger from '../utils/logger.js';
 import { verifyAccessToken } from '../services/tokenService.js';
 import prisma from '../config/prisma.js';
+import redis from '../config/redis.js';
 import { isOriginAllowed } from '../config/env.js';
 import { registerMessageHandler } from './handlers/messageHandler.js';
 import { registerTypingHandler } from './handlers/typingHandler.js';
 import { registerPresenceHandler } from './handlers/presenceHandler.js';
+import { registerCommunityHandler } from './handlers/communityHandler.js';
 import { registerWhiteboardHandler } from './handlers/whiteboardHandler.js';
 
 let ioInstance: Server | null = null;
@@ -38,16 +40,14 @@ export const initSocketServer = (httpServer: any) => {
   ioInstance = io;
 
   io.use(async (socket, next) => {
-    const auth = socket.handshake.auth || {};
-    const query = socket.handshake.query || {};
-    let userId: string | null = (typeof auth.userId === 'string' && auth.userId.trim()) || (typeof query.userId === 'string' && query.userId.trim()) || null;
-    let name: string = auth.name || (typeof query.name === 'string' ? query.name : '') || 'Participant';
-
     const parseCookieToken = (cookieHeader?: string): string | null => {
       if (!cookieHeader) return null;
       const match = cookieHeader.match(/(?:^|;\s*)accessToken=([^;]+)/);
       return match ? decodeURIComponent(match[1]) : null;
     };
+
+    const auth = socket.handshake.auth || {};
+    const query = socket.handshake.query || {};
 
     let rawToken = auth.token ||
       (typeof socket.handshake.headers.authorization === 'string' ? socket.handshake.headers.authorization : '') ||
@@ -56,40 +56,66 @@ export const initSocketServer = (httpServer: any) => {
 
     let token = typeof rawToken === 'string' ? rawToken.replace(/^Bearer\s+/i, '').trim() : '';
 
-    if (token) {
+    if (!token) {
+      return next(new Error('Authentication error: Access token required'));
+    }
+
+    let decoded: any;
+    try {
+      decoded = verifyAccessToken(token);
+    } catch (err: any) {
+      return next(new Error('Authentication error: Invalid or expired token'));
+    }
+
+    if (!decoded || !decoded.id) {
+      return next(new Error('Authentication error: Invalid token payload'));
+    }
+
+    if (decoded.jti) {
       try {
-        const decoded = verifyAccessToken(token);
-        if (decoded?.id) {
-          userId = decoded.id;
+        const isRevoked = await redis.exists(`revoked_access:${decoded.jti}`);
+        if (isRevoked) {
+          return next(new Error('Authentication error: Token revoked'));
         }
       } catch (err: any) {
-        logger.warn(`[Socket Auth] Token verification failed for socket ${socket.id}: ${err.message}`);
-        return next(new Error('Authentication error: jwt expired'));
+        logger.warn(`[Socket Auth] Redis revocation check failed: ${err.message}`);
       }
     }
 
-    if (userId && (!name || name === 'Participant')) {
-      try {
-        const dbUser = await prisma.user.findUnique({
-          where: { id: userId },
-          select: { name: true },
-        });
-        if (dbUser?.name) {
-          name = dbUser.name;
-        }
-      } catch (err: any) {
-        logger.warn(`[Socket Auth] Could not fetch user name for ${userId}: ${err.message}`);
+    try {
+      const dbUser = await prisma.user.findUnique({
+        where: { id: decoded.id },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          lockedUntil: true,
+        },
+      });
+
+      if (!dbUser) {
+        return next(new Error('Authentication error: User not found'));
       }
+
+      if (dbUser.lockedUntil && dbUser.lockedUntil > new Date()) {
+        return next(new Error('Authentication error: Account is temporarily locked'));
+      }
+
+      socket.data.user = {
+        id: dbUser.id,
+        name: dbUser.name || 'User',
+        email: dbUser.email,
+        role: dbUser.role,
+        isAuthenticated: true,
+      };
+      socket.data.tokenPayload = decoded;
+
+      next();
+    } catch (err: any) {
+      logger.error(`[Socket Auth] Database error verifying user ${decoded.id}: ${err.message}`);
+      return next(new Error('Authentication error: Internal server error'));
     }
-
-    socket.data.user = {
-      id: String(userId || socket.id),
-      name: String(name),
-      isAuthenticated: !!userId,
-    };
-
-    logger.info(`[Socket Auth] Client ${socket.id} resolved: userId=${socket.data.user.id}, name=${socket.data.user.name}, isAuth=${socket.data.user.isAuthenticated}`);
-    next();
   });
 
   io.on('connection', (socket) => {
@@ -103,6 +129,7 @@ export const initSocketServer = (httpServer: any) => {
     registerMessageHandler(io, socket as any);
     registerTypingHandler(io, socket as any);
     registerPresenceHandler(io, socket as any);
+    registerCommunityHandler(io, socket as any);
     registerWhiteboardHandler(io, socket as any);
 
     const handleDynamicAuth = async (data: { token?: string }, ack?: (res: any) => void) => {
@@ -118,21 +145,30 @@ export const initSocketServer = (httpServer: any) => {
           ack?.({ success: false, message: 'Invalid token payload' });
           return;
         }
+        if (decoded.jti) {
+          const isRevoked = await redis.exists(`revoked_access:${decoded.jti}`);
+          if (isRevoked) {
+            ack?.({ success: false, message: 'Token revoked' });
+            return;
+          }
+        }
         const dbUser = await prisma.user.findUnique({
           where: { id: decoded.id },
-          select: { id: true, name: true }
+          select: { id: true, name: true, email: true, role: true, lockedUntil: true }
         });
-        if (!dbUser) {
-          ack?.({ success: false, message: 'User not found' });
+        if (!dbUser || (dbUser.lockedUntil && dbUser.lockedUntil > new Date())) {
+          ack?.({ success: false, message: 'Unauthorized' });
           return;
         }
         socket.data.user = {
           id: dbUser.id,
           name: dbUser.name || 'User',
+          email: dbUser.email,
+          role: dbUser.role,
           isAuthenticated: true,
         };
+        socket.data.tokenPayload = decoded;
         socket.join(`user:${dbUser.id}`);
-        logger.info(`[Socket Auth] Client ${socket.id} dynamically authenticated as userId=${dbUser.id}`);
         ack?.({ success: true, user: socket.data.user });
       } catch (err: any) {
         ack?.({ success: false, message: err.message });

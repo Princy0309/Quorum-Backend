@@ -20,7 +20,7 @@ export const handleToggleMic = (
   ack?: (res: SocketAckResponse) => void
 ) => {
   const user = socket.data.user;
-  if (!user || !user.id) {
+  if (!user || !user.id || !user.isAuthenticated) {
     const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
@@ -80,7 +80,7 @@ export const handleMuteParticipant = (
   ack?: (res: SocketAckResponse) => void
 ) => {
   const user = socket.data.user;
-  if (!user || !user.id) {
+  if (!user || !user.id || !user.isAuthenticated) {
     const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
@@ -195,7 +195,7 @@ export const handleToggleCam = (
   ack?: (res: SocketAckResponse) => void
 ) => {
   const user = socket.data.user;
-  if (!user || !user.id) {
+  if (!user || !user.id || !user.isAuthenticated) {
     const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
@@ -246,7 +246,7 @@ export const handleSendMeetingMessage = (
   ack?: (res: SocketAckResponse) => void
 ) => {
   const user = socket.data.user;
-  if (!user || !user.id) {
+  if (!user || !user.id || !user.isAuthenticated) {
     const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
     socket.emit('meeting:error', err);
     ack?.({ success: false, ...err });
