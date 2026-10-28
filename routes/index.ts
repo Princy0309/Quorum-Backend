@@ -27,6 +27,7 @@ router.get('/csrf-token', (req: Request, res: Response) => {
 });
 
 router.use('/auth', authRoutes);
+router.use('/v1/auth', authRoutes);
 router.use('/otp', otpRoutes);
 router.use('/user', userRoutes);
 router.use('/users', userRoutes);

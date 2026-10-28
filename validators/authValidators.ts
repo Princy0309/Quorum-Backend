@@ -13,5 +13,6 @@ export const registerSchema = z.object({
 
 export const loginSchema = z.object({
   email: z.string().email().toLowerCase().trim().max(50).regex(/^[\x21-\x7E]+$/, 'only printable ASCII allowed'),
-  password: passwordSchema
+  password: passwordSchema,
+  rememberMe: z.boolean().optional().default(false),
 });

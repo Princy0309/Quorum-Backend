@@ -6,7 +6,13 @@ import { ApiError } from '../utils/ApiError.js';
 import { sendSuccess } from '../utils/ApiResponse.js';
 import { rotateRefreshToken, revokeRefreshToken, revokeAllSessions, revokeAccessToken } from '../services/tokenService.js';
 import { registerUser, loginUser } from '../services/authService.js';
-import { accessCookieOptions, refreshCookieOptions } from '../utils/cookieOptions.js';
+import {
+  accessCookieOptions,
+  refreshCookieOptions,
+  getAccessCookieOptions,
+  getRefreshCookieOptions,
+  clearCookieOptions
+} from '../utils/cookieOptions.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
 export const register = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
@@ -29,10 +35,11 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
 
 
 export const login = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  const { email, password } = req.body;
+  const { email, password, rememberMe = false } = req.body;
   const cleanEmail = email.trim().toLowerCase();
+  const isRememberMe = Boolean(rememberMe);
   
-  const { user, accessToken, refreshToken } = await loginUser(cleanEmail, password, req.ip || '127.0.0.1', req);
+  const { user, accessToken, refreshToken } = await loginUser(cleanEmail, password, req.ip || '127.0.0.1', req, isRememberMe);
 
   const isMobile = req.headers['x-client-platform'] === 'mobile';
 
@@ -44,8 +51,8 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
   if (isMobile) {
     responseData.refreshToken = refreshToken;
   } else {
-    res.cookie('accessToken', accessToken, accessCookieOptions);
-    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+    res.cookie('accessToken', accessToken, getAccessCookieOptions(isRememberMe));
+    res.cookie('refreshToken', refreshToken, getRefreshCookieOptions(isRememberMe));
   }
 
   return sendSuccess(res, 200, 'Login successful', responseData);
@@ -58,15 +65,15 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response, nex
   if (!incomingToken) throw new ApiError(401, 'Refresh token required');
 
   try {
-    const { accessToken, refreshToken: newRefreshToken } = await rotateRefreshToken(incomingToken, req);
+    const { accessToken, refreshToken: newRefreshToken, rememberMe } = await rotateRefreshToken(incomingToken, req);
 
     const responseData: any = { accessToken };
 
     if (isMobile) {
       responseData.refreshToken = newRefreshToken;
     } else {
-      res.cookie('accessToken', accessToken, accessCookieOptions);
-      res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
+      res.cookie('accessToken', accessToken, getAccessCookieOptions(rememberMe));
+      res.cookie('refreshToken', newRefreshToken, getRefreshCookieOptions(rememberMe));
     }
 
     return sendSuccess(res, 200, 'Tokens refreshed successfully', responseData);
@@ -93,8 +100,8 @@ export const logout = asyncHandler(async (req: Request, res: Response, next: Nex
   }
 
   if (!isMobile) {
-    res.clearCookie('accessToken', accessCookieOptions);
-    res.clearCookie('refreshToken', refreshCookieOptions);
+    res.clearCookie('accessToken', clearCookieOptions);
+    res.clearCookie('refreshToken', clearCookieOptions);
   }
 
   return sendSuccess(res, 200, 'Logged out successfully');
@@ -110,8 +117,8 @@ export const logoutAll = asyncHandler(async (req: Request, res: Response, next: 
   if (req.user && req.user.id) {
     await revokeAllSessions(req.user.id);
   }
-  res.clearCookie('accessToken', accessCookieOptions);
-  res.clearCookie('refreshToken', refreshCookieOptions);
+  res.clearCookie('accessToken', clearCookieOptions);
+  res.clearCookie('refreshToken', clearCookieOptions);
   return sendSuccess(res, 200, 'Logged out of all sessions successfully');
 });
 

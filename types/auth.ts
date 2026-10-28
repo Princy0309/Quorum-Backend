@@ -13,6 +13,7 @@ export interface RefreshTokenPayload {
   id: string;
   type: 'refresh';
   jti: string;
+  rem?: boolean;
   iat?: number;
   exp?: number;
   iss?: string;
