@@ -13,6 +13,7 @@ import {
 import prisma from '../config/prisma.js';
 import { queueNotification } from '../queues/notificationQueue.js';
 import { getIO } from '../sockets/socketServer.js';
+import { uploadBufferToS3 } from '../services/uploadService.js';
 
 
 const getParam = (param: unknown): string => {
@@ -196,7 +197,31 @@ export const sendTeamMessageController = asyncHandler(
     }
 
     const teamId = getParam(req.params.teamId);
-    const { content, fileUrl, fileType, fileName, fileSize, clientMessageId } = req.body;
+    const body = req.body || {};
+    let content = typeof body.content === 'string' ? body.content.trim() : (body.content || '');
+    let fileUrl = body.fileUrl || null;
+    let fileType = body.fileType || null;
+    let fileName = body.fileName || null;
+    let fileSize = body.fileSize ? Number(body.fileSize) : null;
+    const clientMessageId = body.clientMessageId;
+
+    const files = (req.files && Array.isArray(req.files) && req.files.length > 0)
+      ? (req.files as Express.Multer.File[])
+      : ((req as any).file ? [(req as any).file as Express.Multer.File] : []);
+
+    if (files.length > 0) {
+      const uploadedFile = files[0];
+      const uploadResult = await uploadBufferToS3(
+        uploadedFile.buffer,
+        uploadedFile.originalname || 'attachment',
+        'chat',
+        uploadedFile.mimetype
+      );
+      fileUrl = uploadResult.publicUrl;
+      fileName = uploadResult.cleanName;
+      fileSize = uploadResult.fileSize;
+      fileType = uploadResult.category;
+    }
 
     if (!content && !fileUrl) {
       return next(new ApiError(400, 'Message content or file attachment is required'));
