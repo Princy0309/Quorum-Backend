@@ -2,9 +2,9 @@ import crypto from 'crypto';
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import { env } from '../config/env.js';
-import { MeetingStatus } from '@prisma/client';
+import { MeetingScopeType, MeetingStatus } from '@prisma/client';
 import { closeMeetingRoom } from '../sockets/meetingPresence.js';
-
+import { canUserCreateMeeting, canUserJoinMeeting } from './meetingPermissionService.js';
 
 const generateCode = (): string => {
   const letters = 'abcdefghijklmnopqrstuvwxyz';
@@ -60,11 +60,90 @@ export const createMeeting = async (hostId: string, organizationId?: string) => 
   };
 };
 
-export const getMeeting = async (code: string) => {
+export interface CreateScopedMeetingInput {
+  title?: string;
+  scopeType?: MeetingScopeType;
+  organizationId?: string;
+  teamId?: string;
+  scheduledStartTime?: Date | string;
+}
+
+export const createScopedMeeting = async (
+  hostId: string,
+  input: CreateScopedMeetingInput
+) => {
+  const scopeType = input.scopeType || MeetingScopeType.PERSONAL;
+
+  const permCheck = await canUserCreateMeeting(hostId, {
+    scopeType,
+    organizationId: input.organizationId,
+    teamId: input.teamId,
+    scheduledStartTime: input.scheduledStartTime,
+  });
+
+  if (!permCheck.allowed) {
+    throw new ApiError(permCheck.statusCode || 403, permCheck.reason || 'Permission denied');
+  }
+
+  let code: string;
+  do {
+    code = generateCode();
+  } while (await prisma.meeting.findUnique({ where: { code } }));
+
+  const scheduledDate = input.scheduledStartTime
+    ? new Date(input.scheduledStartTime)
+    : null;
+
+  const isFutureScheduled = scheduledDate && scheduledDate.getTime() > Date.now();
+  const status = isFutureScheduled ? MeetingStatus.SCHEDULED : MeetingStatus.ACTIVE;
+
+  const meeting = await prisma.meeting.create({
+    data: {
+      code,
+      title: input.title?.trim() || null,
+      hostId,
+      scopeType,
+      organizationId: input.organizationId || null,
+      teamId: input.teamId || null,
+      scheduledStartTime: scheduledDate,
+      waitingRoom: true,
+      status,
+      admitted: [hostId],
+    },
+    include: {
+      organization: { select: { id: true, name: true, slug: true } },
+      team: { select: { id: true, name: true } },
+    },
+  });
+
+  return {
+    code: meeting.code,
+    title: meeting.title,
+    scopeType: meeting.scopeType,
+    status: meeting.status,
+    scheduledStartTime: meeting.scheduledStartTime,
+    organizationId: meeting.organizationId,
+    organization: meeting.organization,
+    teamId: meeting.teamId,
+    team: meeting.team,
+    link: `${env.CLIENT_URL}/meet/${meeting.code}`,
+  };
+};
+
+export const getMeeting = async (code: string, userId?: string) => {
+  if (userId) {
+    const permCheck = await canUserJoinMeeting(userId, code);
+    if (!permCheck.allowed) {
+      throw new ApiError(permCheck.statusCode || 403, permCheck.reason || 'Access denied');
+    }
+  }
+
   const meeting = await prisma.meeting.findFirst({
     where: {
       code,
-      status: MeetingStatus.ACTIVE,
+      status: {
+        in: [MeetingStatus.ACTIVE, MeetingStatus.SCHEDULED],
+      },
     },
     include: {
       host: {
@@ -81,6 +160,12 @@ export const getMeeting = async (code: string) => {
           slug: true,
         },
       },
+      team: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
     },
   });
 
@@ -90,11 +175,17 @@ export const getMeeting = async (code: string) => {
 
   return {
     code: meeting.code,
+    title: meeting.title,
+    scopeType: meeting.scopeType,
+    status: meeting.status,
+    scheduledStartTime: meeting.scheduledStartTime,
     waitingRoom: meeting.waitingRoom,
     hostId: meeting.hostId,
     host: meeting.host,
     organizationId: meeting.organizationId,
     organization: meeting.organization,
+    teamId: meeting.teamId,
+    team: meeting.team,
   };
 };
 

@@ -3,6 +3,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import {
   createMeeting,
+  createScopedMeeting,
   getMeeting,
   endMeeting,
 } from '../services/meetingService.js';
@@ -23,6 +24,22 @@ export const createMeetingController = asyncHandler(
   }
 );
 
+export const createScopedMeetingController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id) {
+      return next(new ApiError(401, 'Unauthorized, login required'));
+    }
+
+    const meeting = await createScopedMeeting(req.user.id, req.body);
+
+    return res.status(201).json({
+      success: true,
+      data: meeting,
+    });
+  }
+);
+
+
 export const getMeetingController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const code = req.params.code as string;
@@ -31,7 +48,7 @@ export const getMeetingController = asyncHandler(
       return next(new ApiError(400, 'Meeting code is required'));
     }
 
-    const meeting = await getMeeting(code);
+    const meeting = await getMeeting(code, req.user?.id);
 
     return res.status(200).json({
       success: true,
