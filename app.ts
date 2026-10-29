@@ -51,6 +51,7 @@ app.use(
     },
   })
 );
+app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 
 app.use(cookieParser());
 app.use(verifyCSRF);

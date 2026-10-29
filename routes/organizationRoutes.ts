@@ -45,6 +45,7 @@ import {
   deleteTeamMessageController,
   pinTeamMessageController,
 } from '../controllers/teamController.js';
+import { uploadMiddleware } from '../controllers/uploadController.js';
 
 import {
   createTaskController,
@@ -181,6 +182,7 @@ router.post(
   '/:id/teams/:teamId/messages',
   authMiddleware,
   requireOrgMember(),
+  uploadMiddleware,
   sendTeamMessageController
 );
 
