@@ -44,5 +44,6 @@ jobs:
              sudo docker compose up -d --force-recreate
 
 
+             sudo docker compose exec -T app npx prisma migrate resolve --rolled-back "20261029000000_add_meeting_scope_and_hierarchy" || true
              sudo docker compose exec -T app npx prisma migrate deploy
              sudo docker compose logs --tail=50 app

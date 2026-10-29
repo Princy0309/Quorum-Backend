@@ -50,18 +50,65 @@ export const createMeeting = async (hostId: string, organizationId?: string) => 
     }
   }
 
-  const meeting = await prisma.meeting.create({
-    data: {
-      code,
-      hostId,
-      organizationId: organizationId || null,
-      waitingRoom: true,
-      status: MeetingStatus.ACTIVE,
-      admitted: [hostId],
-      scopeType: organizationId ? MeetingScopeType.ORGANIZATION : MeetingScopeType.PERSONAL,
-
-    },
-  });
+  let meeting;
+  try {
+    meeting = await prisma.meeting.create({
+      data: {
+        code,
+        hostId,
+        organizationId: organizationId || null,
+        waitingRoom: true,
+        status: MeetingStatus.ACTIVE,
+        admitted: [hostId],
+        scopeType: organizationId ? MeetingScopeType.ORGANIZATION : MeetingScopeType.PERSONAL,
+      },
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2022' || err?.message?.includes('scopeType') || err?.message?.includes('does not exist')) {
+      logger.warn('[MeetingService] Missing schema detected on createMeeting, auto-repairing Meeting schema...');
+      try {
+        await prisma.$executeRawUnsafe(`
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'MeetingScopeType') THEN
+              CREATE TYPE "MeetingScopeType" AS ENUM ('PERSONAL', 'ORGANIZATION', 'TEAM');
+            END IF;
+          END $$;
+          ALTER TYPE "MeetingStatus" ADD VALUE IF NOT EXISTS 'SCHEDULED';
+          ALTER TYPE "MeetingStatus" ADD VALUE IF NOT EXISTS 'CANCELLED';
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Meeting' AND column_name = 'scopeType') THEN
+              ALTER TABLE "Meeting" ADD COLUMN "scopeType" "MeetingScopeType" NOT NULL DEFAULT 'PERSONAL';
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Meeting' AND column_name = 'title') THEN
+              ALTER TABLE "Meeting" ADD COLUMN "title" TEXT;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Meeting' AND column_name = 'teamId') THEN
+              ALTER TABLE "Meeting" ADD COLUMN "teamId" TEXT;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Meeting' AND column_name = 'organizationId') THEN
+              ALTER TABLE "Meeting" ADD COLUMN "organizationId" TEXT;
+            END IF;
+          END $$;
+        `);
+        meeting = await prisma.meeting.create({
+          data: {
+            code,
+            hostId,
+            organizationId: organizationId || null,
+            waitingRoom: true,
+            status: MeetingStatus.ACTIVE,
+            admitted: [hostId],
+            scopeType: organizationId ? MeetingScopeType.ORGANIZATION : MeetingScopeType.PERSONAL,
+          },
+        });
+      } catch (repairErr) {
+        logger.error('[MeetingService] Schema auto-repair failed:', repairErr);
+        throw err;
+      }
+    } else {
+      throw err;
+    }
+  }
 
   return {
     code: meeting.code,
