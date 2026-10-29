@@ -83,7 +83,9 @@ model Team {
   members        TeamMember[]
   tasks          TeamTask[]
   invites        OrganizationInvite[]
-  jiraTickets  JiraTicketLink[] 
+  jiraTickets    JiraTicketLink[] 
+  meetings       Meeting[]
+
 
   @@unique([organizationId, name])
   @@index([organizationId])

@@ -6,6 +6,7 @@ import { SrtpContext } from '../sfu/protocols/srtp/srtpContext.js';
 import { SrtpSession } from '../sfu/protocols/srtp/srtpPacket.js';
 import logger from '../utils/logger.js';
 import { RoomSharder } from '../sfu/roomSharder.js';
+import { canUserJoinMeeting } from '../services/meetingPermissionService.js';
 
 
 
@@ -196,8 +197,15 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         return;
       }
 
-      const effectivePeerId = socket.data.user.id || peerId;
-      const effectiveName = socket.data.user.name || name || 'Participant';
+    const effectivePeerId = socket.data.user.id || peerId;
+    const effectiveName = socket.data.user.name || name || 'Participant';
+
+    const permCheck = await canUserJoinMeeting(effectivePeerId, roomCode);
+    if (!permCheck.allowed) {
+      logger.warn(`[Signaling] Rejecting unauthorized SFU join: user=${effectivePeerId}, room=${roomCode}, reason=${permCheck.reason}`);
+      socket.emit('sfu:error', { message: permCheck.reason || 'Access denied to this meeting' });
+      return;
+    }
 
       if (currentRoom) {
         handleLeave();
