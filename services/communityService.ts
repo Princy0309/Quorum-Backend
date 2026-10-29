@@ -22,6 +22,15 @@ export interface UpdateCommunityInput {
 }
 
 export const createCommunity = async (userId: string, data: CreateCommunityInput) => {
+  const trimmedName = data.name.trim();
+  if (trimmedName.length < 2 || trimmedName.length > 100) {
+    throw new ApiError(400, 'Community name must be between 2 and 100 characters');
+  }
+
+  if (data.description && data.description.trim().length > 1000) {
+    throw new ApiError(400, 'Community description cannot exceed 1000 characters');
+  }
+
   return await prisma.$transaction(async (tx) => {
     const community = await tx.community.create({
       data: {
@@ -201,9 +210,16 @@ export const updateCommunity = async (userId: string, communityId: string, data:
 
     const updateData: { name?: string; description?: string | null } = {};
     if (data.name !== undefined) {
-      updateData.name = data.name.trim();
+      const trimmedName = data.name.trim();
+      if (trimmedName.length < 2 || trimmedName.length > 100) {
+        throw new ApiError(400, 'Community name must be between 2 and 100 characters');
+      }
+      updateData.name = trimmedName;
     }
     if (data.description !== undefined) {
+      if (data.description && data.description.trim().length > 1000) {
+        throw new ApiError(400, 'Community description cannot exceed 1000 characters');
+      }
       updateData.description = data.description?.trim() || null;
     }
 

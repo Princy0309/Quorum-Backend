@@ -40,6 +40,11 @@ import {
 
 import { authMiddleware } from '../middlewares/authMiddleware.js';
 import { requireOrgMember } from '../middlewares/orgAuthMiddleware.js';
+import { validate } from '../middlewares/validate.js';
+import {
+  createOrganizationSchema,
+  updateOrganizationSchema,
+} from '../validators/organizationValidators.js';
 
 const router = Router();
 
@@ -47,7 +52,7 @@ router.get('/join/:token', getInvitePreviewController);
 router.post('/join/:token', authMiddleware, acceptInviteController);
 
 
-router.post('/', authMiddleware, createOrganizationController);
+router.post('/', authMiddleware, validate(createOrganizationSchema), createOrganizationController);
 router.get('/', authMiddleware, getUserOrganizationsController);
 
 router.get('/:id', authMiddleware, requireOrgMember(), getOrganizationController);
@@ -55,6 +60,7 @@ router.patch(
   '/:id',
   authMiddleware,
   requireOrgMember([OrgRole.ORG_ADMIN]),
+  validate(updateOrganizationSchema),
   updateOrganizationController
 );
 
