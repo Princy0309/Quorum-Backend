@@ -67,29 +67,50 @@ export const createMeeting = async (hostId: string, organizationId?: string) => 
     if (err?.code === 'P2022' || err?.message?.includes('scopeType') || err?.message?.includes('does not exist')) {
       logger.warn('[MeetingService] Missing schema detected on createMeeting, auto-repairing Meeting schema...');
       try {
-        await prisma.$executeRawUnsafe(`
-          DO $$ BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'MeetingScopeType') THEN
-              CREATE TYPE "MeetingScopeType" AS ENUM ('PERSONAL', 'ORGANIZATION', 'TEAM');
-            END IF;
-          END $$;
-          ALTER TYPE "MeetingStatus" ADD VALUE IF NOT EXISTS 'SCHEDULED';
-          ALTER TYPE "MeetingStatus" ADD VALUE IF NOT EXISTS 'CANCELLED';
-          DO $$ BEGIN
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Meeting' AND column_name = 'scopeType') THEN
-              ALTER TABLE "Meeting" ADD COLUMN "scopeType" "MeetingScopeType" NOT NULL DEFAULT 'PERSONAL';
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Meeting' AND column_name = 'title') THEN
-              ALTER TABLE "Meeting" ADD COLUMN "title" TEXT;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Meeting' AND column_name = 'teamId') THEN
-              ALTER TABLE "Meeting" ADD COLUMN "teamId" TEXT;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Meeting' AND column_name = 'organizationId') THEN
-              ALTER TABLE "Meeting" ADD COLUMN "organizationId" TEXT;
-            END IF;
-          END $$;
-        `);
+        try {
+          await prisma.$executeRawUnsafe(`
+            DO $$ BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'MeetingScopeType') THEN
+                CREATE TYPE "MeetingScopeType" AS ENUM ('PERSONAL', 'ORGANIZATION', 'TEAM');
+              END IF;
+            END $$;
+          `);
+        } catch (e: any) {
+          logger.warn('[MeetingService] MeetingScopeType enum error:', e?.message);
+        }
+
+        try {
+          await prisma.$executeRawUnsafe(`ALTER TYPE "MeetingStatus" ADD VALUE IF NOT EXISTS 'SCHEDULED'`);
+        } catch (e: any) {
+          logger.warn('[MeetingService] SCHEDULED enum error:', e?.message);
+        }
+
+        try {
+          await prisma.$executeRawUnsafe(`ALTER TYPE "MeetingStatus" ADD VALUE IF NOT EXISTS 'CANCELLED'`);
+        } catch (e: any) {
+          logger.warn('[MeetingService] CANCELLED enum error:', e?.message);
+        }
+
+        try {
+          await prisma.$executeRawUnsafe(`
+            DO $$ BEGIN
+              IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Meeting' AND column_name = 'scopeType') THEN
+                ALTER TABLE "Meeting" ADD COLUMN "scopeType" "MeetingScopeType" NOT NULL DEFAULT 'PERSONAL';
+              END IF;
+              IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Meeting' AND column_name = 'title') THEN
+                ALTER TABLE "Meeting" ADD COLUMN "title" TEXT;
+              END IF;
+              IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Meeting' AND column_name = 'teamId') THEN
+                ALTER TABLE "Meeting" ADD COLUMN "teamId" TEXT;
+              END IF;
+              IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Meeting' AND column_name = 'organizationId') THEN
+                ALTER TABLE "Meeting" ADD COLUMN "organizationId" TEXT;
+              END IF;
+            END $$;
+          `);
+        } catch (e: any) {
+          logger.warn('[MeetingService] Column creation error:', e?.message);
+        }
         meeting = await prisma.meeting.create({
           data: {
             code,
