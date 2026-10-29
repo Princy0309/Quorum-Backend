@@ -5,6 +5,7 @@ import { env } from '../config/env.js';
 import { MeetingScopeType, MeetingStatus, OrgRole } from '@prisma/client';
 import { closeMeetingRoom } from '../sockets/meetingPresence.js';
 import { canUserCreateMeeting, canUserJoinMeeting } from './meetingPermissionService.js';
+import logger from '../utils/logger.js';
 
 const generateCode = (): string => {
   const letters = 'abcdefghijklmnopqrstuvwxyz';
@@ -503,3 +504,66 @@ export const getUserUpcomingMeetings = async (userId: string) => {
     link: `${env.CLIENT_URL}/meet/${m.code}`,
   }));
 };
+
+export const cancelMeeting = async (code: string, userId: string) => {
+  const meeting = await prisma.meeting.findFirst({
+    where: { code },
+    include: {
+      organization: {
+        select: {
+          ownerId: true,
+        },
+      },
+    },
+  });
+
+  if (!meeting) {
+    throw new ApiError(404, 'Meeting not found');
+  }
+
+  if (meeting.status === MeetingStatus.ENDED) {
+    throw new ApiError(400, 'Cannot cancel a meeting that has already ended');
+  }
+
+  if (meeting.status === MeetingStatus.CANCELLED) {
+    throw new ApiError(400, 'Meeting is already cancelled');
+  }
+
+  let isAuthorized = meeting.hostId === userId;
+
+  if (!isAuthorized && meeting.organizationId) {
+    if (meeting.organization?.ownerId === userId) {
+      isAuthorized = true;
+    } else {
+      const orgMember = await prisma.organizationMember.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId: meeting.organizationId,
+            userId,
+          },
+        },
+      });
+      if (orgMember?.role === OrgRole.ORG_ADMIN) {
+        isAuthorized = true;
+      }
+    }
+  }
+
+  if (!isAuthorized) {
+    throw new ApiError(403, 'Only the host or an organization admin can cancel this meeting');
+  }
+
+  await prisma.meeting.update({
+    where: { code },
+    data: { status: MeetingStatus.CANCELLED },
+  });
+
+  try {
+    closeMeetingRoom(code);
+  } catch (err) {
+    logger.error('[MeetingService] Failed to teardown cancelled meeting socket room:', err);
+  }
+
+  return { message: 'Meeting cancelled successfully' };
+};
+

@@ -7,6 +7,7 @@ import {
   getMeeting,
   endMeeting,
   getOrganizationMeetings,
+  cancelMeeting,
   getTeamMeetings,
   getUserUpcomingMeetings,
 } from '../services/meetingService.js';
@@ -91,6 +92,27 @@ export const endMeetingController = asyncHandler(
     });
   }
 );
+
+export const cancelMeetingController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id) {
+      return next(new ApiError(401, 'Unauthorized, login required'));
+    }
+
+    const parsedCode = meetingCodeParamSchema.safeParse(req.params.code);
+    if (!parsedCode.success) {
+      return next(new ApiError(400, parsedCode.error.issues[0]?.message || 'Invalid meeting code'));
+    }
+
+    const result = await cancelMeeting(parsedCode.data, req.user.id);
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  }
+);
+
 
 export const getOrganizationMeetingsController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {

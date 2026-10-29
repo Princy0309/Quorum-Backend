@@ -4,6 +4,7 @@ import {
   createScopedMeetingController,
   getMeetingController,
   endMeetingController,
+  cancelMeetingController,
   getOrganizationMeetingsController,
   getTeamMeetingsController,
   getUserUpcomingMeetingsController,
@@ -24,6 +25,7 @@ router.get('/organization/:organizationId', authMiddleware, getOrganizationMeeti
 router.get('/team/:teamId', authMiddleware, getTeamMeetingsController);
 router.get('/:code', optionalAuth, getMeetingController);
 router.post('/:code/end', authMiddleware, endMeetingController);
+router.patch('/:code/cancel', authMiddleware, cancelMeetingController);
 router.get('/:code/whiteboards', authMiddleware, getMeetingWhiteboardsController);
 router.post('/:code/whiteboards', authMiddleware, createMeetingWhiteboardController);
 router.post(
