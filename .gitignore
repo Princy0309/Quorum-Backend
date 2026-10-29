@@ -154,3 +154,4 @@ vite.config.ts.timestamp-*
 !.elasticbeanstalk/*.global.yml
 
 test-client.html
+jira-creds.txt

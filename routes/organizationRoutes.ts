@@ -16,6 +16,22 @@ import {
   revokeInviteController,
   
 } from '../controllers/organizationController.js';
+
+import {
+  createTeamTicketController,
+  getTeamTicketsController,
+  getTicketDetailsController,
+  transitionTicketStatusController,
+} from '../controllers/jiraTicketController.js';
+
+
+import {
+  setupOrgJiraController,
+  getOrgJiraStatusController,
+  disconnectOrgJiraController,
+} from '../controllers/jiraOrgController.js';
+
+
 import {
   createTeamController,
   getOrganizationTeamsController,
@@ -210,8 +226,53 @@ router.get(
   getMyTasksController
 );
 
+router.post(
+  '/:id/integrations/jira/setup',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  setupOrgJiraController
+);
 
+router.get(
+  '/:id/integrations/jira',
+  authMiddleware,
+  requireOrgMember(),
+  getOrgJiraStatusController
+);
 
+router.delete(
+  '/:id/integrations/jira',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  disconnectOrgJiraController
+);
 
+router.post(
+  '/:id/teams/:teamId/jira/tickets',
+  authMiddleware,
+  requireOrgMember(),
+  createTeamTicketController
+);
+
+router.get(
+  '/:id/teams/:teamId/jira/tickets',
+  authMiddleware,
+  requireOrgMember(),
+  getTeamTicketsController
+);
+
+router.get(
+  '/:id/teams/:teamId/jira/tickets/:key',
+  authMiddleware,
+  requireOrgMember(),
+  getTicketDetailsController
+);
+
+router.patch(
+  '/:id/teams/:teamId/jira/tickets/:key/status',
+  authMiddleware,
+  requireOrgMember(),
+  transitionTicketStatusController
+);
 
 export default router;

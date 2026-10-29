@@ -43,7 +43,15 @@ app.get('/test', (req: Request, res: Response) => {
   }
   res.status(404).send('Not Found');
 });
-app.use(express.json({ limit: "10kb" }));
+app.use(
+  express.json({
+    limit: "100kb",
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
+
 app.use(cookieParser());
 app.use(verifyCSRF);
 

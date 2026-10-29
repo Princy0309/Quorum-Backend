@@ -20,8 +20,9 @@ model Organization {
   members      OrganizationMember[]
   invites      OrganizationInvite[]
   teams        Team[]
-  meetings     Meeting[]
-  whiteboards  Whiteboard[]
+  meetings           Meeting[]
+  whiteboards        Whiteboard[]
+  jiraIntegration    OrgJiraIntegration?
 
   @@index([slug])
   @@index([ownerId])
@@ -62,6 +63,8 @@ model OrganizationInvite {
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   inviter         User         @relation("OrgInviter", fields: [inviterId], references: [id], onDelete: Cascade)
   team            Team?        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  
+
 
   @@index([organizationId])
   @@index([token])
@@ -80,6 +83,7 @@ model Team {
   members        TeamMember[]
   tasks          TeamTask[]
   invites        OrganizationInvite[]
+  jiraTickets  JiraTicketLink[] 
 
   @@unique([organizationId, name])
   @@index([organizationId])

@@ -48,6 +48,8 @@ model User {
   assignedTasks            TeamTask[]                @relation("AssignedTeamTasks")
   createdTasks             TeamTask[]                @relation("CreatedTeamTasks")
   createdWhiteboards       Whiteboard[]              @relation("WhiteboardCreator")
+  jiraLink                 UserJiraLink?
+  installedJiraOrgs        OrgJiraIntegration[]      @relation("OrgJiraInstaller")
 }
 
 model RefreshToken {

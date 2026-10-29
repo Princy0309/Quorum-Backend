@@ -1,0 +1,76 @@
+model OrgJiraIntegration {
+  id                     String       @id @default(uuid())
+  organizationId         String       @unique
+  organization           Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  cloudId                String
+  siteUrl                String
+  projectKey             String
+  installedByUserId      String
+  installedByUser        User         @relation("OrgJiraInstaller", fields: [installedByUserId], references: [id], onDelete: Restrict)
+  webhookId              String?
+  encryptedWebhookSecret String?
+  isActive               Boolean      @default(true)
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([cloudId])
+}
+
+model UserJiraLink {
+  id                    String    @id @default(uuid())
+  userId                String    @unique
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jiraAccountId         String
+  jiraEmail             String?
+  jiraDisplayName       String?
+  cloudId               String
+  siteUrl               String?
+  encryptedAccessToken  String
+  encryptedRefreshToken String
+  tokenExpiresAt        DateTime
+  scope                 String
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  @@index([userId])
+  @@index([jiraAccountId])
+}
+
+
+model JiraTicketLink {
+  id                  String   @id @default(uuid())
+  teamId              String
+  team                Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  jiraIssueId         String
+  jiraKey             String
+  jiraSummary         String
+  jiraStatus          String
+  statusCategory      String?
+  assigneeAccountId   String?
+  reporterAccountId   String?
+  priority            String?
+  lastSyncedAt        DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  @@unique([teamId, jiraKey])
+  @@index([teamId])
+  @@index([jiraKey])
+  @@index([assigneeAccountId])
+}
+
+
+model JiraWebhookEvent {
+  id              String    @id @default(uuid())
+  eventId         String    @unique
+  eventType       String
+  payload         Json
+  signature       String?
+  signatureValid  Boolean   @default(false)
+  processed       Boolean   @default(false)
+  processedAt     DateTime?
+  error           String?
+  createdAt       DateTime  @default(now())
+  @@index([eventId])
+  @@index([createdAt])
+}
+
