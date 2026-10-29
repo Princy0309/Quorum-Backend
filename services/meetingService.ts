@@ -6,6 +6,10 @@ import { MeetingScopeType, MeetingStatus, OrgRole } from '@prisma/client';
 import { closeMeetingRoom } from '../sockets/meetingPresence.js';
 import { canUserCreateMeeting, canUserJoinMeeting } from './meetingPermissionService.js';
 import logger from '../utils/logger.js';
+import { getIO } from '../sockets/socketServer.js';
+import { sendPushToOfflineUsers } from './notificationService.js';
+import { scheduleEventReminder } from '../queues/reminderQueue.js';
+
 
 const generateCode = (): string => {
   const letters = 'abcdefghijklmnopqrstuvwxyz';
@@ -66,6 +70,162 @@ export const createMeeting = async (hostId: string, organizationId?: string) => 
   };
 };
 
+const syncMeetingCalendarAndNotifications = async (
+  meeting: {
+    code: string;
+    title: string | null;
+    scopeType: MeetingScopeType;
+    status: MeetingStatus;
+    scheduledStartTime: Date | null;
+    hostId: string;
+    organizationId: string | null;
+    teamId: string | null;
+  }
+) => {
+  try {
+    if (meeting.scopeType === MeetingScopeType.PERSONAL) {
+      return;
+    }
+
+    const hostUser = await prisma.user.findUnique({
+      where: { id: meeting.hostId },
+      select: { id: true, name: true },
+    });
+    const hostName = hostUser?.name || 'Host';
+
+    let memberIds: string[] = [];
+    let scopeName = 'Meeting';
+
+    if (meeting.scopeType === MeetingScopeType.ORGANIZATION && meeting.organizationId) {
+      const orgMembers = await prisma.organizationMember.findMany({
+        where: { organizationId: meeting.organizationId },
+        select: { userId: true },
+      });
+      const org = await prisma.organization.findUnique({
+        where: { id: meeting.organizationId },
+        select: { name: true, ownerId: true },
+      });
+      scopeName = org?.name || 'Organization';
+      const allIds = new Set(orgMembers.map((m) => m.userId));
+      if (org?.ownerId) allIds.add(org.ownerId);
+      memberIds = Array.from(allIds);
+    } else if (meeting.scopeType === MeetingScopeType.TEAM && meeting.teamId) {
+      const teamMembers = await prisma.teamMember.findMany({
+        where: { teamId: meeting.teamId },
+        select: { userId: true },
+      });
+      const team = await prisma.team.findUnique({
+        where: { id: meeting.teamId },
+        select: { name: true },
+      });
+      scopeName = team?.name || 'Team';
+      memberIds = teamMembers.map((m) => m.userId);
+    }
+
+    if (memberIds.length === 0) return;
+
+    const meetingLink = `${env.CLIENT_URL}/meet/${meeting.code}`;
+    const meetingTitle = meeting.title || `${scopeName} Meeting`;
+
+    if (meeting.status === MeetingStatus.SCHEDULED && meeting.scheduledStartTime) {
+      const start = new Date(meeting.scheduledStartTime);
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
+
+      for (const userId of memberIds) {
+        try {
+          const event = await prisma.calendarEvent.create({
+            data: {
+              userId,
+              title: meetingTitle,
+              description: `${meetingTitle} scheduled by ${hostName} for ${scopeName}`,
+              eventType: 'MEETING',
+              startDate: start,
+              endDate: end,
+              meetingLink,
+              hasReminder: true,
+              reminderMinutes: 15,
+            },
+          });
+
+          scheduleEventReminder(event).catch((remErr) => {
+            logger.warn(`[MeetingService] BullMQ reminder scheduling failed for user ${userId}:`, remErr);
+          });
+        } catch (calErr) {
+          logger.warn(`[MeetingService] Calendar event creation failed for user ${userId}:`, calErr);
+        }
+      }
+    }
+
+    const recipients = memberIds.filter((id) => id !== meeting.hostId);
+    if (recipients.length === 0) return;
+
+    const isScheduled = meeting.status === MeetingStatus.SCHEDULED && meeting.scheduledStartTime;
+    const formattedDate = isScheduled
+      ? new Date(meeting.scheduledStartTime!).toLocaleDateString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      : '';
+
+    const notifType = 'MEETING_STARTED' as const;
+    const notifTitle = isScheduled
+      ? `Meeting Scheduled: ${meetingTitle}`
+      : `Meeting Started: ${meetingTitle}`;
+    const notifBody = isScheduled
+      ? `${hostName} scheduled a meeting for ${formattedDate} in ${scopeName}.`
+      : `${hostName} started a meeting in ${scopeName}. Click to join!`;
+
+    await prisma.notification.createMany({
+      data: recipients.map((recipientId) => ({
+        recipientId,
+        actorId: meeting.hostId,
+        type: notifType,
+        title: notifTitle,
+        body: notifBody,
+        data: {
+          meetingCode: meeting.code,
+          meetingLink,
+          scopeType: meeting.scopeType,
+          scheduledStartTime: meeting.scheduledStartTime ? meeting.scheduledStartTime.toISOString() : null,
+        },
+      })),
+    });
+
+    try {
+      const io = getIO();
+      for (const recipientId of recipients) {
+        io.to(`user:${recipientId}`).emit('notification:new', {
+          type: notifType,
+          title: notifTitle,
+          body: notifBody,
+          actorId: meeting.hostId,
+          data: {
+            meetingCode: meeting.code,
+            meetingLink,
+          },
+          createdAt: new Date(),
+        });
+      }
+    } catch (sockErr) {
+      logger.warn('[MeetingService] Socket notification emission failed:', sockErr);
+    }
+
+    sendPushToOfflineUsers(recipients, notifTitle, notifBody, {
+      meetingCode: meeting.code,
+      meetingLink,
+    }).catch((pushErr) => {
+      logger.warn('[MeetingService] Offline push notification failed:', pushErr);
+    });
+
+  } catch (err) {
+    logger.error('[MeetingService] Error syncing calendar and notifications for meeting:', err);
+  }
+};
+
+
 export interface CreateScopedMeetingInput {
   title?: string;
   scopeType?: MeetingScopeType;
@@ -125,6 +285,11 @@ export const createScopedMeeting = async (
       team: { select: { id: true, name: true, organizationId: true } },
     },
   });
+
+  syncMeetingCalendarAndNotifications(meeting).catch((err) =>
+    logger.error('[MeetingService] Background calendar sync error:', err)
+  );
+
 
   return {
     code: meeting.code,
@@ -187,7 +352,6 @@ export const getMeeting = async (code: string, userId?: string) => {
   if (meeting.scopeType !== MeetingScopeType.PERSONAL && !userId) {
     throw new ApiError(401, 'Authentication required to access this meeting');
   }
-
 
   return {
     code: meeting.code,
