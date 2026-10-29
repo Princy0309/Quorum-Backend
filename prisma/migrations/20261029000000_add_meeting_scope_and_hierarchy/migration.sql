@@ -7,27 +7,8 @@ BEGIN
 END $$;
 
 -- 2. Add SCHEDULED and CANCELLED to MeetingStatus enum if not exists
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_enum 
-        JOIN pg_type ON pg_enum.enumtypid = pg_type.oid 
-        WHERE pg_type.typname = 'MeetingStatus' AND pg_enum.enumlabel = 'SCHEDULED'
-    ) THEN
-        ALTER TYPE "MeetingStatus" ADD VALUE 'SCHEDULED';
-    END IF;
-END $$;
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_enum 
-        JOIN pg_type ON pg_enum.enumtypid = pg_type.oid 
-        WHERE pg_type.typname = 'MeetingStatus' AND pg_enum.enumlabel = 'CANCELLED'
-    ) THEN
-        ALTER TYPE "MeetingStatus" ADD VALUE 'CANCELLED';
-    END IF;
-END $$;
+ALTER TYPE "MeetingStatus" ADD VALUE IF NOT EXISTS 'SCHEDULED';
+ALTER TYPE "MeetingStatus" ADD VALUE IF NOT EXISTS 'CANCELLED';
 
 -- 3. Add columns to Meeting table if not exists
 DO $$

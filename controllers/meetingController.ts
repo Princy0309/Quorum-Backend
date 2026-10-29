@@ -24,7 +24,11 @@ export const createMeetingController = asyncHandler(
       return next(new ApiError(401, 'Unauthorized, login required'));
     }
 
-    const organizationId = req.body?.organizationId as string | undefined;
+    const rawOrgId = req.body?.organizationId;
+    const organizationId =
+      typeof rawOrgId === 'string' && rawOrgId.trim() && rawOrgId !== 'null' && rawOrgId !== 'undefined'
+        ? rawOrgId.trim()
+        : undefined;
     const meeting = await createMeeting(req.user.id, organizationId);
 
     return res.status(201).json({
