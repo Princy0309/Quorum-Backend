@@ -22,22 +22,34 @@ export const authMiddleware = async (
   res: Response,
   next: NextFunction,
 ) => {
-  let token: string | undefined;
+  const candidates: string[] = [];
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith("Bearer ")) {
-    token = authHeader.split(" ")[1];
-  } else if (req.cookies?.accessToken) {
-    token = req.cookies.accessToken;
+    const bearer = authHeader.split(" ")[1]?.trim();
+    if (bearer) candidates.push(bearer);
+  }
+  if (req.cookies?.accessToken && typeof req.cookies.accessToken === "string") {
+    const cookieTok = req.cookies.accessToken.trim();
+    if (cookieTok && !candidates.includes(cookieTok)) {
+      candidates.push(cookieTok);
+    }
   }
 
-  if (!token) {
+  if (candidates.length === 0) {
     return next(new ApiError(401, "Unauthorized, missing token"));
   }
 
-  let decoded: AccessTokenPayload;
-  try {
-    decoded = verifyAccessToken(token);
-  } catch (err) {
+  let decoded: AccessTokenPayload | null = null;
+  for (const candidate of candidates) {
+    try {
+      decoded = verifyAccessToken(candidate);
+      break;
+    } catch {
+      // If the first candidate (e.g. stale Authorization header) is expired, try the cookie!
+    }
+  }
+
+  if (!decoded) {
     return next(new ApiError(401, "Invalid or expired token"));
   }
 

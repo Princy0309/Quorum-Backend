@@ -12,6 +12,7 @@ import {
 } from '../services/teamService.js';
 import prisma from '../config/prisma.js';
 import { queueNotification } from '../queues/notificationQueue.js';
+import { getIO } from '../sockets/socketServer.js';
 
 
 const getParam = (param: unknown): string => {
@@ -195,7 +196,7 @@ export const sendTeamMessageController = asyncHandler(
     }
 
     const teamId = getParam(req.params.teamId);
-    const { content, fileUrl, fileType, fileName, fileSize } = req.body;
+    const { content, fileUrl, fileType, fileName, fileSize, clientMessageId } = req.body;
 
     if (!content && !fileUrl) {
       return next(new ApiError(400, 'Message content or file attachment is required'));
@@ -222,18 +223,50 @@ export const sendTeamMessageController = asyncHandler(
       return next(new ApiError(403, 'You must be a team member to post in this chat'));
     }
 
-    const nextSeq = conversation.lastSeq + 1;
+    if (clientMessageId) {
+      const existing = await prisma.message.findUnique({
+        where: {
+          conversationId_senderId_clientMessageId: {
+            conversationId: conversation.id,
+            senderId: req.user.id,
+            clientMessageId: String(clientMessageId),
+          },
+        },
+        include: {
+          sender: {
+            select: { id: true, name: true, email: true, avatar: true },
+          },
+        },
+      });
 
-    const [message] = await prisma.$transaction([
-      prisma.message.create({
+      if (existing) {
+        return res.status(200).json({
+          success: true,
+          data: existing,
+        });
+      }
+    }
+
+    const message = await prisma.$transaction(async (tx) => {
+      const lastMessage = await tx.message.findFirst({
+        where: { conversationId: conversation.id },
+        orderBy: { seq: 'desc' },
+        select: { seq: true },
+      });
+
+      const currentMaxSeq = Math.max(conversation.lastSeq || 0, lastMessage?.seq || 0);
+      const nextSeq = currentMaxSeq + 1;
+
+      const created = await tx.message.create({
         data: {
           conversationId: conversation.id,
-          senderId: req.user.id,
+          senderId: req.user!.id,
           content: content || '',
           fileUrl: fileUrl || null,
           fileType: fileType || null,
           fileName: fileName || null,
           fileSize: fileSize ? Number(fileSize) : null,
+          clientMessageId: clientMessageId ? String(clientMessageId) : null,
           seq: nextSeq,
         },
         include: {
@@ -241,16 +274,26 @@ export const sendTeamMessageController = asyncHandler(
             select: { id: true, name: true, email: true, avatar: true },
           },
         },
-      }),
-      prisma.conversation.update({
-        where: { id: conversation.id },
-        data: { lastSeq: nextSeq },
-      }),
-    ]);
+      });
 
-    const io = req.app.get('io');
-    if (io) {
-      io.to(conversation.id).emit('chat:message:new', message);
+      await tx.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          lastSeq: nextSeq,
+          updatedAt: new Date(),
+        },
+      });
+
+      return created;
+    });
+
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(`conversation:${conversation.id}`).to(conversation.id).emit('chat:message:new', message);
+      }
+    } catch {
+      // socket server might not be initialized
     }
 
     if (content && typeof content === 'string') {

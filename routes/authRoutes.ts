@@ -10,6 +10,7 @@ const router = Router();
 router.post('/register', registerLimiter, validate(registerSchema), register);
 router.post('/login', loginLimiter, validate(loginSchema), login);
 router.post('/refresh-token', refreshLimiter, refreshToken);
+router.post('/refresh', refreshLimiter, refreshToken);
 router.post('/logout', logout);
 router.post('/logout-all', authMiddleware, logoutAll);
 router.get('/me', authMiddleware, requireEmailVerified, getMe);
