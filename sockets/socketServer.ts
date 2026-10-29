@@ -49,21 +49,41 @@ export const initSocketServer = (httpServer: any) => {
     const auth = socket.handshake.auth || {};
     const query = socket.handshake.query || {};
 
-    let rawToken = auth.token ||
-      (typeof socket.handshake.headers.authorization === 'string' ? socket.handshake.headers.authorization : '') ||
-      (typeof query.token === 'string' ? query.token : '') ||
-      parseCookieToken(socket.handshake.headers.cookie);
+    const rawCandidates = [
+      auth.token,
+      socket.handshake.headers.authorization,
+      parseCookieToken(socket.handshake.headers.cookie),
+      query.token,
+    ];
 
-    let token = typeof rawToken === 'string' ? rawToken.replace(/^Bearer\s+/i, '').trim() : '';
+    const candidateTokens: string[] = [];
+    for (const raw of rawCandidates) {
+      if (typeof raw === 'string' && raw.trim()) {
+        const clean = raw.replace(/^Bearer\s+/i, '').trim();
+        if (clean && !candidateTokens.includes(clean)) {
+          candidateTokens.push(clean);
+        }
+      }
+    }
 
-    if (!token) {
+    if (candidateTokens.length === 0) {
       return next(new Error('Authentication error: Access token required'));
     }
 
-    let decoded: any;
-    try {
-      decoded = verifyAccessToken(token);
-    } catch (err: any) {
+    let decoded: any = null;
+    let token: string = '';
+
+    for (const candidate of candidateTokens) {
+      try {
+        decoded = verifyAccessToken(candidate);
+        token = candidate;
+        break;
+      } catch {
+        // Continue to check other candidates (e.g. cookie if auth.token was expired)
+      }
+    }
+
+    if (!decoded) {
       return next(new Error('Authentication error: Invalid or expired token'));
     }
 
