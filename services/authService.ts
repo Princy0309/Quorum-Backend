@@ -104,8 +104,7 @@ export const loginUser = async (email: string, password: string, ip: string, req
   }
 
   if (!user.isEmailVerified) {
-    await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
-    throw new ApiError(403, 'Email not verified. A fresh verification code has been sent to your email.');
+    throw new ApiError(403, 'Email not verified. Please verify your email before logging in.');
   }
   await prisma.user.update({
     where: { id: user.id },
