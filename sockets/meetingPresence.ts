@@ -6,6 +6,7 @@ import { roomBroker } from '../sfu/roomBroker.js';
 import { peerConnectionManager } from '../sfu/peerConnection.js';
 import { endMeeting } from '../services/meetingService.js';
 import logger from '../utils/logger.js';
+import { canUserJoinMeeting } from '../services/meetingPermissionService.js';
 
 export interface Participant {
     userId: string;
@@ -54,7 +55,7 @@ export const socketToMeetingsMap = new Map<string, Set<string>>();
 const meetingInitLocks = new Map<string, Promise<MeetingRoomState | null>>();
 
 export const normalizeMeetingCode = (code: string): string => {
-    let cleaned = typeof code === 'string' ? code.trim().toLowerCase() : '';  
+    let cleaned = typeof code === 'string' ? code.trim().toLowerCase() : '';
     if (cleaned.includes('/')) {
         const parts = cleaned.split('/').filter(Boolean);
         cleaned = parts[parts.length - 1];
@@ -155,6 +156,17 @@ export const handleJoinMeeting = async (
     const normalizedCode = normalizeMeetingCode(meetingCode);
     if (!normalizedCode) {
         const errorPayload = { code: 'INVALID_PAYLOAD', message: 'Meeting code is required' };
+        socket.emit('meeting:error', errorPayload);
+        ack?.({ success: false, ...errorPayload });
+        return;
+    }
+
+    const permCheck = await canUserJoinMeeting(user.id, normalizedCode);
+    if (!permCheck.allowed) {
+        const errorPayload = {
+            code: 'FORBIDDEN',
+            message: permCheck.reason || 'Access denied to this meeting',
+        };
         socket.emit('meeting:error', errorPayload);
         ack?.({ success: false, ...errorPayload });
         return;
