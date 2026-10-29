@@ -4,6 +4,9 @@ import {
   createScopedMeetingController,
   getMeetingController,
   endMeetingController,
+  getOrganizationMeetingsController,
+  getTeamMeetingsController,
+  getUserUpcomingMeetingsController,
 } from '../controllers/meetingController.js';
 import {
   getMeetingWhiteboardsController,
@@ -16,7 +19,10 @@ const router = Router();
 
 router.post('/', authMiddleware, createMeetingController);
 router.post('/scoped', authMiddleware, createScopedMeetingController);
-router.get('/:code',optionalAuth, getMeetingController);
+router.get('/upcoming', authMiddleware, getUserUpcomingMeetingsController);
+router.get('/organization/:organizationId', authMiddleware, getOrganizationMeetingsController);
+router.get('/team/:teamId', authMiddleware, getTeamMeetingsController);
+router.get('/:code', optionalAuth, getMeetingController);
 router.post('/:code/end', authMiddleware, endMeetingController);
 router.get('/:code/whiteboards', authMiddleware, getMeetingWhiteboardsController);
 router.post('/:code/whiteboards', authMiddleware, createMeetingWhiteboardController);
