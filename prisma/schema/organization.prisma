@@ -80,6 +80,8 @@ model Team {
   members        TeamMember[]
   tasks          TeamTask[]
   invites        OrganizationInvite[]
+  meetings       Meeting[]
+
 
   @@unique([organizationId, name])
   @@index([organizationId])

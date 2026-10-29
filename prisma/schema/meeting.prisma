@@ -1,23 +1,42 @@
 enum MeetingStatus {
+  SCHEDULED
   ACTIVE
   ENDED
+  CANCELLED
+}
+
+enum MeetingScopeType {
+  PERSONAL
+  ORGANIZATION
+  TEAM
 }
 
 model Meeting {
-  id          String        @id @default(uuid())
-  code        String        @unique
-  hostId      String
-  waitingRoom Boolean       @default(true)
-  status      MeetingStatus @default(ACTIVE)
-  admitted    String[]      @default([])
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  host        User          @relation(fields: [hostId], references: [id], onDelete: Cascade)
-  organizationId String?
-  organization   Organization?       @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  whiteboards    WhiteboardMeeting[]
-  originWhiteboards Whiteboard[]     @relation("MeetingOriginWhiteboards")
+  id                  String        @id @default(uuid())
+  code                String        @unique
+  title               String?
+  hostId              String
+  scopeType           MeetingScopeType  @default(PERSONAL)
+  waitingRoom         Boolean       @default(true)
+  status              MeetingStatus @default(ACTIVE)
+  admitted            String[]      @default([])
+  scheduledStartTime  DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  host                User          @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  organizationId      String?
+  organization        Organization?       @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  teamId             String?
+  team               Team?               @relation(fields: [teamId], references: [id], onDelete: SetNull)
 
-  @@index([code])
+  whiteboards         WhiteboardMeeting[]
+  originWhiteboards   Whiteboard[]     @relation("MeetingOriginWhiteboards")
+
   @@index([organizationId])
+  @@index([organizationId, scheduledStartTime])
+  @@index([teamId])
+  @@index([teamId, scheduledStartTime])
+  @@index([scopeType])
+  @@index([scheduledStartTime])
+
 }
