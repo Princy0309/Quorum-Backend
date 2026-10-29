@@ -61,6 +61,19 @@ export const registerRateLimiter = new RateLimiterRedis({
   })
 });
 
+export const registerEmailRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'register_email_v1',
+  points: 5,
+  duration: 60 * 60,
+  blockDuration: 15 * 60,
+  insuranceLimiter: new RateLimiterMemory({
+    points: 5,
+    duration: 60 * 60,
+    blockDuration: 15 * 60
+  })
+});
+
 export const searchRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
   keyPrefix: 'search_v1',
@@ -110,16 +123,25 @@ export const refreshLimiter = (req: Request, res: Response, next: NextFunction):
     });
 };
 
-export const registerLimiter = (req: Request, res: Response, next: NextFunction): void => {
-  registerRateLimiter.consume(req.ip || '127.0.0.1')
-    .then(() => next())
-    .catch((err) => {
-      if (err && err.remainingPoints !== undefined) {
-        return res.status(429).json({ success: false, statusCode: 429, message: 'Too many registration attempts, try again later.' });
-      }
-      logger.warn('Register rate limiter encountered an error, failing open:', err);
-      return next();
-    });
+export const registerLimiter = async (req: Request, res: Response, next: NextFunction): Promise<any> => {
+  try {
+    const ip = req.ip || '127.0.0.1';
+    await registerRateLimiter.consume(ip);
+
+    const email = req.body?.email;
+    if (email) {
+      const emailHash = hashEmail(email);
+      await registerEmailRateLimiter.consume(emailHash);
+    }
+
+    next();
+  } catch (err: any) {
+    if (err && err.remainingPoints !== undefined) {
+      return res.status(429).json({ success: false, statusCode: 429, message: 'Too many registration attempts, try again later.' });
+    }
+    logger.warn('Register rate limiter encountered an error, failing open:', err);
+    return next();
+  }
 };
 
 export const searchLimiter = (req: Request, res: Response, next: NextFunction): void => {
