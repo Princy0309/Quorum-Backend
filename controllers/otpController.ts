@@ -18,46 +18,49 @@ export const sendVerificationOTP = asyncHandler(async (req: Request, res: Respon
   const email = rawEmail.trim().toLowerCase();
 
   const user = (await prisma.user.findUnique({ where: { email } })) || req.user;
-  if (!user) {
-    return sendSuccess(res, 200, 'If an account with that email exists and is unverified, a verification code has been sent.');
+  if (user && user.isEmailVerified) {
+    return sendSuccess(res, 200, 'Email is already verified. Please log in.');
   }
 
-  const existing = await redis.get(`otp:verify:${user.id}`);
-  if (existing) {
+  const pendingRaw = await redis.get(`otp:register:${email}`);
+  if (pendingRaw) {
     try {
-      const parsed = JSON.parse(existing);
-      if (parsed.createdAt && Date.now() - parsed.createdAt < 60 * 1000) {
-        return sendSuccess(res, 200, 'Verification code already sent. Please check your inbox.');
-      }
+      const parsed = JSON.parse(pendingRaw);
+      await storeAndSendOTP(email, `otp:register:${email}`, 'verification', parsed.payload, true);
+      return sendSuccess(res, 200, 'Verification code sent. Please check your inbox.');
     } catch (e: any) {
-      logger.error('Failed to parse verification OTP record from Redis', { userId: user.id, error: e.message });
+      logger.error('Failed to parse pending registration record from Redis', { email, error: e.message });
     }
   }
 
-  await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
+  if (user) {
+    await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification', undefined, true);
+    return sendSuccess(res, 200, 'Verification code sent. Please check your inbox.');
+  }
+
   return sendSuccess(res, 200, 'If an account with that email exists and is unverified, a verification code has been sent.');
 });
 
 export const verifyEmail = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  
-
   const rawEmail = req.body?.email;
   const cleanEmail = rawEmail ? rawEmail.trim().toLowerCase() : null;
   const cleanOtp = String(req.body?.otp || '').trim();
 
+  if (!cleanEmail && !req.user) {
+    throw new ApiError(400, 'Email address is required');
+  }
+
+  const emailToVerify = cleanEmail || req.user?.email;
+
   let user = null;
-  if (cleanEmail) {
-    user = await prisma.user.findUnique({ where: { email: cleanEmail } });
+  if (emailToVerify) {
+    user = await prisma.user.findUnique({ where: { email: emailToVerify } });
   }
   if (!user && req.user) {
     user = req.user;
   }
 
-  if (!user) {
-    throw new ApiError(400, 'User not found. Please provide your registered email address.');
-  }
-
-  if (user.isEmailVerified) {
+  if (user && user.isEmailVerified) {
     return sendSuccess(res, 200, 'Email is already verified. Please log in.', {
       user: {
         id: user.id,
@@ -69,31 +72,60 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response, next
     });
   }
 
-  const result = await verifyOTPFromRedis(`otp:verify:${user.id}`, cleanOtp);
+  let result = await verifyOTPFromRedis(`otp:register:${emailToVerify}`, cleanOtp);
+  if (!result.success && user) {
+    result = await verifyOTPFromRedis(`otp:verify:${user.id}`, cleanOtp);
+  }
+  if (!result.success) {
+    result = await verifyOTPFromRedis(`otp:verify:${emailToVerify}`, cleanOtp);
+  }
+
   if (!result.success) throw new ApiError(400, result.message);
 
+  const payload = result.payload;
+
   try {
-    const updateData: any = { isEmailVerified: true };
-    if (result.payload && result.payload.name && result.payload.passwordHash) {
-      updateData.name = result.payload.name;
-      updateData.passwordHash = result.payload.passwordHash;
+    if (user) {
+      const updateData: any = { isEmailVerified: true };
+      if (payload && payload.name) {
+        updateData.name = payload.name;
+      }
+      if (payload && payload.passwordHash) {
+        updateData.passwordHash = payload.passwordHash;
+      }
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: updateData,
+      });
+    } else {
+      if (!payload || !payload.passwordHash) {
+        throw new ApiError(400, 'Registration session expired or invalid. Please sign up again.');
+      }
+      user = await prisma.user.create({
+        data: {
+          name: payload.name || 'User',
+          email: emailToVerify!,
+          passwordHash: payload.passwordHash,
+          isEmailVerified: true,
+        },
+      });
     }
 
-    const updatedUser = await prisma.user.update({
-      where: { id: user.id },
-      data: updateData,
-    });
+    await redis.del(`otp:register:${emailToVerify}`);
+    if (user) {
+      await redis.del(`otp:verify:${user.id}`);
+    }
 
-    const { accessToken, refreshToken } = await issueTokens(updatedUser, req);
+    const { accessToken, refreshToken } = await issueTokens(user, req);
 
     const isMobile = req.headers['x-client-platform'] === 'mobile';
     const responseData: any = {
       accessToken,
       user: {
-        id: updatedUser.id,
-        name: updatedUser.name,
-        email: updatedUser.email,
-        role: updatedUser.role,
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
         isEmailVerified: true,
       },
     };
@@ -107,17 +139,11 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response, next
 
     return sendSuccess(res, 200, 'Email verified successfully', responseData);
   } catch (err: unknown) {
-    logger.error('Error during post-verification session issuance', { error: (err as Error).message });
-
-    return sendSuccess(res, 200, 'Email verified successfully. Please log in to continue.', {
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        isEmailVerified: true,
-      },
-    });
+    if (err instanceof ApiError) {
+      throw err;
+    }
+    logger.error('Error during post-verification user creation/session issuance', { error: (err as Error).message });
+    throw new ApiError(500, 'Failed to complete registration. Please try again.');
   }
 });
 
