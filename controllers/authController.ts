@@ -24,10 +24,10 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
   return sendSuccess(res, 201, 'User registered successfully. Please verify your email with the OTP sent to your inbox.', {
     email: user.email,
     user: {
-      id: user.id,
+      id: user.id || '',
       name: user.name,
       email: user.email,
-      role: user.role,
+      role: user.role || 'USER',
       isEmailVerified: false,
     },
   });

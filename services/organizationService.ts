@@ -26,6 +26,15 @@ export const createOrganization = async (userId: string, data: CreateOrgInput) =
     throw new ApiError(400, 'Organization name is required');
   }
 
+  const trimmedName = name.trim();
+  if (trimmedName.length < 2 || trimmedName.length > 100) {
+    throw new ApiError(400, 'Organization name must be between 2 and 100 characters');
+  }
+
+  if (description && description.trim().length > 1000) {
+    throw new ApiError(400, 'Organization description cannot exceed 1000 characters');
+  }
+
   let baseSlug = slugify(name);
   if (!baseSlug) {
     baseSlug = 'org';
@@ -126,8 +135,17 @@ export const updateOrganization = async (orgId: string, data: UpdateOrgInput) =>
     throw new ApiError(404, 'Organization not found');
   }
 
-  if (data.name !== undefined && data.name.trim().length === 0) {
-    throw new ApiError(400, 'Organization name cannot be empty');
+  if (data.name !== undefined) {
+    const trimmedName = data.name.trim();
+    if (trimmedName.length < 2 || trimmedName.length > 100) {
+      throw new ApiError(400, 'Organization name must be between 2 and 100 characters');
+    }
+  }
+
+  if (data.description !== undefined && data.description !== null) {
+    if (data.description.trim().length > 1000) {
+      throw new ApiError(400, 'Organization description cannot exceed 1000 characters');
+    }
   }
 
   const updatedOrg = await prisma.organization.update({

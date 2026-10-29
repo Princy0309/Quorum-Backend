@@ -10,13 +10,15 @@ export const storeAndSendOTP = async (
   email: string,
   redisKey: string,
   emailType: 'verification' | 'reset',
-  payload?: any
+  payload?: any,
+  force: boolean = false
 ): Promise<boolean> => {
   const existing = await redis.get(redisKey);
-  if (existing) {
+  if (existing && !force) {
     try {
       const parsed = JSON.parse(existing);
-      if (parsed.createdAt && Date.now() - parsed.createdAt < 30 * 1000) {
+      const isSamePayload = JSON.stringify(parsed.payload || {}) === JSON.stringify(payload || {});
+      if (isSamePayload && parsed.createdAt && Date.now() - parsed.createdAt < 30 * 1000) {
         return false;
       }
     } catch (e: any) {

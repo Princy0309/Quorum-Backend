@@ -1,13 +1,13 @@
 import { z } from 'zod';
 
 export const createCommunitySchema = z.object({
-  name: z.string().trim().min(2).max(100),
-  description: z.string().trim().max(1000).optional().nullable()
+  name: z.string().trim().min(2, 'Community name must be between 2 and 100 characters').max(100, 'Community name must be between 2 and 100 characters'),
+  description: z.string().trim().max(1000, 'Community description cannot exceed 1000 characters').optional().nullable()
 });
 
 export const updateCommunitySchema = z.object({
-  name: z.string().trim().min(2).max(100).optional(),
-  description: z.string().trim().max(1000).optional().nullable()
+  name: z.string().trim().min(2, 'Community name must be between 2 and 100 characters').max(100, 'Community name must be between 2 and 100 characters').optional(),
+  description: z.string().trim().max(1000, 'Community description cannot exceed 1000 characters').optional().nullable()
 }).refine((data) => data.name !== undefined || data.description !== undefined, {
   message: 'At least one field (name or description) must be provided'
 });

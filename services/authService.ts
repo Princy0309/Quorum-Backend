@@ -40,46 +40,32 @@ export const handleFailedLogin = async (userId: string) => {
 };
 
 export const registerUser = async (name: string, email: string, passwordUnHashed: string) => {
-  const passwordHash = await bcrypt.hash(passwordUnHashed, 10);
-
   const existingUser = await prisma.user.findUnique({ where: { email } });
   
-  if (existingUser) {
-    if (existingUser.isEmailVerified) {
-      throw new ApiError(409, 'Email already registered. Please log in.');
-    }
-    const updatedUser = await prisma.user.update({
-      where: { id: existingUser.id },
-      data: { name, passwordHash },
-    });
-    try {
-      await storeAndSendOTP(updatedUser.email, `otp:verify:${updatedUser.id}`, 'verification');
-    } catch (err) {
-      console.error('Failed to send OTP during registration (existing unverified):', err);
-    }
-
-    return { user: updatedUser, isNew: false, isVerified: false };
+  if (existingUser && existingUser.isEmailVerified) {
+    throw new ApiError(409, 'Email already registered. Please log in.');
   }
 
-  let user;
-  try {
-    user = await prisma.user.create({
-      data: { name, email, passwordHash },
-    });
-  } catch (err: any) {
-    if (err.code === 'P2002') {
-      throw new ApiError(409, 'Email already registered. Please log in.');
-    }
-    throw err;
+  const passwordHash = await bcrypt.hash(passwordUnHashed, 10);
+  const payload = { name, email, passwordHash };
+
+  await storeAndSendOTP(email, `otp:register:${email}`, 'verification', payload, true);
+
+  if (existingUser && !existingUser.isEmailVerified) {
+    await storeAndSendOTP(email, `otp:verify:${existingUser.id}`, 'verification', payload, true);
   }
 
-  try {
-    await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
-  } catch (err) {
-    console.error('Failed to send OTP during registration:', err);
-  }
-
-  return { user, isNew: true, isVerified: false };
+  return {
+    user: {
+      id: existingUser?.id || '',
+      name,
+      email,
+      role: existingUser?.role || 'USER',
+      isEmailVerified: false,
+    },
+    isNew: !existingUser,
+    isVerified: false,
+  };
 };
 
 export const loginUser = async (email: string, password: string, ip: string, req: Request, rememberMe: boolean = false) => {
@@ -104,8 +90,7 @@ export const loginUser = async (email: string, password: string, ip: string, req
   }
 
   if (!user.isEmailVerified) {
-    await storeAndSendOTP(user.email, `otp:verify:${user.id}`, 'verification');
-    throw new ApiError(403, 'Email not verified. A fresh verification code has been sent to your email.');
+    throw new ApiError(403, 'Email not verified. Please verify your email before logging in.');
   }
   await prisma.user.update({
     where: { id: user.id },
