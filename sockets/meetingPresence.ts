@@ -92,7 +92,7 @@ export const getOrCreateMeetingState = async (meetingCode: string): Promise<Meet
             const dbMeeting = await prisma.meeting.findFirst({
                 where: {
                     code: cleanCode,
-                    status: MeetingStatus.ACTIVE,
+                    status: { in: [MeetingStatus.ACTIVE, MeetingStatus.SCHEDULED] },
                 },
                 select: {
                     hostId: true,
@@ -197,6 +197,21 @@ export const handleJoinMeeting = async (
     const isHost = roomState.hostUserId === user.id;
 
     logger.info(`[Join Debug] meeting=${normalizedCode}, socket=${socket.id}, resolvedUser=${user.id} (${user.name}), hostUserId=${roomState.hostUserId}, isHost=${isHost}`);
+
+    if (isHost || !roomState.waitingRoomEnabled) {
+        await prisma.meeting.updateMany({
+            where: {
+                code: normalizedCode,
+                status: MeetingStatus.SCHEDULED,
+            },
+            data: {
+                status: MeetingStatus.ACTIVE,
+            },
+        }).catch((err) => {
+            logger.warn(`[MeetingPresence] Could not activate meeting ${normalizedCode}:`, err);
+        });
+    }
+
 
     if (!isHost && roomState.waitingRoomEnabled && !roomState.participants.has(user.id)) {
         let waitingUser = roomState.waitingRoom.get(user.id);
