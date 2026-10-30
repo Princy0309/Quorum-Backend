@@ -9,7 +9,7 @@ import {
 } from '../controllers/jiraOAuthController.js';
 
 import { getMyTicketsController } from '../controllers/jiraTicketController.js';
-
+import { handleJiraWebhookController } from '../controllers/jiraWebhookController.js';
 
 const router = Router();
 
@@ -31,5 +31,6 @@ router.get('/oauth/callback', handleOAuthCallbackController);
 router.post('/disconnect', authMiddleware, disconnectJiraController);
 router.get('/oauth/status', authMiddleware, getJiraStatusController);
 router.get('/tickets/my', authMiddleware, getMyTicketsController);
+router.post('/webhook', handleJiraWebhookController);
 
 export default router;
