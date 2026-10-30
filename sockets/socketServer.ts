@@ -4,7 +4,8 @@ import { handleJoinMeeting, handleLeaveMeeting, handleEndMeeting, handleDisconne
 import { handleToggleMic, handleToggleCam, handleMuteParticipant, handleSendMeetingMessage } from './meetingControls.js';
 import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.js';
 import logger from '../utils/logger.js';
-import { verifyAccessToken } from '../services/tokenService.js';
+import { verifyAccessToken, verifyRefreshToken } from '../services/tokenService.js';
+import { hashToken } from '../utils/hashToken.js';
 import prisma from '../config/prisma.js';
 import redis from '../config/redis.js';
 import { isOriginAllowed } from '../config/env.js';
@@ -40,9 +41,10 @@ export const initSocketServer = (httpServer: any) => {
   ioInstance = io;
 
   io.use(async (socket, next) => {
-    const parseCookieToken = (cookieHeader?: string): string | null => {
+    const parseCookieToken = (cookieHeader?: string, name: string = 'accessToken'): string | null => {
       if (!cookieHeader) return null;
-      const match = cookieHeader.match(/(?:^|;\s*)accessToken=([^;]+)/);
+      const regex = new RegExp(`(?:^|;\\s*)${name}=([^;]+)`);
+      const match = cookieHeader.match(regex);
       return match ? decodeURIComponent(match[1]) : null;
     };
 
@@ -52,7 +54,7 @@ export const initSocketServer = (httpServer: any) => {
     const rawCandidates = [
       auth.token,
       socket.handshake.headers.authorization,
-      parseCookieToken(socket.handshake.headers.cookie),
+      parseCookieToken(socket.handshake.headers.cookie, 'accessToken'),
       query.token,
     ];
 
@@ -64,10 +66,6 @@ export const initSocketServer = (httpServer: any) => {
           candidateTokens.push(clean);
         }
       }
-    }
-
-    if (candidateTokens.length === 0) {
-      return next(new Error('Authentication error: Access token required'));
     }
 
     let decoded: any = null;
@@ -83,7 +81,38 @@ export const initSocketServer = (httpServer: any) => {
       }
     }
 
+    // Auto-healing fallback: If access token is expired or missing,
+    // verify the client's active refreshToken cookie from the WebSocket handshake.
     if (!decoded) {
+      const rawRefresh = parseCookieToken(socket.handshake.headers.cookie, 'refreshToken') || (typeof auth.refreshToken === 'string' ? auth.refreshToken : null);
+      if (rawRefresh) {
+        try {
+          const decodedRefresh = verifyRefreshToken(rawRefresh.trim());
+          if (decodedRefresh?.id) {
+            const tokenHash = hashToken(rawRefresh.trim());
+            const storedToken = await prisma.refreshToken.findUnique({
+              where: { tokenHash },
+              include: { user: true }
+            });
+            if (storedToken && !storedToken.revokedAt && storedToken.expiresAt > new Date()) {
+              decoded = {
+                id: storedToken.userId,
+                type: 'access',
+                sid: storedToken.familyId,
+                jti: 'socket-refresh-fallback-' + storedToken.id,
+              };
+            }
+          }
+        } catch (refreshErr: any) {
+          logger.warn(`[Socket Auth] Refresh token fallback check failed: ${refreshErr?.message}`);
+        }
+      }
+    }
+
+    if (!decoded) {
+      if (candidateTokens.length === 0) {
+        return next(new Error('Authentication error: Access token required'));
+      }
       return next(new Error('Authentication error: Invalid or expired token'));
     }
 
