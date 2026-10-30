@@ -9,6 +9,7 @@ import logger from '../utils/logger.js';
 import { getIO } from '../sockets/socketServer.js';
 import { sendPushToOfflineUsers } from './notificationService.js';
 import { scheduleEventReminder } from '../queues/reminderQueue.js';
+import { addScopedMeetingInviteEmailToQueue } from '../queues/emailQueue.js';
 
 
 const generateCode = (): string => {
@@ -227,6 +228,12 @@ const syncMeetingCalendarAndNotifications = async (
     const recipients = memberIds.filter((id) => id !== meeting.hostId);
     if (recipients.length === 0) return;
 
+    // Fetch email addresses of all members (excluding the host)
+    const recipientUsers = await prisma.user.findMany({
+      where: { id: { in: recipients } },
+      select: { id: true, email: true },
+    });
+
     const isScheduled = meeting.status === MeetingStatus.SCHEDULED && meeting.scheduledStartTime;
     const formattedDate = isScheduled
       ? new Date(meeting.scheduledStartTime!).toLocaleDateString('en-IN', {
@@ -236,7 +243,27 @@ const syncMeetingCalendarAndNotifications = async (
         hour: '2-digit',
         minute: '2-digit',
       })
-      : '';
+      : 'Happening Now';
+
+    // Dispatch branded email invitations with direct join link to members' inboxes
+    if (isScheduled) {
+      for (const member of recipientUsers) {
+        if (member.email) {
+          addScopedMeetingInviteEmailToQueue({
+            email: member.email,
+            inviterName: hostName,
+            meetingTitle,
+            scopeName,
+            scopeType: meeting.scopeType === MeetingScopeType.ORGANIZATION ? 'Organization Wide' : 'Team Specific',
+            formattedDate,
+            meetingLink,
+          }).catch((mailErr) => {
+            logger.warn(`[MeetingService] Failed to queue meeting invite email for ${member.email}:`, mailErr);
+          });
+        }
+      }
+    }
+
 
     const notifType = 'MEETING_STARTED' as const;
     const notifTitle = isScheduled
