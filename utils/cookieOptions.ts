@@ -1,4 +1,4 @@
-import { CookieOptions } from 'express';
+import { CookieOptions, Response } from 'express';
 import env from '../config/env.js';
 
 const isProduction = env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true';
@@ -67,6 +67,29 @@ export const clearCookieOptions: CookieOptions = {
   ...(cookieDomain ? { domain: cookieDomain } : {}),
 };
 
+export const clearLegacyCookies = (res: Response): void => {
+  const paths = ['/api/auth', '/api'];
+  const domains = [undefined, cookieDomain, 'api.newquorum.me', '.newquorum.me'];
+  for (const p of paths) {
+    for (const d of domains) {
+      res.clearCookie('refreshToken', {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
+        path: p,
+        ...(d ? { domain: d } : {}),
+      });
+      res.clearCookie('accessToken', {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
+        path: p,
+        ...(d ? { domain: d } : {}),
+      });
+    }
+  }
+};
+
 export const csrfCookieOptions: CookieOptions = {
   httpOnly: false,
   secure: isProduction,
@@ -81,5 +104,6 @@ export default {
   getAccessCookieOptions,
   getRefreshCookieOptions,
   clearCookieOptions,
+  clearLegacyCookies,
   csrfCookieOptions
 };

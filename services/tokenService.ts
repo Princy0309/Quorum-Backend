@@ -185,7 +185,8 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
   let decoded: RefreshTokenPayload;
   try {
     decoded = verifyRefreshToken(rawToken);
-  } catch (err) {
+  } catch (err: any) {
+    logger.warn('[Token Rotation] Token verification failed:', { error: err?.message });
     throw new ApiError(401, 'Invalid or expired refresh token');
   }
 
@@ -198,7 +199,13 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
     include: { user: true },
   });
 
-  if (!storedToken || storedToken.expiresAt < new Date()) {
+  if (!storedToken) {
+    logger.warn('[Token Rotation] No stored refresh token in DB for hash', { tokenHash: tokenHash.slice(0, 12) + '...' });
+    throw new ApiError(401, 'Invalid or expired refresh token');
+  }
+
+  if (storedToken.expiresAt < new Date()) {
+    logger.warn('[Token Rotation] Stored refresh token is expired', { expiresAt: storedToken.expiresAt });
     throw new ApiError(401, 'Invalid or expired refresh token');
   }
 
