@@ -19,7 +19,8 @@ export const setupOrgJiraController = asyncHandler(async (req: Request, res: Res
     throw new ApiError(401, 'Unauthorized');
   }
 
-  const organizationId = req.params.id as string;
+  // Support both /:id and /:organizationId route parameter styles
+  const organizationId = (req.params.id || req.params.organizationId) as string;
   if (!organizationId) {
     throw new ApiError(400, 'Organization ID is required in URL parameters');
   }
@@ -40,7 +41,8 @@ export const getOrgJiraStatusController = asyncHandler(async (req: Request, res:
     throw new ApiError(401, 'Unauthorized');
   }
 
-  const organizationId = req.params.id as string;
+  // Support both /:id and /:organizationId route parameter styles
+  const organizationId = (req.params.id || req.params.organizationId) as string;
   if (!organizationId) {
     throw new ApiError(400, 'Organization ID is required in URL parameters');
   }
@@ -55,7 +57,8 @@ export const disconnectOrgJiraController = asyncHandler(async (req: Request, res
     throw new ApiError(401, 'Unauthorized');
   }
 
-  const organizationId = req.params.id as string;
+  // Support both /:id and /:organizationId route parameter styles
+  const organizationId = (req.params.id || req.params.organizationId) as string;
   if (!organizationId) {
     throw new ApiError(400, 'Organization ID is required in URL parameters');
   }

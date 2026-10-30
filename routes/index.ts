@@ -51,8 +51,11 @@ router.use('/v1/notifications', notificationRoutes);
 router.use('/ai', aiRoutes);
 router.use('/v1/ai', aiRoutes);
 
+// Meeting & Organization routes (supports both /api/* and /api/v1/* for mobile compatibility)
 router.use('/meetings', meetingRoutes);
+router.use('/v1/meetings', meetingRoutes);
 router.use('/organizations', organizationRoutes);
+router.use('/v1/organizations', organizationRoutes);
 
 router.use('/communities', communityRoutes);
 router.use('/community', communityRoutes);
@@ -74,13 +77,16 @@ router.use('/v1/comments', commentRoutes);
 router.use('/v1/community-comments', commentRoutes);
 
 router.use('/dm', dmRoutes);
+router.use('/v1/dm', dmRoutes);
 router.use('/conversations', conversationRoutes);
 router.use('/chat/conversations', conversationRoutes);
 router.use('/v1/conversations', conversationRoutes);
 router.use('/v1/chat/conversations', conversationRoutes);
 
 router.use('/uploads', uploadRoutes);
+router.use('/v1/uploads', uploadRoutes);
 router.use('/devices', deviceRoutes);
+router.use('/v1/devices', deviceRoutes);
 router.use('/saved-items', savedItemRoutes);
 router.use('/v1/saved-items', savedItemRoutes);
 router.use('/whiteboards', whiteboardRoutes);

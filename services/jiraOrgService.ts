@@ -95,6 +95,12 @@ export async function getOrgJiraIntegration(userId: string, organizationId: stri
     throw new ApiError(403, 'You are not a member of this organization');
   }
 
+  // Check if current user has connected their personal Jira account (Step 1 prerequisite)
+  const userJiraLink = await prisma.userJiraLink.findUnique({
+    where: { userId },
+    select: { id: true, cloudId: true, siteUrl: true, jiraEmail: true },
+  });
+
   const integration = await prisma.orgJiraIntegration.findUnique({
     where: { organizationId },
     select: {
@@ -110,12 +116,20 @@ export async function getOrgJiraIntegration(userId: string, organizationId: stri
     },
   });
 
+  // If organization has not configured Jira yet, return clean isConnected: false
+  // along with userConnected status to inform frontend whether admin needs OAuth first.
   if (!integration || !integration.isActive) {
-    return { isConnected: false };
+    return {
+      isConnected: false,
+      userConnected: !!userJiraLink,
+      userEmail: userJiraLink?.jiraEmail || null,
+    };
   }
 
   return {
     isConnected: true,
+    userConnected: !!userJiraLink,
+    userEmail: userJiraLink?.jiraEmail || null,
     ...integration,
   };
 }

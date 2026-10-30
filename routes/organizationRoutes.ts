@@ -228,22 +228,31 @@ router.get(
   getMyTasksController
 );
 
+// ---------------------------------------------------------------------------
+// Organization Jira Integration Routes
+// Supports both '/:id/integrations/jira' and '/:id/jira' route aliases so mobile
+// and web clients can request either path without encountering 404 errors.
+// ---------------------------------------------------------------------------
+
+// 1. Setup / Link Organization to Jira Project (Admin only)
 router.post(
-  '/:id/integrations/jira/setup',
+  ['/:id/integrations/jira/setup', '/:id/jira/setup'],
   authMiddleware,
   requireOrgMember([OrgRole.ORG_ADMIN]),
   setupOrgJiraController
 );
 
+// 2. Get Organization Jira Integration Status (Org Members)
 router.get(
-  '/:id/integrations/jira',
+  ['/:id/integrations/jira', '/:id/jira'],
   authMiddleware,
   requireOrgMember(),
   getOrgJiraStatusController
 );
 
+// 3. Disconnect Organization Jira Integration (Admin only)
 router.delete(
-  '/:id/integrations/jira',
+  ['/:id/integrations/jira', '/:id/jira'],
   authMiddleware,
   requireOrgMember([OrgRole.ORG_ADMIN]),
   disconnectOrgJiraController

@@ -26,11 +26,44 @@ const authorizeLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-router.get('/oauth/authorize-url', authMiddleware, authorizeLimiter, getAuthorizeUrlController);
+// ---------------------------------------------------------------------------
+// User Jira Integration Routes (/api/integrations/jira and /api/v1/integrations/jira)
+// Provides OAuth 2.0 3LO authorization, connection status, token revocation,
+// personal tickets, and webhook handling.
+// Multiple path aliases are provided to support diverse frontend/mobile clients.
+// ---------------------------------------------------------------------------
+
+// 1. Generate Atlassian OAuth Consent URL
+// Supports both '/oauth/authorize-url' and shorthand '/authorize-url'
+router.get(
+  ['/oauth/authorize-url', '/authorize-url'],
+  authMiddleware,
+  authorizeLimiter,
+  getAuthorizeUrlController
+);
+
+// 2. OAuth Callback from Atlassian (Public endpoint visited via browser redirect)
 router.get('/oauth/callback', handleOAuthCallbackController);
-router.post('/disconnect', authMiddleware, disconnectJiraController);
-router.get('/oauth/status', authMiddleware, getJiraStatusController);
+
+// 3. Disconnect Personal Jira Account (Revokes Atlassian tokens)
+router.post(
+  ['/disconnect', '/oauth/disconnect'],
+  authMiddleware,
+  disconnectJiraController
+);
+
+// 4. Get Current User's Personal Jira Connection Status
+// Supports '/oauth/status', '/status', and the root '/' of the integration router
+router.get(
+  ['/oauth/status', '/status', '/'],
+  authMiddleware,
+  getJiraStatusController
+);
+
+// 5. Get Tickets Assigned to the Current User
 router.get('/tickets/my', authMiddleware, getMyTicketsController);
+
+// 6. Incoming Jira Webhook Event Dispatcher
 router.post('/webhook', handleJiraWebhookController);
 
 export default router;
