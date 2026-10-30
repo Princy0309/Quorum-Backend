@@ -10,6 +10,7 @@ import {
   getJiraStatus,
 } from '../services/jiraOAuthService.js';
 import env from '../config/env.js';
+import logger from '../utils/logger.js';
 
 const callbackQuerySchema = z.object({
   code: z.string().optional(),
@@ -49,13 +50,16 @@ export const handleOAuthCallbackController = asyncHandler(async (req: Request, r
     return res.redirect(errorUrl);
   }
 
-  try {
+    try {
     const redirectUrl = await handleOAuthCallback(code, state);
     return res.redirect(redirectUrl);
   } catch (err: any) {
-    const errorUrl = `${env.CLIENT_URL}/settings/integrations/jira?status=error&message=${encodeURIComponent(err.message || 'OAuth connection failed')}`;
+    logger.error(`Jira OAuth callback failed: ${err.message}`);
+    const safeMessage = err instanceof ApiError ? err.message : 'OAuth connection failed. Please try again.';
+    const errorUrl = `${env.CLIENT_URL}/settings/integrations/jira?status=error&message=${encodeURIComponent(safeMessage)}`;
     return res.redirect(errorUrl);
   }
+
 });
 
 export const disconnectJiraController = asyncHandler(async (req: Request, res: Response) => {
