@@ -11,5 +11,8 @@ export const handleJiraWebhookController = asyncHandler(async (req: Request, res
   ) as string | undefined;
 
   const result = await processJiraWebhook(rawBody, signature, req.body);
+  if (result.error) {
+    return res.status(401).json({ received: false, error: result.error });
+  }
   return res.status(200).json({ received: true, ...result });
 });
