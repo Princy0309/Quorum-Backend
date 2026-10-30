@@ -11,7 +11,8 @@ import {
   refreshCookieOptions,
   getAccessCookieOptions,
   getRefreshCookieOptions,
-  clearCookieOptions
+  clearCookieOptions,
+  clearLegacyCookies
 } from '../utils/cookieOptions.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
@@ -51,6 +52,7 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
   if (isMobile) {
     responseData.refreshToken = refreshToken;
   } else {
+    clearLegacyCookies(res);
     res.cookie('accessToken', accessToken, getAccessCookieOptions(isRememberMe));
     res.cookie('refreshToken', refreshToken, getRefreshCookieOptions(isRememberMe));
   }
@@ -60,29 +62,60 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
 
 export const refreshToken = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const isMobile = req.headers['x-client-platform'] === 'mobile';
-  const incomingToken = isMobile ? req.body?.refreshToken : (req.cookies?.refreshToken || req.body?.refreshToken);
-
-  if (!incomingToken) throw new ApiError(401, 'Refresh token required');
-
-  try {
-    const { accessToken, refreshToken: newRefreshToken, rememberMe } = await rotateRefreshToken(incomingToken, req);
-
-    const responseData: any = { accessToken };
-
-    if (isMobile) {
-      responseData.refreshToken = newRefreshToken;
-    } else {
-      res.cookie('accessToken', accessToken, getAccessCookieOptions(rememberMe));
-      res.cookie('refreshToken', newRefreshToken, getRefreshCookieOptions(rememberMe));
-    }
-
-    return sendSuccess(res, 200, 'Tokens refreshed successfully', responseData);
-  } catch (err: any) {
-    if (err instanceof ApiError) {
-      throw err;
-    }
-    throw err;
+  
+  // Extract all potential candidates (handles duplicate cookies from legacy paths e.g. /api/auth vs /)
+  const candidates: string[] = [];
+  if (req.body?.refreshToken && typeof req.body.refreshToken === 'string' && req.body.refreshToken.trim()) {
+    candidates.push(req.body.refreshToken.trim());
   }
+
+  const cookieHeader = req.headers.cookie || '';
+  const regex = /(?:^|;\s*)refreshToken=([^;]+)/g;
+  let match;
+  while ((match = regex.exec(cookieHeader)) !== null) {
+    const decoded = decodeURIComponent(match[1]).trim();
+    if (decoded && !candidates.includes(decoded)) {
+      candidates.push(decoded);
+    }
+  }
+
+  if (req.cookies?.refreshToken && !candidates.includes(req.cookies.refreshToken)) {
+    candidates.push(req.cookies.refreshToken);
+  }
+
+  if (candidates.length === 0) {
+    throw new ApiError(401, 'Refresh token required');
+  }
+
+  let rotationResult: { accessToken: string; refreshToken: string; rememberMe: boolean } | null = null;
+  let lastError: any = null;
+
+  // Try each candidate (valid token might be listed after a stale legacy /api/auth cookie)
+  for (const tokenCandidate of candidates) {
+    try {
+      rotationResult = await rotateRefreshToken(tokenCandidate, req);
+      break;
+    } catch (err: any) {
+      lastError = err;
+    }
+  }
+
+  if (!rotationResult) {
+    throw lastError || new ApiError(401, 'Invalid or expired refresh token');
+  }
+
+  const { accessToken, refreshToken: newRefreshToken, rememberMe } = rotationResult;
+  const responseData: any = { accessToken };
+
+  if (isMobile) {
+    responseData.refreshToken = newRefreshToken;
+  } else {
+    clearLegacyCookies(res);
+    res.cookie('accessToken', accessToken, getAccessCookieOptions(rememberMe));
+    res.cookie('refreshToken', newRefreshToken, getRefreshCookieOptions(rememberMe));
+  }
+
+  return sendSuccess(res, 200, 'Tokens refreshed successfully', responseData);
 });
 
 export const logout = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
@@ -100,6 +133,7 @@ export const logout = asyncHandler(async (req: Request, res: Response, next: Nex
   }
 
   if (!isMobile) {
+    clearLegacyCookies(res);
     res.clearCookie('accessToken', clearCookieOptions);
     res.clearCookie('refreshToken', clearCookieOptions);
   }
