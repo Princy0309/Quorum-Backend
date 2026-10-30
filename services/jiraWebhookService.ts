@@ -1,35 +1,38 @@
 import crypto from 'crypto';
 import prisma from '../config/prisma.js';
-import env from '../config/env.js';
 import logger from '../utils/logger.js';
+import { decryptJiraToken } from '../utils/jiraCrypto.js';
 
-export function verifyWebhookSignature(rawBody: Buffer, signatureHeader?: string): boolean {
-  if (!signatureHeader) {
-    return true;
-  }
-
-  const secret = env.JIRA_STATE_SECRET;
-  if (!secret) {
+export function verifyWebhookSignature(
+  rawBody: Buffer,
+  signatureHeader?: string,
+  secret?: string
+): boolean {
+  if (!signatureHeader || !secret) {
     return false;
   }
 
-  const expectedSignature = crypto
-    .createHmac('sha256', secret)
-    .update(rawBody)
-    .digest('hex');
+  try {
+    const expectedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(rawBody)
+      .digest('hex');
 
-  const cleanProvided = signatureHeader.startsWith('sha256=')
-    ? signatureHeader.slice(7)
-    : signatureHeader;
+    const cleanProvided = signatureHeader.startsWith('sha256=')
+      ? signatureHeader.slice(7)
+      : signatureHeader;
 
-  const expectedBuf = Buffer.from(expectedSignature, 'hex');
-  const providedBuf = Buffer.from(cleanProvided, 'hex');
+    const expectedBuf = Buffer.from(expectedSignature, 'hex');
+    const providedBuf = Buffer.from(cleanProvided, 'hex');
 
-  if (expectedBuf.length !== providedBuf.length) {
+    if (expectedBuf.length !== providedBuf.length) {
+      return false;
+    }
+
+    return crypto.timingSafeEqual(expectedBuf, providedBuf);
+  } catch {
     return false;
   }
-
-  return crypto.timingSafeEqual(expectedBuf, providedBuf);
 }
 
 export async function processJiraWebhook(
@@ -37,11 +40,44 @@ export async function processJiraWebhook(
   signatureHeader: string | undefined,
   payload: any
 ) {
-  const isSignatureValid = verifyWebhookSignature(rawBody, signatureHeader);
-
   const webhookEvent = payload?.webhookEvent || 'unknown';
   const issue = payload?.issue;
   const timestamp = payload?.timestamp || Date.now();
+
+  const projectKey = (
+    issue?.fields?.project?.key ||
+    (issue?.key ? issue.key.split('-')[0] : '') ||
+    payload?.project?.key ||
+    (payload?.comment?.issue?.key ? payload.comment.issue.key.split('-')[0] : '')
+  )?.toUpperCase();
+
+  if (!projectKey) {
+    logger.warn(`Rejected Jira webhook event "${webhookEvent}": Cannot extract project key from payload`);
+    return { error: 'Cannot identify organization from webhook payload' };
+  }
+
+  const integration = await prisma.orgJiraIntegration.findFirst({
+    where: { projectKey, isActive: true },
+  });
+
+  if (!integration || !integration.encryptedWebhookSecret) {
+    logger.warn(`Rejected Jira webhook event "${webhookEvent}": No active integration or secret found for project "${projectKey}"`);
+    return { error: 'No active Jira integration or webhook secret found for this project' };
+  }
+
+  let secret: string | null = null;
+  try {
+    secret = decryptJiraToken(integration.encryptedWebhookSecret);
+  } catch (err: any) {
+    logger.error(`Failed to decrypt webhook secret for org ${integration.organizationId}: ${err.message}`);
+    return { error: 'Failed to decrypt webhook secret' };
+  }
+
+  if (!secret) {
+    return { error: 'No webhook secret configured for this organization' };
+  }
+
+  const isSignatureValid = verifyWebhookSignature(rawBody, signatureHeader, secret);
 
   const eventId = issue?.id
     ? `${webhookEvent}_${issue.id}_${timestamp}`
