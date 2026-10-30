@@ -207,18 +207,39 @@ export const rotateRefreshToken = async (rawToken: string, req?: any): Promise<{
   }
 
   if (storedToken.revokedAt) {
-    if (
-      storedToken.rotationCache &&
-      storedToken.rotationCacheExpiresAt &&
-      storedToken.rotationCacheExpiresAt > new Date()
-    ) {
-      try {
-        const parsed = decryptPayload(rawToken, storedToken.rotationCache);
-        return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken, rememberMe };
-      } catch (e) {
-        throw new ApiError(401, 'Invalid or expired refresh token');
+    // If recently revoked, the winning concurrent transaction might still be writing the rotationCache!
+    for (let attempt = 0; attempt < 6; attempt++) {
+      if (
+        storedToken.rotationCache &&
+        storedToken.rotationCacheExpiresAt &&
+        storedToken.rotationCacheExpiresAt > new Date()
+      ) {
+        try {
+          const parsed = decryptPayload(rawToken, storedToken.rotationCache);
+          return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken, rememberMe };
+        } catch {
+          throw new ApiError(401, 'Invalid or expired refresh token');
+        }
+      }
+
+      // If rotationCacheExpiresAt is already in the past, token was revoked long ago (true reuse attack)
+      if (storedToken.rotationCacheExpiresAt && storedToken.rotationCacheExpiresAt <= new Date()) {
+        break;
+      }
+
+      // Wait 150ms and check DB again in case concurrent rotation is completing right now
+      await new Promise(resolve => setTimeout(resolve, 150));
+      const refetched = await prisma.refreshToken.findUnique({
+        where: { id: storedToken.id },
+        select: { rotationCache: true, rotationCacheExpiresAt: true, revokedAt: true }
+      });
+      if (refetched) {
+        storedToken.rotationCache = refetched.rotationCache;
+        storedToken.rotationCacheExpiresAt = refetched.rotationCacheExpiresAt;
       }
     }
+
+    // Only if grace period is genuinely expired or no valid cache exists after waiting
     await performReuseRevocation(storedToken);
     throw new ApiError(401, 'Invalid or expired refresh token');
   }
