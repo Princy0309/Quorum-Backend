@@ -5,7 +5,7 @@ import logger from '../utils/logger.js';
 
 export function verifyWebhookSignature(rawBody: Buffer, signatureHeader?: string): boolean {
   if (!signatureHeader) {
-    return true;
+    return false;
   }
 
   const secret = env.JIRA_STATE_SECRET;
