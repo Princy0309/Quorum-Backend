@@ -116,17 +116,73 @@ export async function createTeamJiraTicket(
     fields.priority = { name: input.priority };
   }
 
-  if (input.assigneeAccountId) {
-    fields.assignee = { accountId: input.assigneeAccountId };
+  // Resolve assignee: handle Atlassian accountId, Quorum userId, email, or "Unassigned"
+  let resolvedAccountId: string | null = null;
+  const rawAssignee = input.assigneeAccountId?.trim();
+
+  if (rawAssignee && !['unassigned', 'none', 'null', 'undefined', ''].includes(rawAssignee.toLowerCase())) {
+    if (rawAssignee.includes(':') || /^[a-f0-9]{24}$/i.test(rawAssignee)) {
+      resolvedAccountId = rawAssignee;
+    } else {
+      // Check if it's a Quorum userId
+      const userRecord = await prisma.user.findUnique({
+        where: { id: rawAssignee },
+        include: { jiraLink: true },
+      });
+      if (userRecord?.jiraLink?.jiraAccountId) {
+        resolvedAccountId = userRecord.jiraLink.jiraAccountId;
+      } else if (rawAssignee.includes('@')) {
+        // Check if it's an email
+        const linkByEmail = await prisma.userJiraLink.findFirst({
+          where: { jiraEmail: rawAssignee },
+        });
+        if (linkByEmail?.jiraAccountId) {
+          resolvedAccountId = linkByEmail.jiraAccountId;
+        }
+      } else {
+        // Fallback: check by display name
+        const linkByName = await prisma.userJiraLink.findFirst({
+          where: { jiraDisplayName: { equals: rawAssignee, mode: 'insensitive' } },
+        });
+        if (linkByName?.jiraAccountId) {
+          resolvedAccountId = linkByName.jiraAccountId;
+        } else {
+          resolvedAccountId = rawAssignee;
+        }
+      }
+    }
   }
 
-  const jiraIssue = await callJiraApi<{ id: string; key: string; self: string }>({
-    cloudId: orgIntegration.cloudId,
-    userId,
-    endpoint: '/issue',
-    method: 'POST',
-    body: { fields },
-  });
+  if (resolvedAccountId) {
+    fields.assignee = { accountId: resolvedAccountId };
+  }
+
+  let jiraIssue: { id: string; key: string; self: string };
+  try {
+    jiraIssue = await callJiraApi<{ id: string; key: string; self: string }>({
+      cloudId: orgIntegration.cloudId,
+      userId,
+      endpoint: '/issue',
+      method: 'POST',
+      body: { fields },
+    });
+  } catch (err: any) {
+    // If Atlassian rejected the ticket because of the assignee, retry once as unassigned so creation succeeds!
+    if (fields.assignee) {
+      logger.warn(`Jira ticket creation failed with assignee (${resolvedAccountId}), retrying as unassigned: ${err.message}`);
+      delete fields.assignee;
+      jiraIssue = await callJiraApi<{ id: string; key: string; self: string }>({
+        cloudId: orgIntegration.cloudId,
+        userId,
+        endpoint: '/issue',
+        method: 'POST',
+        body: { fields },
+      });
+      resolvedAccountId = null;
+    } else {
+      throw err;
+    }
+  }
 
   const createdLink = await prisma.jiraTicketLink.create({
     data: {
@@ -135,7 +191,7 @@ export async function createTeamJiraTicket(
       jiraKey: jiraIssue.key,
       jiraSummary: input.summary.trim(),
       jiraStatus: 'To Do',
-      assigneeAccountId: input.assigneeAccountId || null,
+      assigneeAccountId: resolvedAccountId || null,
       reporterAccountId: userJiraLink.jiraAccountId,
       priority: input.priority || 'Medium',
     },

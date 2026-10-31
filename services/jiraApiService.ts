@@ -83,7 +83,16 @@ export async function callJiraApi<T = any>(options: JiraApiRequestOptions): Prom
   if (!response.ok) {
     const errorText = await response.text();
     logger.error('Jira API error response:', { status: response.status, body: errorText });
-    throw new ApiError(response.status, `Jira API error: ${response.statusText}`);
+    let detail = response.statusText;
+    try {
+      const parsed = JSON.parse(errorText);
+      const errMsgs = parsed.errorMessages || [];
+      const fieldErrors = parsed.errors ? Object.entries(parsed.errors).map(([k, v]) => `${k}: ${v}`) : [];
+      detail = [...errMsgs, ...fieldErrors].join('; ') || response.statusText;
+    } catch {
+      detail = errorText.slice(0, 150) || response.statusText;
+    }
+    throw new ApiError(response.status, `Jira API error: ${detail}`);
   }
 
   if (response.status === 204) {
