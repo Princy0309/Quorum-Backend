@@ -1,6 +1,7 @@
 import prisma from "../config/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
 import { UseCase } from '@prisma/client';
+import { uploadBufferToS3 } from './uploadService.js';
 
 export const saveUserOnboarding = async (userId: string, useCases: UseCase[]) => {
     const existingUser = await prisma.user.findUnique({
@@ -85,4 +86,83 @@ export const searchUsers = async (
       totalPages: Math.ceil(totalCount / limitNum),
     },
   };
+};
+
+export const getUserProfile = async (userId: string) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      avatar: true,
+      isEmailVerified: true,
+      isOnboarded: true,
+      useCases: true,
+      createdAt: true,
+      updatedAt: true,
+      lastLogin: true,
+    },
+  });
+
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  return user;
+};
+
+export const updateUserProfile = async (
+  userId: string,
+  input: {
+    name?: string;
+    avatar?: string | null;
+    useCases?: UseCase[];
+    isOnboarded?: boolean;
+  },
+  file?: { buffer: Buffer; originalname: string; mimetype: string }
+) => {
+  const existingUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, avatar: true },
+  });
+
+  if (!existingUser) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  let finalAvatar = input.avatar !== undefined ? input.avatar : existingUser.avatar;
+
+  if (file && file.buffer && file.buffer.length > 0) {
+    const uploadRes = await uploadBufferToS3(file.buffer, file.originalname, 'avatars', file.mimetype);
+    finalAvatar = uploadRes.publicUrl;
+  }
+
+  const updatedUser = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      ...(input.name !== undefined && { name: input.name.trim() }),
+      ...(finalAvatar !== undefined && { avatar: finalAvatar }),
+      ...(input.useCases !== undefined && { useCases: input.useCases }),
+      ...(input.isOnboarded !== undefined
+        ? { isOnboarded: input.isOnboarded }
+        : (input.useCases && input.useCases.length > 0 ? { isOnboarded: true } : {})),
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      avatar: true,
+      isEmailVerified: true,
+      isOnboarded: true,
+      useCases: true,
+      createdAt: true,
+      updatedAt: true,
+      lastLogin: true,
+    },
+  });
+
+  return updatedUser;
 };
