@@ -13,7 +13,14 @@ import {
 const router = Router();
 
 router.post('/send-verification', otpLimiter, optionalAuth, sendVerificationOTP);
+router.post('/send-otp', otpLimiter, optionalAuth, sendVerificationOTP);
+router.post('/resend-otp', otpLimiter, optionalAuth, sendVerificationOTP);
+router.post('/resend', otpLimiter, optionalAuth, sendVerificationOTP);
+
 router.post('/verify-email', otpLimiter, optionalAuth, validate(verifyEmailSchema), verifyEmail);
+router.post('/verify-otp', otpLimiter, optionalAuth, validate(verifyEmailSchema), verifyEmail);
+router.post('/verify', otpLimiter, optionalAuth, validate(verifyEmailSchema), verifyEmail);
+
 router.post('/forgot-password', otpLimiter, validate(sendResetSchema), forgotPassword);
 router.post('/reset-password', otpLimiter, validate(resetPasswordSchema), resetPassword);
 

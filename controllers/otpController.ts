@@ -13,6 +13,10 @@ import logger from '../utils/logger.js';
 import { verifyEmailSchema, sendResetSchema, resetPasswordSchema } from '../validators/otpValidators.js';
 
 export const sendVerificationOTP = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  if (req.body?.type === 'reset') {
+    return forgotPassword(req, res, next);
+  }
+
   const rawEmail = req.body?.email || req.user?.email;
   if (!rawEmail) throw new ApiError(400, 'Email address is required');
   const email = rawEmail.trim().toLowerCase();
@@ -44,7 +48,7 @@ export const sendVerificationOTP = asyncHandler(async (req: Request, res: Respon
 export const verifyEmail = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const rawEmail = req.body?.email;
   const cleanEmail = rawEmail ? rawEmail.trim().toLowerCase() : null;
-  const cleanOtp = String(req.body?.otp || '').trim();
+  const cleanOtp = String(req.body?.otp || req.body?.code || '').trim();
 
   if (!cleanEmail && !req.user) {
     throw new ApiError(400, 'Email address is required');
