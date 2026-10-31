@@ -15,6 +15,7 @@ import {
   acceptOrganizationInvite,
   getOrganizationInvites,
   revokeOrganizationInvite,
+  deleteOrganization,
 } from '../services/organizationService.js';
 
 export const createOrganizationController = asyncHandler(
@@ -100,6 +101,25 @@ export const updateOrganizationController = asyncHandler(
     });
   }
 );
+
+export const deleteOrganizationController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const rawId = req.params.orgId || req.params.id;
+    const orgId = typeof rawId === 'string' ? rawId.trim() : undefined;
+
+    if (!orgId) {
+      return next(new ApiError(400, 'Valid Organization ID is required'));
+    }
+
+    const result = await deleteOrganization(orgId, req.user!.id);
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  }
+);
+
 
 export const getOrganizationMembersController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {

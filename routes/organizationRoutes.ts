@@ -14,7 +14,8 @@ import {
   acceptInviteController,
   getOrganizationInvitesController,
   revokeInviteController,
-  
+  deleteOrganizationController,
+
 } from '../controllers/organizationController.js';
 
 import {
@@ -83,6 +84,14 @@ router.patch(
   validate(updateOrganizationSchema),
   updateOrganizationController
 );
+
+router.delete(
+  '/:id',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  deleteOrganizationController
+);
+
 
 router.get('/:id/members', authMiddleware, requireOrgMember(), getOrganizationMembersController);
 

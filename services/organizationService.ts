@@ -164,6 +164,24 @@ export const updateOrganization = async (orgId: string, data: UpdateOrgInput) =>
   return updatedOrg;
 };
 
+export const deleteOrganization = async (orgId: string, userId: string) => {
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { id: true, name: true, ownerId: true },
+  });
+
+  if (!org) {
+    throw new ApiError(404, 'Organization not found');
+  }
+
+  await prisma.organization.delete({
+    where: { id: orgId },
+  });
+
+  return { message: `Organization '${org.name}' deleted successfully` };
+};
+
+
 export const getOrganizationMembers = async (orgId: string) => {
   
   const org = await prisma.organization.findUnique({
