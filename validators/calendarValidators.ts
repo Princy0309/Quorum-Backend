@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
 export const createCalendarEventSchema = z.object({
-
     title: z.string().min(1, 'Title is required').max(120),
     description: z.string().max(1000).optional(),
     eventType: z.enum(['REMINDER', 'MEETING', 'DEADLINE', 'GENERAL']).default('REMINDER'),
@@ -12,7 +11,16 @@ export const createCalendarEventSchema = z.object({
     attendeeEmails: z.array(z.string().email()).optional().default([]),
     hasReminder: z.boolean().optional().default(false),
     reminderMinutes: z.number().int().min(0).max(10080).optional().default(15),
-});
+}).refine(
+    (data) => {
+        if (!data.endDate) return true;
+        return new Date(data.endDate) >= new Date(data.startDate);
+    },
+    {
+        message: 'End date cannot be earlier than start date',
+        path: ['endDate'],
+    }
+);
 
 export const updateCalendarEventSchema = z.object({
     title: z.string().min(1).max(120).optional(),
@@ -25,7 +33,16 @@ export const updateCalendarEventSchema = z.object({
     attendeeEmails: z.array(z.string().email()).optional(),
     hasReminder: z.boolean().optional(),
     reminderMinutes: z.number().int().min(0).max(10080).optional(),
-});
+}).refine(
+    (data) => {
+        if (!data.startDate || !data.endDate) return true;
+        return new Date(data.endDate) >= new Date(data.startDate);
+    },
+    {
+        message: 'End date cannot be earlier than start date',
+        path: ['endDate'],
+    }
+);
 
 export const monthQuerySchema = z.object({
   year: z.coerce.number().int().min(2020).max(2035),

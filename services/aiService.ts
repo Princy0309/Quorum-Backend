@@ -33,9 +33,16 @@ export const sanitizeAiInput = (input: string): string => {
     .replace(/\$2[abxy]?\$\d{1,2}\$[A-Za-z0-9./]{53}/g, '[REDACTED_HASH]');
 };
 
+export interface AiMediaAttachment {
+  mimeType: string;
+  data: string; // base64 string
+  fileName?: string;
+}
+
 export const generateRawCompletion = async (
   prompt: string,
-  systemInstruction?: string
+  systemInstruction?: string,
+  mediaAttachments?: AiMediaAttachment[]
 ): Promise<RawAiCompletionResult> => {
   const ai = getGenAIClient();
   const requestId = crypto.randomUUID();
@@ -60,9 +67,21 @@ export const generateRawCompletion = async (
     }, 25000);
 
     try {
+      const contentsPayload: any = (mediaAttachments && mediaAttachments.length > 0)
+        ? [
+            ...mediaAttachments.map((m) => ({
+              inlineData: {
+                mimeType: m.mimeType,
+                data: m.data
+              }
+            })),
+            { text: sanitizedPrompt }
+          ]
+        : sanitizedPrompt;
+
       const response = await ai.models.generateContent({
         model,
-        contents: sanitizedPrompt,
+        contents: contentsPayload,
         config: {
           httpOptions: { timeout: 25000 },
           abortSignal: abortController.signal,
