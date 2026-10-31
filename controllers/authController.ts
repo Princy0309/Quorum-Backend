@@ -167,8 +167,12 @@ export const getMe = asyncHandler(async (req: Request, res: Response, next: Next
       name: true,
       email: true,
       role: true,
+      avatar: true,
       isEmailVerified: true,
+      isOnboarded: true,
+      useCases: true,
       createdAt: true,
+      updatedAt: true,
       lastLogin: true,
     },
   });

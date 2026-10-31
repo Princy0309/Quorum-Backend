@@ -92,6 +92,133 @@ export const swaggerDocument = {
         }
       }
     },
+    "/api/users/profile": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Get current user profile",
+        "description": "Fetches current authenticated user's complete profile. Compatible with Web and Mobile apps.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User profile retrieved successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Update current user profile (Partial / JSON)",
+        "description": "Updates current authenticated user's profile fields. Accepts JSON or multipart/form-data. Compatible with Web and Mobile.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Jane Doe"
+                  },
+                  "avatar": {
+                    "type": "string",
+                    "example": "https://cdn.quorum.me/avatars/user.png"
+                  },
+                  "useCases": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "ORGANIZATION",
+                        "FREELANCE",
+                        "HIRE_COLLABORATE",
+                        "COMMUNITY"
+                      ]
+                    }
+                  },
+                  "isOnboarded": {
+                    "type": "boolean",
+                    "example": true
+                  }
+                }
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Jane Doe"
+                  },
+                  "avatar": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Profile picture image file (JPEG, PNG, WEBP, etc.)"
+                  },
+                  "useCases": {
+                    "type": "string",
+                    "description": "JSON string or comma-separated use case enums"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Set/Replace current user profile",
+        "description": "Sets or replaces current authenticated user's profile. Accepts both application/json and multipart/form-data.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/paths/~1api~1users~1profile/patch/requestBody"
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
     "/api/auth/register": {
       "post": {
         "tags": [
