@@ -1,7 +1,7 @@
 import { Express, Request, Response } from 'express';
 import swaggerUi from 'swagger-ui-express';
 
-const swaggerDocument = {
+export const swaggerDocument = {
   "openapi": "3.0.0",
   "info": {
     "title": "Quorum Backend API Documentation",
@@ -6163,6 +6163,829 @@ const swaggerDocument = {
           }
         }
       }
+    },
+    "/api/whiteboards": {
+      "get": {
+        "tags": [
+          "Collaborative Whiteboards"
+        ],
+        "summary": "List user whiteboards",
+        "description": "Retrieves paginated whiteboards accessible to the authenticated user within their organizations.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by organization ID"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search whiteboards by title"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1
+            },
+            "description": "Page number"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            },
+            "description": "Items per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whiteboards retrieved successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Collaborative Whiteboards"
+        ],
+        "summary": "Create a new whiteboard",
+        "description": "Creates a new organization-scoped collaborative whiteboard canvas.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "organizationId"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Sprint Architecture & Brainstorming"
+                  },
+                  "organizationId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "example": "123e4567-e89b-12d3-a456-426614174000"
+                  },
+                  "content": {
+                    "type": "object",
+                    "description": "Initial canvas content containing elements array and viewState",
+                    "example": {
+                      "elements": [],
+                      "viewState": {
+                        "zoom": 1,
+                        "scrollX": 0,
+                        "scrollY": 0
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Whiteboard created successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/whiteboards/{id}": {
+      "get": {
+        "tags": [
+          "Collaborative Whiteboards"
+        ],
+        "summary": "Get whiteboard by ID",
+        "description": "Fetches whiteboard details, element contents, view state, author metadata, and linked meetings.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Whiteboard ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whiteboard details returned"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Whiteboard not found"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Collaborative Whiteboards"
+        ],
+        "summary": "Update whiteboard",
+        "description": "Updates whiteboard title or content with distributed Redis locking and optimistic concurrency checks.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Whiteboard ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "object",
+                    "description": "Canvas content structure"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Whiteboard updated successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Whiteboard not found"
+          },
+          "409": {
+            "description": "Conflict - locked or concurrent version mismatch"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Collaborative Whiteboards"
+        ],
+        "summary": "Delete whiteboard",
+        "description": "Permanently deletes a whiteboard and invalidates all associated Redis session keys.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Whiteboard ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whiteboard deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Whiteboard not found"
+          }
+        }
+      }
+    },
+    "/api/whiteboards/meetings/{code}": {
+      "get": {
+        "tags": [
+          "Collaborative Whiteboards"
+        ],
+        "summary": "Get meeting whiteboards",
+        "description": "Retrieves all whiteboards attached or opened inside a specific meeting session.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting call code or meeting ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meeting whiteboards retrieved successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Meeting not found"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Collaborative Whiteboards"
+        ],
+        "summary": "Create whiteboard for meeting",
+        "description": "Instantly provisions a whiteboard and binds it to the specified video conference call.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting call code or meeting ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Meeting Notes & Diagrams"
+                  },
+                  "organizationId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "content": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Meeting whiteboard created and linked"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/whiteboards/{id}/meetings/{meetingCode}/open": {
+      "post": {
+        "tags": [
+          "Collaborative Whiteboards"
+        ],
+        "summary": "Open existing whiteboard in meeting",
+        "description": "Links and opens an existing whiteboard in the specified meeting, broadcasting whiteboard:opened event to call participants.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Whiteboard ID"
+          },
+          {
+            "name": "meetingCode",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting call code"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whiteboard opened in meeting"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Whiteboard or meeting not found"
+          }
+        }
+      }
+    },
+    "/api/integrations/jira/oauth/authorize-url": {
+      "get": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Get Jira OAuth 2.0 authorization URL",
+        "description": "Generates an Atlassian 3LO OAuth authorization URL with state nonce for connecting a Jira Cloud account.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorize URL generated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "example": "https://auth.atlassian.com/authorize?..."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "429": {
+            "description": "Too many authorization requests"
+          }
+        }
+      }
+    },
+    "/api/integrations/jira/oauth/callback": {
+      "get": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Jira OAuth callback",
+        "description": "Receives the OAuth authorization code and state from Atlassian, exchanges them for tokens, and redirects to client settings.",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorization code from Atlassian"
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Security state nonce"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirects to frontend integration settings"
+          }
+        }
+      }
+    },
+    "/api/integrations/jira/oauth/status": {
+      "get": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Get Jira integration status",
+        "description": "Checks whether the authenticated user has an active Jira Cloud connection and returns connected site details.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Jira connection status retrieved"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/integrations/jira/disconnect": {
+      "post": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Disconnect Jira integration",
+        "description": "Revokes stored OAuth credentials and disconnects Jira Cloud from user account.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Jira disconnected successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/integrations/jira/tickets/my": {
+      "get": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Get user assigned Jira tickets",
+        "description": "Retrieves Jira tickets assigned to the authenticated user from the connected Jira Cloud instance.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tickets retrieved successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/integrations/jira/webhook": {
+      "post": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Jira webhook receiver",
+        "description": "Ingests Jira Cloud webhook notifications for ticket creation, status changes, and issue transitions.",
+        "responses": {
+          "200": {
+            "description": "Webhook processed successfully"
+          },
+          "401": {
+            "description": "Invalid webhook signature"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/teams/{teamId}/jira/tickets": {
+      "get": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Get team Jira tickets",
+        "description": "Retrieves all Jira issues associated with the specified team.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Team ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Team Jira tickets retrieved"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Create team Jira ticket",
+        "description": "Creates a new Jira issue linked to the specified team in Jira Cloud.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Team ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "summary"
+                ],
+                "properties": {
+                  "summary": {
+                    "type": "string",
+                    "example": "Fix auth token refresh in mobile client"
+                  },
+                  "description": {
+                    "type": "string",
+                    "example": "Investigate disconnects during socket reconnect"
+                  },
+                  "issueType": {
+                    "type": "string",
+                    "example": "Bug"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "example": "High"
+                  },
+                  "assigneeAccountId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Jira ticket created successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/teams/{teamId}/jira/tickets/{key}": {
+      "get": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Get team Jira ticket details",
+        "description": "Fetches detailed status, description, assignee, and comments for a team Jira issue.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Team ID"
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Jira issue key (e.g. PROJ-123)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticket details retrieved"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Ticket not found"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/teams/{teamId}/jira/tickets/{key}/status": {
+      "patch": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Transition team Jira ticket status",
+        "description": "Transitions a Jira ticket workflow status (e.g. 'In Progress', 'Done').",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization ID"
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Team ID"
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Jira issue key"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "example": "In Progress"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ticket status updated successfully"
+          },
+          "400": {
+            "description": "Invalid transition status"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
     }
   },
   "tags": [
@@ -6204,7 +7027,15 @@ const swaggerDocument = {
     },
     {
       "name": "Meetings & Video Calling",
-      "description": "High-performance multi-party WebRTC meetings powered by Werift SFU, RTP forwarding, DTLS/SRTP encryption, and call life-cycle control."
+      "description": "High-performance multi-party WebRTC meetings powered by custom SFU architecture, RTP forwarding, DTLS/SRTP encryption, and call life-cycle control."
+    },
+    {
+      "name": "Collaborative Whiteboards",
+      "description": "Real-time multi-user interactive canvas, organization boards, in-meeting live collaboration, and Redis-coordinated persistence."
+    },
+    {
+      "name": "Jira Integration",
+      "description": "Atlassian Jira Cloud OAuth 2.0 (3LO) connection, issue tracking, status transitions, and webhook event processing."
     },
     {
       "name": "Media & Storage",
