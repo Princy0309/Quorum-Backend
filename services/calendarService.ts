@@ -28,6 +28,21 @@ export const createCalendarEvent = async (userId: string, input: CreateEventInpu
         throw new ApiError(400, 'End date cannot be earlier than start date');
     }
 
+    const now = Date.now();
+    const gracePeriodMs = 60 * 1000; // 60s grace period for submission latency and clock drift
+
+    if (input.isAllDay) {
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        if (start.getTime() < startOfToday.getTime()) {
+            throw new ApiError(400, 'Event start date cannot be before today');
+        }
+    } else {
+        if (start.getTime() < now - gracePeriodMs) {
+            throw new ApiError(400, 'Event start date cannot be in the past');
+        }
+    }
+
 
     const event = await prisma.calendarEvent.create({
         data: {
@@ -238,7 +253,7 @@ export const updateCalendarEvent = async (userId: string, eventId: string, input
 
 
     const effectiveStart = input.startDate ? new Date(input.startDate) : existing.startDate;
-    const effectiveEnd = input.endDate !== undefined
+    let effectiveEnd = input.endDate !== undefined
         ? (input.endDate ? new Date(input.endDate) : null)
         : existing.endDate;
 
@@ -247,7 +262,31 @@ export const updateCalendarEvent = async (userId: string, eventId: string, input
     }
 
     if (effectiveEnd && effectiveEnd < effectiveStart) {
-        throw new ApiError(400, 'End date cannot be earlier than start date');
+        if (input.endDate === undefined && existing.endDate && existing.startDate) {
+            const existingDuration = Math.max(existing.endDate.getTime() - existing.startDate.getTime(), 60 * 60 * 1000);
+            effectiveEnd = new Date(effectiveStart.getTime() + existingDuration);
+        } else {
+            throw new ApiError(400, 'End date cannot be earlier than start date');
+        }
+    }
+
+    if (input.startDate !== undefined) {
+        const newStart = new Date(input.startDate);
+        const isAllDay = input.isAllDay !== undefined ? input.isAllDay : existing.isAllDay;
+        const now = Date.now();
+        const gracePeriodMs = 60 * 1000;
+
+        if (isAllDay) {
+            const startOfToday = new Date();
+            startOfToday.setHours(0, 0, 0, 0);
+            if (newStart.getTime() < startOfToday.getTime()) {
+                throw new ApiError(400, 'Event start date cannot be before today');
+            }
+        } else {
+            if (newStart.getTime() < now - gracePeriodMs) {
+                throw new ApiError(400, 'Event start date cannot be in the past');
+            }
+        }
     }
 
     const datesOrReminderChanged =
@@ -263,7 +302,9 @@ export const updateCalendarEvent = async (userId: string, eventId: string, input
             ...(input.description !== undefined && { description: input.description }),
             ...(input.eventType && { eventType: input.eventType }),
             ...(input.startDate != undefined && { startDate: new Date(input.startDate) }),
-            ...(input.endDate !== undefined && { endDate: input.endDate ? new Date(input.endDate) : null }),
+            ...(input.endDate !== undefined
+                ? { endDate: input.endDate ? new Date(input.endDate) : null }
+                : (effectiveEnd !== existing.endDate ? { endDate: effectiveEnd } : {})),
             ...(input.isAllDay !== undefined && { isAllDay: input.isAllDay }),
             ...(input.meetingLink !== undefined && { meetingLink: input.meetingLink }),
             ...(input.attendeeEmails && { attendeeEmails: input.attendeeEmails }),

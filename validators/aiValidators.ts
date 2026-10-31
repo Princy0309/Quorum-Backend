@@ -1,11 +1,47 @@
 import { z } from 'zod';
 
+export const aiFileAttachmentSchema = z.object({
+  fileUrl: z.string().url('Must be a valid URL').max(2048).optional(),
+  url: z.string().url('Must be a valid URL').max(2048).optional(),
+  fileName: z.string().trim().max(255).optional(),
+  fileType: z.string().trim().max(100).optional(),
+  fileSize: z.coerce.number().int().min(0).max(26214400).optional(),
+  mimeType: z.string().trim().max(100).optional(),
+  base64Data: z.string().optional(),
+}).passthrough();
+
+export const aiUploadSchema = z.object({
+  fileName: z.string().trim().min(1, 'fileName is required').max(255),
+  fileSize: z.coerce.number().int().min(1, 'fileSize must be at least 1 byte').max(26214400, 'fileSize cannot exceed 25MB'),
+  mimeType: z.string().trim().max(100).optional(),
+  fileType: z.string().trim().max(100).optional(),
+});
+
 export const aiChatSchema = z.object({
-  prompt: z.string().trim().min(1, 'Prompt cannot be empty').max(10000).optional(),
-  message: z.string().trim().min(1, 'Message cannot be empty').max(10000).optional(),
+  prompt: z.string().trim().max(10000).optional(),
+  message: z.string().trim().max(10000).optional(),
   context: z.string().trim().max(10000).optional(),
-}).refine((data) => Boolean(data.prompt || data.message), {
-  message: 'Prompt or message cannot be empty',
+  fileUrl: z.string().url('Must be a valid URL').max(2048).optional(),
+  url: z.string().url('Must be a valid URL').max(2048).optional(),
+  fileName: z.string().trim().max(255).optional(),
+  fileType: z.string().trim().max(100).optional(),
+  fileSize: z.coerce.number().int().min(0).max(26214400).optional(),
+  mimeType: z.string().trim().max(100).optional(),
+  base64Data: z.string().optional(),
+  attachments: z.array(aiFileAttachmentSchema).max(5).optional(),
+  files: z.array(aiFileAttachmentSchema).max(5).optional(),
+}).passthrough().refine((data) => {
+  const hasText = Boolean((data.prompt && data.prompt.trim()) || (data.message && data.message.trim()));
+  const hasFile = Boolean(
+    data.fileUrl ||
+    data.url ||
+    data.base64Data ||
+    (data.attachments && data.attachments.length > 0) ||
+    (data.files && data.files.length > 0)
+  );
+  return hasText || hasFile;
+}, {
+  message: 'Prompt, message, or at least one file attachment must be provided',
   path: ['prompt']
 });
 

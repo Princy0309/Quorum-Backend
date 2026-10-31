@@ -6,7 +6,8 @@ import {
   searchWorkspaceWithAi,
   getProjectAssistance,
   generateQuickResponses,
-  generateProjectStatusUpdate
+  generateProjectStatusUpdate,
+  AiChatAttachmentInput
 } from '../services/aiChatService.js';
 import { summarizeConversationChat } from '../services/aiSummaryService.js';
 import {
@@ -14,6 +15,7 @@ import {
   getUserAiHistory,
   deleteUserAiHistory
 } from '../services/aiHistoryService.js';
+import { getSignedUploadUrl, uploadBufferToS3 } from '../services/uploadService.js';
 
 const sendAiSuccess = (res: Response, statusCode: number, message: string, data: any) => {
   return res.status(statusCode).json({
@@ -29,11 +31,60 @@ export const chatController = asyncHandler(async (req: Request, res: Response) =
   const userId = req.user?.id;
   const prompt = String(req.body?.prompt || req.body?.message || '').trim();
   const context = req.body?.context;
-  const result = await askAiAssistant(prompt, context);
+
+  const attachments: AiChatAttachmentInput[] = [];
+
+  // 1. Direct multipart file uploads via multer (req.files or req.file)
+  const uploadedFiles = (req.files && Array.isArray(req.files) && req.files.length > 0)
+    ? req.files
+    : ((req as any).file ? [(req as any).file] : []);
+
+  for (const file of uploadedFiles) {
+    attachments.push({
+      buffer: file.buffer,
+      fileName: file.originalname,
+      mimeType: file.mimetype,
+      fileSize: file.size,
+    });
+  }
+
+  // 2. Attachments array in JSON body
+  const bodyAttachments = req.body?.attachments || req.body?.files;
+  if (Array.isArray(bodyAttachments)) {
+    for (const item of bodyAttachments) {
+      if (item && typeof item === 'object') {
+        attachments.push({
+          fileUrl: item.fileUrl || item.url,
+          fileName: item.fileName,
+          fileType: item.fileType,
+          mimeType: item.mimeType,
+          fileSize: item.fileSize ? Number(item.fileSize) : undefined,
+          base64Data: item.base64Data,
+        });
+      }
+    }
+  }
+
+  // 3. Flat single attachment fields in JSON body
+  if (req.body?.fileUrl || req.body?.url || req.body?.base64Data) {
+    attachments.push({
+      fileUrl: req.body.fileUrl || req.body.url,
+      fileName: req.body.fileName,
+      fileType: req.body.fileType,
+      mimeType: req.body.mimeType,
+      fileSize: req.body.fileSize ? Number(req.body.fileSize) : undefined,
+      base64Data: req.body.base64Data,
+    });
+  }
+
+  const result = await askAiAssistant(prompt, context, attachments.length > 0 ? attachments : undefined);
 
   if (userId) {
+    const fileLabel = attachments.length > 0 
+      ? ` [${attachments.length} attachment(s) shared: ${attachments.map(a => a.fileName || 'file').slice(0, 3).join(', ')}]` 
+      : '';
     await recordAiInteraction(userId, {
-      prompt,
+      prompt: (prompt || 'Analyze attached file') + fileLabel,
       response: result.answer,
       actionType: 'chat',
       model: result.metadata?.model,
@@ -42,6 +93,22 @@ export const chatController = asyncHandler(async (req: Request, res: Response) =
   }
 
   return sendAiSuccess(res, 200, 'AI response generated successfully', result);
+});
+
+export const uploadAiFileController = asyncHandler(async (req: Request, res: Response) => {
+  const uploadedFiles = (req.files && Array.isArray(req.files) && req.files.length > 0)
+    ? req.files
+    : ((req as any).file ? [(req as any).file] : []);
+
+  if (uploadedFiles.length > 0) {
+    const file = uploadedFiles[0];
+    const uploadResult = await uploadBufferToS3(file.buffer, file.originalname, 'ai', file.mimetype);
+    return sendAiSuccess(res, 201, 'File uploaded to S3 for AI analysis successfully', uploadResult);
+  }
+
+  const fileName = String(req.body?.fileName || req.body?.name || 'document.pdf').trim();
+  const signedData = await getSignedUploadUrl('ai', fileName);
+  return sendAiSuccess(res, 200, 'S3 presigned upload URL generated for AI file sharing', signedData);
 });
 
 export const summarizeChatController = asyncHandler(async (req: Request, res: Response) => {

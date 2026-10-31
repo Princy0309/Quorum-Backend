@@ -4196,13 +4196,80 @@ export const swaggerDocument = {
         }
       }
     },
+    "/api/ai/upload": {
+      "post": {
+        "tags": [
+          "AI Assistant"
+        ],
+        "summary": "Upload file or request presigned URL for AI analysis",
+        "description": "Uploads a document/image directly or generates an S3 presigned upload URL specifically for sharing files with Quorum AI.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Direct file to upload (image, PDF, spreadsheet, document, or code file up to 25MB)"
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fileName": {
+                    "type": "string",
+                    "example": "quarterly_budget.xlsx"
+                  },
+                  "fileSize": {
+                    "type": "integer",
+                    "example": 204800
+                  },
+                  "mimeType": {
+                    "type": "string",
+                    "example": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Presigned upload URL generated"
+          },
+          "201": {
+            "description": "File uploaded directly to S3"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "429": {
+            "description": "Too many requests"
+          }
+        }
+      }
+    },
     "/api/ai/chat": {
       "post": {
         "tags": [
           "AI Assistant"
         ],
-        "summary": "Conversational AI question-answering assistant",
-        "description": "Provides intelligent answers with optional context budgeting and privacy sanitization.",
+        "summary": "Conversational AI question-answering assistant with file sharing",
+        "description": "Provides intelligent answers, analyzes attached files (images, PDFs, documents, text files), and synthesizes workspace context.",
         "security": [
           {
             "BearerAuth": []
@@ -4217,17 +4284,64 @@ export const swaggerDocument = {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "prompt"
-                ],
                 "properties": {
                   "prompt": {
                     "type": "string",
-                    "example": "How do I invite external collaborators to a team in Quorum?"
+                    "example": "Please summarize the key takeaways from the attached financial report."
                   },
                   "context": {
                     "type": "string",
-                    "example": "Optional context string (up to 10,000 characters)"
+                    "example": "Optional workspace context string"
+                  },
+                  "fileUrl": {
+                    "type": "string",
+                    "example": "https://bucket.s3.amazonaws.com/uploads/ai/report.pdf",
+                    "description": "S3 or public URL of an attached document or image to analyze"
+                  },
+                  "fileName": {
+                    "type": "string",
+                    "example": "report.pdf"
+                  },
+                  "fileType": {
+                    "type": "string",
+                    "example": "application/pdf"
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "description": "Array of multiple attached files for multimodal AI analysis",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "fileUrl": {
+                          "type": "string"
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "mimeType": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Attached image, PDF, or text file to analyze"
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "example": "Explain what this diagram shows"
+                  },
+                  "context": {
+                    "type": "string"
                   }
                 }
               }

@@ -22,6 +22,7 @@ const authorizeLimiter = rateLimit({
     message: 'Too many Jira authorization attempts. Please wait a minute and try again.',
   },
   keyGenerator: (req) => req.user?.id || req.ip || 'anonymous',
+  validate: false,
   standardHeaders: true,
   legacyHeaders: false,
 });
