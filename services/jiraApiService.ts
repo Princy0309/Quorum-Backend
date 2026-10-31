@@ -120,3 +120,13 @@ export async function getJiraTransitions(cloudId: string, userId: string, issueK
   });
 }
 
+export async function getJiraAssignableUsers(cloudId: string, userId: string, projectKey: string) {
+  return callJiraApi<Array<any>>({
+    cloudId,
+    userId,
+    endpoint: `/user/assignable/search?project=${encodeURIComponent(projectKey)}`,
+    method: 'GET',
+  });
+}
+
+

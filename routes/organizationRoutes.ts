@@ -22,6 +22,7 @@ import {
   getTeamTicketsController,
   getTicketDetailsController,
   transitionTicketStatusController,
+  getTeamAssigneesController,
 } from '../controllers/jiraTicketController.js';
 
 
@@ -286,4 +287,22 @@ router.patch(
   transitionTicketStatusController
 );
 
+// 4. Get Team or Organization Jira Assignable Users
+// Supports multiple path aliases so mobile apps can query by team or org
+router.get(
+  [
+    '/:id/teams/:teamId/jira/assignees',
+    '/:id/teams/:teamId/jira/users',
+    '/:id/teams/:teamId/assignees',
+    '/:id/integrations/jira/assignees',
+    '/:id/integrations/jira/users',
+    '/:id/jira/assignees',
+    '/:id/jira/users',
+  ],
+  authMiddleware,
+  requireOrgMember(),
+  getTeamAssigneesController
+);
+
 export default router;
+

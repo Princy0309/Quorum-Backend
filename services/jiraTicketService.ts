@@ -1,7 +1,7 @@
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import logger from '../utils/logger.js';
-import { callJiraApi, getJiraTransitions } from './jiraApiService.js';
+import { callJiraApi, getJiraTransitions, getJiraAssignableUsers } from './jiraApiService.js';
 
 export interface CreateTicketInput {
   summary: string;
@@ -388,5 +388,139 @@ export async function getMyAssignedJiraTickets(userId: string) {
 
   return tickets;
 }
+
+export async function getTeamJiraAssignees(userId: string, teamId: string) {
+  if (!teamId) {
+    throw new ApiError(400, 'Team ID is required');
+  }
+
+  const team = await prisma.team.findUnique({
+    where: { id: teamId },
+    select: { id: true, organizationId: true },
+  });
+
+  if (!team) {
+    throw new ApiError(404, 'Team not found');
+  }
+
+  const isTeamMember = await prisma.teamMember.findUnique({
+    where: {
+      teamId_userId: {
+        teamId,
+        userId,
+      },
+    },
+  });
+
+  const isOrgAdmin = await prisma.organizationMember.findFirst({
+    where: {
+      organizationId: team.organizationId,
+      userId,
+      role: 'ORG_ADMIN',
+    },
+  });
+
+  if (!isTeamMember && !isOrgAdmin) {
+    throw new ApiError(403, 'You must be a team member or Org Admin to view assignees');
+  }
+
+  const orgIntegration = await prisma.orgJiraIntegration.findUnique({
+    where: { organizationId: team.organizationId },
+  });
+
+  if (!orgIntegration || !orgIntegration.isActive) {
+    return [];
+  }
+
+  try {
+    const rawUsers = await getJiraAssignableUsers(
+      orgIntegration.cloudId,
+      userId,
+      orgIntegration.projectKey
+    );
+
+    return (rawUsers || []).map((u: any) => ({
+      accountId: u.accountId,
+      displayName: u.displayName || u.name,
+      email: u.emailAddress || null,
+      avatarUrl: u.avatarUrls?.['48x48'] || u.avatarUrls?.['32x32'] || u.avatarUrls?.['24x24'] || null,
+      active: u.active ?? true,
+    }));
+  } catch (err: any) {
+    logger.warn(`Failed to fetch assignable users from Jira: ${err.message}`);
+    // Graceful fallback to Quorum team members who have linked Jira
+    const teamMembers = await prisma.teamMember.findMany({
+      where: { teamId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            jiraLink: {
+              select: {
+                jiraAccountId: true,
+                jiraDisplayName: true,
+                jiraEmail: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return teamMembers
+      .filter((m) => m.user.jiraLink?.jiraAccountId)
+      .map((m) => ({
+        accountId: m.user.jiraLink!.jiraAccountId,
+        displayName: m.user.jiraLink!.jiraDisplayName || m.user.name,
+        email: m.user.jiraLink!.jiraEmail || m.user.email,
+        active: true,
+      }));
+  }
+}
+
+export async function getOrgJiraAssignees(userId: string, organizationId: string) {
+  if (!organizationId) {
+    throw new ApiError(400, 'Organization ID is required');
+  }
+
+  const membership = await prisma.organizationMember.findFirst({
+    where: { organizationId, userId },
+  });
+
+  if (!membership) {
+    throw new ApiError(403, 'You must be an organization member to view assignees');
+  }
+
+  const orgIntegration = await prisma.orgJiraIntegration.findUnique({
+    where: { organizationId },
+  });
+
+  if (!orgIntegration || !orgIntegration.isActive) {
+    return [];
+  }
+
+  try {
+    const rawUsers = await getJiraAssignableUsers(
+      orgIntegration.cloudId,
+      userId,
+      orgIntegration.projectKey
+    );
+
+    return (rawUsers || []).map((u: any) => ({
+      accountId: u.accountId,
+      displayName: u.displayName || u.name,
+      email: u.emailAddress || null,
+      avatarUrl: u.avatarUrls?.['48x48'] || u.avatarUrls?.['32x32'] || u.avatarUrls?.['24x24'] || null,
+      active: u.active ?? true,
+    }));
+  } catch (err: any) {
+    logger.warn(`Failed to fetch assignable users for org: ${err.message}`);
+    return [];
+  }
+}
+
+
 
 

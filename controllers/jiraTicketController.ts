@@ -9,6 +9,8 @@ import {
   getJiraTicketDetails,
   transitionJiraTicketStatus,
   getMyAssignedJiraTickets,
+  getTeamJiraAssignees,
+  getOrgJiraAssignees,
 } from '../services/jiraTicketService.js';
 
 const createTicketSchema = z.object({
@@ -113,3 +115,25 @@ export const getMyTicketsController = asyncHandler(async (req: Request, res: Res
   const tickets = await getMyAssignedJiraTickets(userId);
   return sendSuccess(res, 200, 'My assigned Jira tickets retrieved', tickets);
 });
+
+export const getTeamAssigneesController = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
+  const teamId = (req.params.teamId || req.params.id) as string;
+  const organizationId = (req.params.id || req.params.organizationId) as string;
+
+  if (teamId && req.params.teamId) {
+    const assignees = await getTeamJiraAssignees(userId, teamId);
+    return sendSuccess(res, 200, 'Team Jira assignees retrieved', assignees);
+  } else if (organizationId) {
+    const assignees = await getOrgJiraAssignees(userId, organizationId);
+    return sendSuccess(res, 200, 'Organization Jira assignees retrieved', assignees);
+  } else {
+    throw new ApiError(400, 'Team ID or Organization ID is required in URL parameters');
+  }
+});
+
+
