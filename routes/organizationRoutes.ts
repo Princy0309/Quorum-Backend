@@ -62,6 +62,8 @@ import { validate } from '../middlewares/validate.js';
 import {
   createOrganizationSchema,
   updateOrganizationSchema,
+  createTeamSchema,
+  updateTeamSchema,
 } from '../validators/organizationValidators.js';
 
 const router = Router();
@@ -126,6 +128,7 @@ router.post(
   '/:id/teams',
   authMiddleware,
   requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  validate(createTeamSchema),
   createTeamController
 );
 
@@ -147,6 +150,7 @@ router.patch(
   '/:id/teams/:teamId',
   authMiddleware,
   requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  validate(updateTeamSchema),
   updateTeamController
 );
 

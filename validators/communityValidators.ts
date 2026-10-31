@@ -2,12 +2,12 @@ import { z } from 'zod';
 
 export const createCommunitySchema = z.object({
   name: z.string().trim().min(2, 'Community name must be between 2 and 100 characters').max(100, 'Community name must be between 2 and 100 characters'),
-  description: z.string().trim().max(1000, 'Community description cannot exceed 1000 characters').optional().nullable()
+  description: z.string().trim().max(300, 'Community description cannot exceed 300 characters').optional().nullable()
 });
 
 export const updateCommunitySchema = z.object({
   name: z.string().trim().min(2, 'Community name must be between 2 and 100 characters').max(100, 'Community name must be between 2 and 100 characters').optional(),
-  description: z.string().trim().max(1000, 'Community description cannot exceed 1000 characters').optional().nullable()
+  description: z.string().trim().max(300, 'Community description cannot exceed 300 characters').optional().nullable()
 }).refine((data) => data.name !== undefined || data.description !== undefined, {
   message: 'At least one field (name or description) must be provided'
 });
@@ -50,13 +50,13 @@ export const respondInviteSchema = z.object({
 });
 
 export const createChannelSchema = z.object({
-  name: z.string().trim().min(2).max(50),
-  description: z.string().trim().max(500).optional().nullable()
+  name: z.string().trim().min(2, 'Channel name must be between 2 and 50 characters').max(50, 'Channel name must be between 2 and 50 characters'),
+  description: z.string().trim().max(300, 'Channel description cannot exceed 300 characters').optional().nullable()
 });
 
 export const updateChannelSchema = z.object({
-  name: z.string().trim().min(2).max(50).optional(),
-  description: z.string().trim().max(500).optional().nullable()
+  name: z.string().trim().min(2, 'Channel name must be between 2 and 50 characters').max(50, 'Channel name must be between 2 and 50 characters').optional(),
+  description: z.string().trim().max(300, 'Channel description cannot exceed 300 characters').optional().nullable()
 }).refine((data) => data.name !== undefined || data.description !== undefined, {
   message: 'At least one field (name or description) must be provided'
 });

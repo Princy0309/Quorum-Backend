@@ -159,14 +159,27 @@ export const searchLimiter = (req: Request, res: Response, next: NextFunction): 
 
 export const otpRateLimiter = new RateLimiterRedis({
   storeClient: redisClient,
-  keyPrefix: 'otp_v2',
-  points: 10,
+  keyPrefix: 'otp_send_v3',
+  points: 15,
   duration: 15 * 60,
-  blockDuration: 5 * 60,
+  blockDuration: 2 * 60,
   insuranceLimiter: new RateLimiterMemory({
-    points: 10,
+    points: 15,
     duration: 15 * 60,
-    blockDuration: 5 * 60
+    blockDuration: 2 * 60
+  })
+});
+
+export const otpVerifyRateLimiter = new RateLimiterRedis({
+  storeClient: redisClient,
+  keyPrefix: 'otp_verify_v3',
+  points: 40,
+  duration: 15 * 60,
+  blockDuration: 2 * 60,
+  insuranceLimiter: new RateLimiterMemory({
+    points: 40,
+    duration: 15 * 60,
+    blockDuration: 2 * 60
   })
 });
 
@@ -175,9 +188,21 @@ export const otpLimiter = (req: Request, res: Response, next: NextFunction): voi
     .then(() => next())
     .catch((err) => {
       if (err && err.remainingPoints !== undefined) {
-        return res.status(429).json({ success: false, statusCode: 429, message: 'Too many OTP requests, try again after 15 minutes.' });
+        return res.status(429).json({ success: false, statusCode: 429, message: 'Too many OTP requests, try again shortly.' });
       }
       logger.warn('OTP rate limiter encountered an error, failing open:', err);
+      return next();
+    });
+};
+
+export const otpVerifyLimiter = (req: Request, res: Response, next: NextFunction): void => {
+  otpVerifyRateLimiter.consume(req.ip || '127.0.0.1')
+    .then(() => next())
+    .catch((err) => {
+      if (err && err.remainingPoints !== undefined) {
+        return res.status(429).json({ success: false, statusCode: 429, message: 'Too many verification attempts, please try again shortly.' });
+      }
+      logger.warn('OTP verify rate limiter encountered an error, failing open:', err);
       return next();
     });
 };

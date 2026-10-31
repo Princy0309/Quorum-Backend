@@ -7,7 +7,7 @@
 [![Prisma](https://img.shields.io/badge/Prisma-5.x-darkblue.svg)](https://www.prisma.io/)
 [![Redis](https://img.shields.io/badge/Redis-7+-red.svg)](https://redis.io/)
 [![BullMQ](https://img.shields.io/badge/BullMQ-5.x-red.svg)](https://bullmq.io/)
-[![WebRTC Werift](https://img.shields.io/badge/WebRTC-Werift%20SFU-orange.svg)](https://github.com/shinyishi/werift-webrtc)
+[![WebRTC SFU](https://img.shields.io/badge/WebRTC-SFU%20Engine-orange.svg)](#webrtc--sfu-video-architecture)
 [![Swagger](https://img.shields.io/badge/OpenAPI-3.0-brightgreen.svg)](https://swagger.io/)
 
 Quorum is an enterprise-grade real-time collaboration and workspace platform. It unites team chat, multi-tenant organizations, scoped teams, community forums with channels, collaborative calendars, AI-assisted productivity, and high-capacity WebRTC multi-party video conferencing backed by a custom Selective Forwarding Unit (SFU).
@@ -36,6 +36,8 @@ Quorum is an enterprise-grade real-time collaboration and workspace platform. It
    - [Notifications & Device Tokens](#12-notifications--device-tokens)
    - [AI Workplace Assistant](#13-ai-workplace-assistant)
    - [Personal Saved Items & Collections](#14-personal-saved-items--collections)
+   - [Collaborative Whiteboards](#15-collaborative-whiteboards)
+   - [Jira Cloud Integration](#16-jira-cloud-integration)
 7. [Real-Time WebSocket Architecture](#real-time-websocket-architecture)
 8. [WebRTC / SFU Video Architecture](#webrtc--sfu-video-architecture)
 9. [Background Queues & Workers](#background-queues--workers)
@@ -60,9 +62,12 @@ Quorum Backend includes a fully interactive OpenAPI 3.0 specification mounted vi
 ## Key Platform Features
 
 - **Multi-Tenant Organizations & RBAC:** Hierarchical multi-tenancy with Role-Based Access Control (`ORG_ADMIN`, `TEAM_HEAD`, `MEMBER`), scoped teams, member management, tokenized join links, and team task tracking.
+- **Collaborative Whiteboard Canvas:** Real-time multi-user interactive canvas with fine-grained element-level synchronization, distributed Redis mutex locking (`SET NX PX` with Lua heartbeat renewal), optimistic concurrency versioning (`_version`), and debounced database persistence.
+- **Atlassian Jira Cloud Integration:** OAuth 2.0 (3LO) authorization flow, team issue creation, assigned ticket tracking, real-time workflow status transitions, and webhook event ingestion.
 - **Communities & Thematic Channels:** Public and private spaces, customizable discussion channels (`#announcements`, `#dev`), threaded discussions, media attachments, and real-time live feed updates.
 - **Real-Time Direct & Group Messaging:** 1-on-1 direct messaging, multi-user group chats, @user mentions with push notifications, read receipts, typing indicators, and message search.
-- **Selective Forwarding Unit (SFU) Video Calling:** Multi-party audio/video conferencing built with [Werift](https://github.com/shinyishi/werift-webrtc). Uses native RTP packet forwarding with authentic DTLS-SRTP encryption, RTCP PLI keyframe generation, and dynamic UDP port allocation (40000–40100).
+- **Auto-Healing WebSocket Sessions:** Transparent handshake authentication that validates active, unrevoked PostgreSQL refresh tokens whenever short-lived 15-minute access tokens expire, keeping live calls, whiteboards, and chats connected without dropouts.
+- **Selective Forwarding Unit (SFU) Video Calling:** Multi-party audio/video conferencing using native RTP packet forwarding with authentic DTLS-SRTP encryption, RTCP PLI keyframe generation, and dynamic UDP port allocation (40000–40100).
 - **Intelligent Workspace AI (Google Gemini):** Grounded workspace assistance, intelligent conversation and meeting transcript summarization, contextual quick replies, and interaction history tracking.
 - **Calendar & Scheduled Reminders:** Collaborative event management (Reminders, Meetings, Deadlines, General) integrated with BullMQ background delayed jobs for automatic email delivery.
 - **Enterprise Media Uploads:** Direct-to-S3 presigned URLs protected by a dual-tier rate limiting system (burst limiter: 10 req/min, daily quota: 100 uploads/24h).
@@ -78,10 +83,11 @@ Quorum Backend includes a fully interactive OpenAPI 3.0 specification mounted vi
 | **Runtime & Language** | Node.js 20+, TypeScript 5.x | High-throughput async I/O, static type safety |
 | **Web Framework** | Express.js 4.x, CORS, Helmet, CSRF protection | REST API routing, security middleware, validation |
 | **Database & ORM** | PostgreSQL 15+, Prisma ORM 5.x | Relational storage with multi-file modular schemas |
-| **In-Memory Cache** | Redis 7+ (`ioredis`) | Session revocation, OTP tracking, presence, burst rate limits |
+| **In-Memory Cache & Mutex** | Redis 7+ (`ioredis`) | Session revocation, OTP tracking, distributed board mutex, presence, burst rate limits |
 | **Background Queues** | BullMQ 5.x | Asynchronous email dispatch, digests, scheduled calendar reminders |
-| **Real-Time Gateway** | Socket.IO 4.x | Bi-directional WebSocket events for chat, presence, SFU signaling |
-| **Media / SFU Engine** | Werift WebRTC SFU | Low-latency multi-party audio/video forwarding (UDP 40000–40100) |
+| **Real-Time Gateway** | Socket.IO 4.x | Bi-directional WebSocket events for chat, whiteboard, presence, SFU signaling |
+| **Media / SFU Engine** | WebRTC SFU Media Engine | Low-latency multi-party audio/video forwarding (UDP 40000–40100) |
+| **Enterprise Integrations** | Atlassian Jira Cloud (3LO OAuth 2.0) | Cross-platform issue management, status synchronization, and webhooks |
 | **Cloud Storage** | AWS S3 (`@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`) | Presigned secure file uploads and asset storage |
 | **Push Notifications** | Firebase Admin SDK (FCM) | Cross-platform mobile & web push notifications |
 | **Workplace AI** | Google Gemini (`@google/genai`) | Contextual workplace intelligence, conversation summarization |
@@ -392,22 +398,55 @@ The server exposes standard REST APIs under `/api/*` (with `/api/v1/*` aliases f
 | `PATCH` | `/api/saved-items/collections/:id` | Bearer JWT | Edit collection name or color. |
 | `DELETE` | `/api/saved-items/collections/:id` | Bearer JWT | Delete collection (keeps saved items uncategorized). |
 
+### 15. Collaborative Whiteboards
+
+| Method | Endpoint | Auth | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/whiteboards` | Bearer JWT | List whiteboards within the user's organizations (`organizationId`, `search`, `page`, `limit`). |
+| `POST` | `/api/whiteboards` | Bearer JWT | Create a new organization whiteboard canvas (`title`, `organizationId`, `content`). |
+| `GET` | `/api/whiteboards/:id` | Bearer JWT | Retrieve full whiteboard state, element tree, view state, and linked meetings. |
+| `PATCH` | `/api/whiteboards/:id` | Bearer JWT | Coordinated update for whiteboard title or content protected by distributed Redis locking. |
+| `DELETE` | `/api/whiteboards/:id` | Bearer JWT | Permanently delete whiteboard and clean up Redis session keys. |
+| `GET` | `/api/whiteboards/meetings/:code` | Bearer JWT | List all whiteboards attached or opened inside a meeting. |
+| `POST` | `/api/whiteboards/meetings/:code` | Bearer JWT | Create and link a new whiteboard directly to a meeting session. |
+| `POST` | `/api/whiteboards/:id/meetings/:meetingCode/open` | Bearer JWT | Open an existing whiteboard in a live meeting with real-time participant broadcast. |
+
+### 16. Jira Cloud Integration
+
+| Method | Endpoint | Auth | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/integrations/jira/oauth/authorize-url` | Bearer JWT | Generate Atlassian OAuth 2.0 (3LO) authorization URL with CSRF state nonce. |
+| `GET` | `/api/integrations/jira/oauth/callback` | None | Handle Atlassian OAuth callback, exchange code for tokens, and redirect to client. |
+| `GET` | `/api/integrations/jira/oauth/status` | Bearer JWT | Retrieve Jira Cloud connection status and connected site metadata. |
+| `POST` | `/api/integrations/jira/disconnect` | Bearer JWT | Revoke Jira OAuth credentials and disconnect user account. |
+| `GET` | `/api/integrations/jira/tickets/my` | Bearer JWT | Fetch Jira tickets assigned to the authenticated user. |
+| `POST` | `/api/integrations/jira/webhook` | Webhook Sig | Ingest Jira Cloud webhook events (ticket creation, status transitions). |
+| `GET` | `/api/organizations/:id/teams/:teamId/jira/tickets` | Bearer JWT | Retrieve Jira tickets associated with a specific team. |
+| `POST` | `/api/organizations/:id/teams/:teamId/jira/tickets` | Bearer JWT | Create a new Jira ticket for a team. |
+| `GET` | `/api/organizations/:id/teams/:teamId/jira/tickets/:key` | Bearer JWT | Get full details of a team Jira issue. |
+| `PATCH` | `/api/organizations/:id/teams/:teamId/jira/tickets/:key/status` | Bearer JWT | Transition a team Jira ticket workflow status. |
+
 ---
 
 ## Real-Time WebSocket Architecture
 
-Quorum utilizes **Socket.IO** for low-latency bidirectional communication across messaging, community feeds, and video call signaling:
+Quorum utilizes **Socket.IO** for low-latency bidirectional communication across messaging, community feeds, interactive whiteboards, and video call signaling:
 
-### Client Connection
-Clients connect to `/` with JWT token authorization:
+### Client Connection & Auto-Healing Resilience
+Clients connect to `/` with JWT authorization. The gateway features **transparent session auto-healing**:
 ```javascript
 import { io } from 'socket.io-client';
 
 const socket = io('http://localhost:5000', {
   auth: { token: 'Bearer <accessToken>' },
+  withCredentials: true,
   transports: ['websocket']
 });
 ```
+
+- **Expired Token Recovery:** When a short-lived (15-minute) access token expires in memory, the server inspects the active `refreshToken` cookie sent in the handshake headers.
+- **Database Verification:** It verifies the cryptographic signature and queries PostgreSQL (`prisma.refreshToken.findUnique`). If the session is active and not revoked (`!storedToken.revokedAt`), the socket is authenticated transparently.
+- **Strict Security:** Unauthenticated users, forged tokens, or revoked sessions are immediately rejected (`Authentication error: Invalid or expired token`).
 
 ### Core Event Catalog
 
@@ -419,19 +458,28 @@ const socket = io('http://localhost:5000', {
 | **Read Receipts** | `message:read` | `message:read` | Read receipt timestamp broadcast to message senders. |
 | **Community Feed** | — | `new_post`, `new_comment`, `post_updated` | Live community broadcast eliminating manual browser refreshes. |
 | **Notifications** | — | `new_notification`, `unread_count_update` | Instant push notification badge increment. |
-| **SFU Video Signaling** | `join-room`, `publish-track`, `subscribe-track`, `ice-candidate` | `track-published`, `user-joined`, `user-left`, `peer-ice-candidate` | WebRTC SDP negotiation and ICE candidate exchange for Werift SFU. |
+| **Whiteboard Session** | `whiteboard:join`, `whiteboard:leave` | `whiteboard:user-joined`, `whiteboard:user-left` | Board room joining, presence tracking across cluster nodes via Redis hashes (`whiteboard:<id>:users`). |
+| **Whiteboard Drawing** | `whiteboard:draw-element`, `whiteboard:elements-change` | `whiteboard:element-updated`, `whiteboard:elements-changed` | Fine-grained element-level synchronization, version incrementing, and peer broadcast. |
+| **Whiteboard Canvas** | `whiteboard:clear`, `whiteboard:view-state` | `whiteboard:cleared`, `whiteboard:view-state` | Canvas reset and pan/zoom view state synchronization across participants. |
+| **Whiteboard Cursors** | `whiteboard:cursor-move` | `whiteboard:cursor-moved` | Ephemeral, throttled (40ms) live cursor position broadcasting. |
+| **SFU Video Signaling** | `join-room`, `publish-track`, `subscribe-track`, `ice-candidate` | `track-published`, `user-joined`, `user-left`, `peer-ice-candidate` | WebRTC SDP negotiation and ICE candidate exchange for custom SFU engine. |
+
+### Whiteboard Concurrency & Redis Distributed Lock
+- **Element-Level Hashes:** Whiteboard elements are tracked as individual key-value entries in Redis Hashes (`whiteboard:<id>:elements`) and local memory Maps. Simultaneous edits on different elements never conflict.
+- **Distributed Mutex (`SET NX PX` + Lua Heartbeat):** To protect database commits across multiple Node.js cluster instances, the server acquires a Redis distributed lock (`whiteboard:<id>:lock`) with automatic Lua heartbeat renewal (`pexpire`).
+- **Debounced Snapshot Flush:** Updates write instantly to Redis memory (sub-millisecond) and schedule a debounced flush (`SAVE_DEBOUNCE_MS = 2500ms`). When users finish drawing or leave the room, a single consolidated snapshot is committed to PostgreSQL under an advisory transaction lock (`pg_advisory_xact_lock`).
 
 ---
 
 ## WebRTC / SFU Video Architecture
 
-Quorum uses a custom Selective Forwarding Unit (SFU) architecture implemented on top of [Werift](https://github.com/shinyishi/werift-webrtc):
+Quorum uses a custom Selective Forwarding Unit (SFU) architecture implemented as a native WebRTC media engine:
 
 ```
 +-----------------------------------------------------------------------------------+
 |                              QUORUM SELECTIVE FORWARDING UNIT                     |
 |                                                                                   |
-|  [Publisher A] ---> (DTLS/SRTP) ---> [Werift PeerConnection]                      |
+|  [Publisher A] ---> (DTLS/SRTP) ---> [SFU Media Engine]                           |
 |                                             |                                     |
 |                                      (Native RTP Stream)                          |
 |                                             |                                     |

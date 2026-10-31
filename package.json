@@ -11,6 +11,7 @@
     "db:migrate": ".\\node_modules\\.bin\\prisma migrate dev",
     "db:generate": ".\\node_modules\\.bin\\prisma generate",
     "db:studio": ".\\node_modules\\.bin\\prisma studio",
+    "db:clear-user-data": "tsx scripts/clearUserData.ts",
     "build": "tsc"
   },
   "repository": {
