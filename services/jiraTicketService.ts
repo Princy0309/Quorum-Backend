@@ -488,6 +488,54 @@ export async function getTeamJiraAssignees(userId: string, teamId: string) {
     return [];
   }
 
+  // 1. Fetch team members and org admins so ONLY this team's members appear in the dropdown
+  const [teamMembers, orgAdmins] = await Promise.all([
+    prisma.teamMember.findMany({
+      where: { teamId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            jiraLink: {
+              select: {
+                jiraAccountId: true,
+                jiraEmail: true,
+              },
+            },
+          },
+        },
+      },
+    }),
+    prisma.organizationMember.findMany({
+      where: { organizationId: team.organizationId, role: 'ORG_ADMIN' },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            jiraLink: {
+              select: {
+                jiraAccountId: true,
+                jiraEmail: true,
+              },
+            },
+          },
+        },
+      },
+    }),
+  ]);
+
+  // Set of allowed emails and accountIds for this team (including Org Admins)
+  const allowedEmails = new Set<string>();
+  const allowedAccountIds = new Set<string>();
+
+  for (const m of [...teamMembers, ...orgAdmins]) {
+    if (m.user.email) allowedEmails.add(m.user.email.toLowerCase());
+    if (m.user.jiraLink?.jiraEmail) allowedEmails.add(m.user.jiraLink.jiraEmail.toLowerCase());
+    if (m.user.jiraLink?.jiraAccountId) allowedAccountIds.add(m.user.jiraLink.jiraAccountId);
+  }
+
   try {
     const rawUsers = await getJiraAssignableUsers(
       orgIntegration.cloudId,
@@ -495,7 +543,16 @@ export async function getTeamJiraAssignees(userId: string, teamId: string) {
       orgIntegration.projectKey
     );
 
-    return (rawUsers || []).map((u: any) => ({
+    // Filter Atlassian assignees so only members of THIS team (and Org Admin) appear
+    const filtered = (rawUsers || []).filter((u: any) => {
+      const email = u.emailAddress?.toLowerCase();
+      const accountId = u.accountId;
+      return (email && allowedEmails.has(email)) || (accountId && allowedAccountIds.has(accountId));
+    });
+
+    const finalUsers = filtered.length > 0 ? filtered : (rawUsers || []);
+
+    return finalUsers.map((u: any) => ({
       accountId: u.accountId,
       displayName: u.displayName || u.name,
       email: u.emailAddress || null,
@@ -503,6 +560,7 @@ export async function getTeamJiraAssignees(userId: string, teamId: string) {
       active: u.active ?? true,
     }));
   } catch (err: any) {
+
     logger.warn(`Failed to fetch assignable users from Jira: ${err.message}`);
     // Graceful fallback to Quorum team members who have linked Jira
     const teamMembers = await prisma.teamMember.findMany({
