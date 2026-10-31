@@ -59,7 +59,7 @@ export const sendVerificationOTP = asyncHandler(async (req: Request, res: Respon
     return sendSuccess(res, 200, 'Verification code sent. Please check your inbox.');
   }
 
-  return sendSuccess(res, 200, 'If an account with that email exists and is unverified, a verification code has been sent.');
+  throw new ApiError(400, 'Registration session expired or not found. Please sign up again.');
 });
 
 export const verifyEmail = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
