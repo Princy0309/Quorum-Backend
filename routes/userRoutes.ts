@@ -3,7 +3,9 @@ import {
   updateOnboarding,
   searchUsersController,
   getUserProfileController,
-  updateUserProfileController
+  updateUserProfileController,
+  getUserPresenceController,
+  getBatchUserPresenceController
 } from '../controllers/userController.js';
 import { authMiddleware, requireEmailVerified } from '../middlewares/authMiddleware.js';
 import { validate } from '../middlewares/validate.js';
@@ -40,6 +42,12 @@ router.patch(
   validate(onboardingSchema),
   updateOnboarding
 );
+
+// Presence endpoints
+router.get('/presence', authMiddleware, getBatchUserPresenceController);
+router.post('/presence/batch', authMiddleware, getBatchUserPresenceController);
+router.get('/presence/:userId', authMiddleware, getUserPresenceController);
+router.get('/:userId/presence', authMiddleware, getUserPresenceController);
 
 router.get('/search', authMiddleware, searchLimiter, searchUsersController);
 router.get('/', authMiddleware, searchLimiter, searchUsersController);

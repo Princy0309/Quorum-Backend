@@ -13,6 +13,7 @@ import {
   editMessage,
   deleteMessage
 } from '../services/chatService.js';
+import { getMultipleUserPresences } from '../services/presenceService.js';
 import { ApiError } from '../utils/ApiError.js';
 
 const parseAndValidatePagination = (
@@ -411,5 +412,44 @@ export const deleteMessageController = async (req: Request, res: Response, next:
   }
 };
 
+export const getConversationPresenceController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
 
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
 
+    const conversation = await getConversationById(userId, conversationId);
+    const participantUserIds = conversation.participants
+      .map((p) => p.userId)
+      .filter((id) => id !== userId);
+
+    const presenceMap = await getMultipleUserPresences(participantUserIds);
+    const presencesObj: Record<string, { isOnline: boolean; lastSeen: Date | null }> = {};
+
+    presenceMap.forEach((val, pUserId) => {
+      presencesObj[pUserId] = {
+        isOnline: val.isOnline,
+        lastSeen: val.lastSeen || null
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Conversation presence retrieved successfully',
+      data: {
+        conversationId: conversation.id,
+        presences: presencesObj
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
