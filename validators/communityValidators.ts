@@ -60,3 +60,18 @@ export const updateChannelSchema = z.object({
 }).refine((data) => data.name !== undefined || data.description !== undefined, {
   message: 'At least one field (name or description) must be provided'
 });
+
+export const sendJoinRequestSchema = z.object({
+  message: z.string().trim().max(300, 'Message cannot exceed 300 characters').optional().nullable()
+});
+
+export const respondJoinRequestSchema = z.object({
+  action: z.enum(['accept', 'reject', 'approve', 'decline'])
+});
+
+export const searchCommunityQuerySchema = z.object({
+  q: z.string().optional(),
+  search: z.string().optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional().default(20)
+});
