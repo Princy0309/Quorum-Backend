@@ -33,6 +33,13 @@ export interface PushPayload {
   title: string;
   body: string;
   data?: Record<string, string>;
+  badge?: number;
+  sound?: string;
+  channelId?: string;
+  conversationId?: string;
+  category?: string;
+  imageUrl?: string;
+  priority?: 'high' | 'normal';
 }
 
 export interface SendFCMResult {
@@ -66,14 +73,63 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
     const batchTokens = tokens.slice(i, i + FCM_BATCH_SIZE);
 
     try {
-      const response = await firebaseMessaging.sendEachForMulticast({
+      const messagePayload: any = {
         tokens: batchTokens,
         notification: {
           title,
-          body
+          body,
+          ...(payload.imageUrl ? { imageUrl: payload.imageUrl } : {})
         },
-        data: data || {}
-      });
+        data: data || {},
+        android: {
+          priority: payload.priority || 'high',
+          collapseKey: payload.conversationId,
+          notification: {
+            title,
+            body,
+            channelId: payload.channelId || 'quorum_chat_messages',
+            sound: payload.sound || 'default',
+            defaultSound: true,
+            defaultVibrateTimings: true,
+            priority: 'max',
+            tag: payload.conversationId,
+            clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+            ...(payload.badge !== undefined ? { notificationCount: payload.badge } : {}),
+            ...(payload.imageUrl ? { imageUrl: payload.imageUrl } : {})
+          }
+        },
+        apns: {
+          headers: {
+            'apns-priority': '10',
+            'apns-push-type': 'alert'
+          },
+          payload: {
+            aps: {
+              alert: {
+                title,
+                body
+              },
+              sound: payload.sound || 'default',
+              badge: payload.badge !== undefined ? payload.badge : 1,
+              ...(payload.conversationId ? { 'thread-id': payload.conversationId } : {}),
+              category: payload.category || 'MESSAGE_REPLY',
+              mutableContent: true
+            }
+          }
+        },
+        webpush: {
+          notification: {
+            title,
+            body,
+            icon: payload.imageUrl || '/icon-192.png',
+            badge: '/badge-72.png',
+            tag: payload.conversationId,
+            data: data || {}
+          }
+        }
+      };
+
+      const response = await firebaseMessaging.sendEachForMulticast(messagePayload);
 
       successCount += response.successCount;
       failureCount += response.failureCount;
