@@ -3,6 +3,7 @@ model Conversation {
   type         String                    @default("direct")
   directKey    String?                   @unique
   teamId       String?                   @unique
+  projectId    String?                   @unique
   name         String?
   avatar       String?
   ownerId      String?
@@ -10,6 +11,7 @@ model Conversation {
   createdAt    DateTime                  @default(now())
   updatedAt    DateTime                  @updatedAt
   owner        User?                     @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  project      Project?                  @relation("ProjectConversation", fields: [projectId], references: [id], onDelete: Cascade)
   participants ConversationParticipant[]
   messages     Message[]
 }
