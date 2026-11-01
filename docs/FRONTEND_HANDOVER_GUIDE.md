@@ -1,151 +1,83 @@
-# Frontend Integration Guide: Profile & Community Join Requests
+# Frontend Integration Guide: Community Discovery & Join Requests
 
-This document is the official handover guide for the **Frontend Team (Web, React Native / Mobile, and Desktop)**. It outlines all newly added and updated backend endpoints, payloads, response shapes, and real-time Socket.IO events.
+This document is the official frontend integration guide for **Community Discovery, Public Search, and Admin-Moderated Join Requests** across Web, Mobile (React Native / Flutter), and Desktop clients.
 
 ---
 
 ## 📋 Table of Contents
-1. [Summary of New Features](#-summary-of-new-features)
-2. [Section 1: User Profile & Direct Avatar Photo Upload](#-section-1-user-profile--direct-avatar-photo-upload)
-3. [Section 2: Public Community Discovery](#-section-2-public-community-discovery)
-4. [Section 3: Community Join Requests & Admin Moderation](#-section-3-community-join-requests--admin-moderation)
-5. [Section 4: Real-Time Socket.IO Events](#-section-4-real-time-socketio-events)
-6. [Section 5: TypeScript Models & Interfaces](#-section-5-typescript-models--interfaces)
-7. [Section 6: Ready-to-Use Frontend Code Examples](#-section-6-ready-to-use-frontend-code-examples)
+1. [🌟 Feature Overview](#-feature-overview)
+2. [🛠️ API Endpoints Summary](#️-api-endpoints-summary)
+3. [🔍 Community Search & Discovery API](#-community-search--discovery-api)
+4. [📬 Join Request Lifecycle APIs](#-join-request-lifecycle-apis)
+5. [🛡️ Admin Moderation APIs](#️-admin-moderation-apis)
+6. [🔔 Real-Time Socket.IO & Push Notifications](#-real-time-socketio--push-notifications)
+7. [📐 TypeScript Models & Interfaces](#-typescript-models--interfaces)
+8. [💻 Ready-to-Use UI Code Examples](#-ready-to-use-ui-code-examples)
 
 ---
 
-## 🌟 Summary of New Features
+## 🌟 Feature Overview
 
-| Feature | Description | Target Clients |
-| :--- | :--- | :--- |
-| **Direct Avatar Upload** | Direct `multipart/form-data` photo upload. Automatically stores to AWS S3 (`uploads/avatars/`) and updates DB in a single request. | Web & Mobile |
-| **User Profile Management** | `GET`, `PATCH`, `PUT /api/users/profile` for updating display name, avatar, use-cases, and onboarding status. | Web & Mobile |
-| **Global Community Search** | Search all platform communities with dynamic caller status (`OWNER`, `ADMIN`, `MEMBER`, `PENDING_REQUEST`, `NOT_MEMBER`). | Web & Mobile |
-| **Join Request Workflow** | Users can send join requests to community admins, view pending requests, or cancel them before approval. | Web & Mobile |
-| **Admin Moderation** | Community Owners and Admins can view pending applicant queues, accept (auto-adds member), or reject with reason. | Web & Mobile |
+1. **Global Public Discovery (`GET /api/communities/search` or `/discover`)**:
+   - Searches public communities across Quorum with text search (`q` or `search`) and cursor-based pagination.
+   - Automatically computes dynamic `membershipStatus` relative to the authenticated caller:
+     - `OWNER`: Caller is the owner/creator.
+     - `ADMIN`: Caller has administrative rights in this community.
+     - `MEMBER`: Caller is already an active member.
+     - `PENDING_REQUEST`: Caller has an open join request awaiting admin approval.
+     - `NOT_MEMBER`: Caller has not joined and has no open request.
+   - Attaches `pendingRequestId` when status is `PENDING_REQUEST` for instant single-click cancellation.
 
----
+2. **Send Join Request (`POST /api/communities/:id/join-requests`)**:
+   - Sends a join request with an optional note/message (up to 500 characters) to community administrators.
+   - Queues in-app and push notifications for community owners and admins.
 
-## 👤 Section 1: User Profile & Direct Avatar Photo Upload
+3. **User Pending Requests View (`GET /api/communities/join-requests/my`)**:
+   - Displays all communities where the user is currently awaiting admin approval.
 
-### 1.1 Endpoints Overview
+4. **Cancel Request (`DELETE /api/communities/:id/join-requests`)**:
+   - Allows users to withdraw their pending join request before an admin responds.
 
-| Method | Endpoint | Supported Content-Type | Purpose |
-| :--- | :--- | :--- | :--- |
-| **GET** | `/api/users/profile` | `application/json` | Fetch full profile of authenticated user |
-| **PATCH** | `/api/users/profile` | `multipart/form-data` OR `application/json` | Partial update (name, useCases, avatar file/URL) |
-| **PUT** | `/api/users/profile` | `multipart/form-data` OR `application/json` | Full update / set profile fields |
-| **GET** | `/api/auth/me` | `application/json` | Hydrate active user session (includes avatar & useCases) |
-
-> **Aliases**: The profile endpoint is also available under `/api/v1/users/profile` and `/api/user/profile`.
-
----
-
-### 1.2 Direct Avatar Upload (`multipart/form-data`)
-
-Use this when the user chooses a photo from their file picker, camera, or device photo gallery. **No separate upload step is required.**
-
-- **Accepted file field names**: `avatar` (recommended), `file`, or `image`.
-- **Supported file formats**: `.jpg`, `.jpeg`, `.png`, `.webp`, `.heic`, `.gif`.
-- **Max file size**: `10 MB`.
-- **Optional accompanying text fields**: `name`, `useCases`, `isOnboarded`.
-
-#### Example Request (Web FormData):
-```typescript
-const formData = new FormData();
-formData.append('avatar', selectedFile); // File or Blob
-formData.append('name', 'Alex Mercer');
-formData.append('useCases', JSON.stringify(['STUDY', 'WORK'])); // Or comma-separated
-
-await axios.patch('/api/users/profile', formData, {
-  headers: { 'Content-Type': 'multipart/form-data' },
-  withCredentials: true,
-});
-```
-
-#### Example Request (Mobile React Native / Expo):
-```typescript
-const formData = new FormData();
-formData.append('avatar', {
-  uri: asset.uri,
-  name: asset.fileName || 'avatar.jpg',
-  type: asset.mimeType || 'image/jpeg',
-} as any);
-formData.append('name', 'Alex Mercer');
-
-await axios.patch('/api/users/profile', formData, {
-  headers: {
-    'Content-Type': 'multipart/form-data',
-    'x-client-platform': 'mobile',
-    Authorization: `Bearer ${accessToken}`,
-  },
-});
-```
-
-#### Successful Response (`200 OK`):
-```json
-{
-  "success": true,
-  "message": "Profile updated successfully",
-  "data": {
-    "user": {
-      "id": "6d57bac9-f1b6-4b19-9ab6-0c7997a8eb46",
-      "name": "Alex Mercer",
-      "email": "alex@example.com",
-      "avatar": "https://quorum-storage.s3.amazonaws.com/uploads/avatars/6d57bac9-...-avatar.jpg",
-      "role": "USER",
-      "isOnboarded": true,
-      "useCases": ["STUDY", "WORK"],
-      "createdAt": "2026-10-15T08:00:00.000Z",
-      "updatedAt": "2026-11-01T14:00:00.000Z"
-    }
-  }
-}
-```
+5. **Admin Moderation (`GET`, `POST accept`, `POST reject`)**:
+   - Owners and Admins view applicant queues with user profile metadata.
+   - **Accepting**: Marks request `ACCEPTED`, creates `CommunityMember` with role `MEMBER`, and emits real-time notification to the applicant.
+   - **Rejecting**: Marks request `REJECTED` with an optional reason note and emits real-time notification to the applicant.
 
 ---
 
-### 1.3 JSON Profile Update (`application/json`)
+## 🛠️ API Endpoints Summary
 
-If the user is only updating text information (e.g. changing their name or selecting use cases without changing the picture):
-
-```http
-PATCH /api/users/profile HTTP/1.1
-Content-Type: application/json
-Authorization: Bearer <token>
-
-{
-  "name": "Alex Mercer",
-  "useCases": ["DEVELOPMENT", "RESEARCH"],
-  "isOnboarded": true
-}
-```
+| Method | Endpoint | Description | Auth Required | Access Level |
+| :--- | :--- | :--- | :---: | :--- |
+| **GET** | `/api/communities/search?q=...&limit=20` | Search/Discover public communities with membership status | ✅ Bearer / Cookie | Any User |
+| **GET** | `/api/communities/discover` | Alias for community discovery | ✅ Bearer / Cookie | Any User |
+| **POST** | `/api/communities/:id/join-requests` | Send join request to community admins | ✅ Bearer / Cookie | Non-Members |
+| **GET** | `/api/communities/join-requests/my` | List caller's active pending join requests | ✅ Bearer / Cookie | Any User |
+| **DELETE**| `/api/communities/:id/join-requests` | Cancel caller's pending join request | ✅ Bearer / Cookie | Applicant |
+| **GET** | `/api/communities/:id/join-requests` | View pending applicant queue for community | ✅ Bearer / Cookie | Admin / Owner |
+| **POST** | `/api/communities/:id/join-requests/:requestId/accept` | Accept applicant and add as member | ✅ Bearer / Cookie | Admin / Owner |
+| **POST** | `/api/communities/:id/join-requests/:requestId/reject` | Reject applicant with optional reason | ✅ Bearer / Cookie | Admin / Owner |
 
 ---
 
-## 🔍 Section 2: Public Community Discovery
+## 🔍 Community Search & Discovery API
 
-### 2.1 Search Public Communities
-**Endpoint:** `GET /api/communities/search` (or `GET /api/communities/discover`)
-
-Enables users to explore communities across the platform. The backend automatically calculates and returns the authenticated user's exact membership state.
+### `GET /api/communities/search` (or `/api/communities/discover`)
 
 #### Query Parameters:
 | Param | Type | Required | Description |
 | :--- | :--- | :---: | :--- |
 | `q` or `search` | `string` | No | Search query matching community name or description |
-| `limit` | `number` | No | Number of results (default `20`, max `50`) |
-| `cursor` | `string` | No | Pagination cursor (returned as `nextCursor` from previous page) |
+| `limit` | `number` | No | Number of records to return (default: `20`, max: `50`) |
+| `cursor` | `string` | No | Pagination cursor (received as `nextCursor` from prior response) |
 
-#### Caller Membership Statuses:
-- `NOT_MEMBER`: User has not joined and has no pending join request.
-- `PENDING_REQUEST`: User has an active join request awaiting admin approval. `pendingRequestId` is populated.
-- `MEMBER`: User is an active member.
-- `ADMIN`: User is a community administrator.
-- `OWNER`: User is the community owner.
+#### Request Headers:
+```http
+Authorization: Bearer <accessToken>
+x-client-platform: mobile   <-- (Only for mobile clients)
+```
 
-#### Response (`200 OK`):
+#### Successful Response (`200 OK`):
 ```json
 {
   "success": true,
@@ -154,7 +86,7 @@ Enables users to explore communities across the platform. The backend automatica
       {
         "id": "74592439-080e-4d72-a60c-3c23300d9f2f",
         "name": "Fullstack Developers",
-        "description": "Collaborate on modern web and mobile apps.",
+        "description": "A place for frontend and backend engineers to collaborate.",
         "icon": "https://s3.amazonaws.com/quorum/communities/fullstack.png",
         "createdAt": "2026-10-20T10:00:00.000Z",
         "memberCount": 142,
@@ -165,13 +97,24 @@ Enables users to explore communities across the platform. The backend automatica
       {
         "id": "e4a781b2-1321-4f11-9252-c3f253e97f90",
         "name": "AI Engineers",
-        "description": "LLMs, Agents, and Deep Learning discussions.",
+        "description": "Discussing LLMs, PyTorch, and generative AI apps.",
         "icon": null,
         "createdAt": "2026-10-25T14:30:00.000Z",
         "memberCount": 88,
         "channelCount": 4,
         "membershipStatus": "PENDING_REQUEST",
         "pendingRequestId": "c2b3d8f1-9310-449e-bfa5-91d120a1c1d0"
+      },
+      {
+        "id": "93a15264-b001-4475-8f64-dcb41203b879",
+        "name": "Design Systems",
+        "description": "Figma, Tailwind, and UI/UX design tokens.",
+        "icon": null,
+        "createdAt": "2026-10-18T08:00:00.000Z",
+        "memberCount": 54,
+        "channelCount": 3,
+        "membershipStatus": "MEMBER",
+        "pendingRequestId": null
       }
     ],
     "nextCursor": "2026-10-25T14:30:00.000Z",
@@ -182,185 +125,192 @@ Enables users to explore communities across the platform. The backend automatica
 
 ---
 
-## 🤝 Section 3: Community Join Requests & Admin Moderation
+## 📬 Join Request Lifecycle APIs
 
-### 3.1 Send a Join Request
-**Endpoint:** `POST /api/communities/:id/join-requests`
+### 1. Send Join Request
+**`POST /api/communities/:id/join-requests`**
 
-Submits a join request to community administrators.
-- **Request Body**:
-  ```json
-  {
-    "message": "Hi! Excited to join and contribute."
+#### Request Body (`application/json`):
+```json
+{
+  "message": "Hi, I am excited to join and contribute to this community!"
+}
+```
+*(Note: `message` is optional, max 500 characters).*
+
+#### Response (`201 Created`):
+```json
+{
+  "success": true,
+  "message": "Join request sent successfully",
+  "data": {
+    "id": "c2b3d8f1-9310-449e-bfa5-91d120a1c1d0",
+    "communityId": "e4a781b2-1321-4f11-9252-c3f253e97f90",
+    "userId": "984aaa79-1a9f-4896-941b-8a3a44171f1b",
+    "status": "PENDING",
+    "message": "Hi, I am excited to join and contribute to this community!",
+    "createdAt": "2026-11-01T10:00:00.000Z"
   }
-  ```
-  *(Note: `message` is optional, max 500 characters).*
-- **Response (`201 Created`)**:
-  ```json
-  {
-    "success": true,
-    "message": "Join request sent successfully",
-    "data": {
+}
+```
+
+---
+
+### 2. View My Pending Join Requests
+**`GET /api/communities/join-requests/my`** (or `/api/communities/join-requests/pending`)
+
+#### Response (`200 OK`):
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "c2b3d8f1-9310-449e-bfa5-91d120a1c1d0",
+      "communityId": "e4a781b2-1321-4f11-9252-c3f253e97f90",
+      "status": "PENDING",
+      "message": "Hi, I am excited to join and contribute to this community!",
+      "createdAt": "2026-11-01T10:00:00.000Z",
+      "community": {
+        "id": "e4a781b2-1321-4f11-9252-c3f253e97f90",
+        "name": "AI Engineers",
+        "description": "Discussing LLMs, PyTorch, and generative AI apps.",
+        "icon": null
+      }
+    }
+  ]
+}
+```
+
+---
+
+### 3. Cancel Pending Join Request
+**`DELETE /api/communities/:id/join-requests`**
+
+#### Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Join request cancelled successfully"
+}
+```
+
+---
+
+## 🛡️ Admin Moderation APIs
+
+> **Permissions**: Only community **OWNER** and **ADMIN** can access these routes. Regular members or non-members receive `403 Forbidden`.
+
+### 1. View Community Join Requests
+**`GET /api/communities/:id/join-requests?status=PENDING`**
+
+#### Query Parameters:
+- `status` *(optional)*: `PENDING` (default), `ACCEPTED`, `REJECTED`, or `CANCELLED`.
+
+#### Response (`200 OK`):
+```json
+{
+  "success": true,
+  "data": [
+    {
       "id": "c2b3d8f1-9310-449e-bfa5-91d120a1c1d0",
       "communityId": "e4a781b2-1321-4f11-9252-c3f253e97f90",
       "userId": "984aaa79-1a9f-4896-941b-8a3a44171f1b",
       "status": "PENDING",
-      "message": "Hi! Excited to join and contribute.",
-      "createdAt": "2026-11-01T10:00:00.000Z"
+      "message": "Hi, I am excited to join and contribute to this community!",
+      "createdAt": "2026-11-01T10:00:00.000Z",
+      "user": {
+        "id": "984aaa79-1a9f-4896-941b-8a3a44171f1b",
+        "name": "Alice Johnson",
+        "email": "alice@example.com",
+        "avatar": "https://s3.amazonaws.com/quorum/avatars/alice.png"
+      }
     }
-  }
-  ```
+  ]
+}
+```
 
 ---
 
-### 3.2 View My Pending Join Requests
-**Endpoint:** `GET /api/communities/join-requests/my` (or `/join-requests/pending`)
+### 2. Accept Join Request
+**`POST /api/communities/:id/join-requests/:requestId/accept`**
 
-Returns all communities where the user is currently awaiting review.
-- **Response (`200 OK`)**:
-  ```json
-  {
-    "success": true,
-    "data": [
-      {
-        "id": "c2b3d8f1-9310-449e-bfa5-91d120a1c1d0",
-        "communityId": "e4a781b2-1321-4f11-9252-c3f253e97f90",
-        "status": "PENDING",
-        "message": "Hi! Excited to join and contribute.",
-        "createdAt": "2026-11-01T10:00:00.000Z",
-        "community": {
-          "id": "e4a781b2-1321-4f11-9252-c3f253e97f90",
-          "name": "AI Engineers",
-          "description": "LLMs, Agents, and Deep Learning discussions."
-        }
-      }
-    ]
-  }
-  ```
+- Adds the applicant as a `MEMBER` of the community.
+- Sends an in-app and push notification to the applicant.
 
----
-
-### 3.3 Cancel a Pending Join Request
-**Endpoint:** `DELETE /api/communities/:id/join-requests`
-
-Allows an applicant to withdraw their pending join request at any time before admin review.
-- **Response (`200 OK`)**:
-  ```json
-  {
-    "success": true,
-    "message": "Join request cancelled successfully"
-  }
-  ```
-
----
-
-### 3.4 Community Admin: View Pending Join Requests
-**Endpoint:** `GET /api/communities/:id/join-requests?status=PENDING`
-- **Access Level**: `OWNER` or `ADMIN` only (others receive `403 Forbidden`).
-- **Response (`200 OK`)**:
-  ```json
-  {
-    "success": true,
-    "data": [
-      {
-        "id": "c2b3d8f1-9310-449e-bfa5-91d120a1c1d0",
-        "communityId": "e4a781b2-1321-4f11-9252-c3f253e97f90",
-        "userId": "984aaa79-1a9f-4896-941b-8a3a44171f1b",
-        "status": "PENDING",
-        "message": "Hi! Excited to join and contribute.",
-        "createdAt": "2026-11-01T10:00:00.000Z",
-        "user": {
-          "id": "984aaa79-1a9f-4896-941b-8a3a44171f1b",
-          "name": "Alice Johnson",
-          "email": "alice@example.com",
-          "avatar": "https://quorum-storage.s3.amazonaws.com/uploads/avatars/alice.png"
-        }
-      }
-    ]
-  }
-  ```
-
----
-
-### 3.5 Community Admin: Accept a Join Request
-**Endpoint:** `POST /api/communities/:id/join-requests/:requestId/accept`
-- **Access Level**: `OWNER` or `ADMIN` only.
-- **Behavior**: Marks request `ACCEPTED`, automatically creates a `CommunityMember` record with role `MEMBER`, and pushes real-time notification to the applicant.
-- **Response (`200 OK`)**:
-  ```json
-  {
-    "success": true,
-    "message": "Join request accepted successfully",
-    "data": {
-      "requestId": "c2b3d8f1-9310-449e-bfa5-91d120a1c1d0",
+#### Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Join request accepted successfully",
+  "data": {
+    "requestId": "c2b3d8f1-9310-449e-bfa5-91d120a1c1d0",
+    "communityId": "e4a781b2-1321-4f11-9252-c3f253e97f90",
+    "member": {
+      "id": "5123a101-b201-4475-8f64-dcb41203b879",
+      "userId": "984aaa79-1a9f-4896-941b-8a3a44171f1b",
       "communityId": "e4a781b2-1321-4f11-9252-c3f253e97f90",
-      "member": {
-        "id": "5123a101-b201-4475-8f64-dcb41203b879",
-        "userId": "984aaa79-1a9f-4896-941b-8a3a44171f1b",
-        "communityId": "e4a781b2-1321-4f11-9252-c3f253e97f90",
-        "role": "MEMBER"
-      }
+      "role": "MEMBER"
     }
   }
-  ```
+}
+```
 
 ---
 
-### 3.6 Community Admin: Reject a Join Request
-**Endpoint:** `POST /api/communities/:id/join-requests/:requestId/reject`
-- **Access Level**: `OWNER` or `ADMIN` only.
-- **Request Body**:
-  ```json
-  {
-    "reason": "Profile prerequisites not satisfied."
+### 3. Reject Join Request
+**`POST /api/communities/:id/join-requests/:requestId/reject`**
+
+#### Request Body (`application/json`):
+```json
+{
+  "reason": "Does not meet community prerequisites."
+}
+```
+*(Note: `reason` is optional, max 500 characters).*
+
+#### Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Join request rejected",
+  "data": {
+    "requestId": "c2b3d8f1-9310-449e-bfa5-91d120a1c1d0",
+    "status": "REJECTED"
   }
-  ```
-  *(Note: `reason` is optional, max 500 characters).*
-- **Response (`200 OK`)**:
-  ```json
-  {
-    "success": true,
-    "message": "Join request rejected",
-    "data": {
-      "requestId": "c2b3d8f1-9310-449e-bfa5-91d120a1c1d0",
-      "status": "REJECTED"
-    }
-  }
-  ```
+}
+```
 
 ---
 
-## 🔔 Section 4: Real-Time Socket.IO Events
+## 🔔 Real-Time Socket.IO & Push Notifications
 
-The backend automatically dispatches real-time Socket.IO notifications to user-specific rooms (`user:<userId>`). Listen to `notification:new` on your Socket.IO client:
+The backend automatically creates persistent notifications and emits real-time events over Socket.IO to user rooms (`user:<userId>`):
 
+| Event Type | Recipient | Triggered When | Action on Frontend |
+| :--- | :--- | :--- | :--- |
+| `COMMUNITY_JOIN_REQUEST` | Community Owner & Admins | User sends a join request | Show badge / toast on admin moderation icon |
+| `COMMUNITY_JOIN_ACCEPTED` | Applicant User | Admin accepts join request | Show congratulations toast; refresh joined communities |
+| `COMMUNITY_JOIN_REJECTED` | Applicant User | Admin rejects join request | Show notification with rejection reason |
+
+#### Example Socket Client Listener:
 ```typescript
 socket.on('notification:new', (notification) => {
-  switch (notification.type) {
-    case 'COMMUNITY_JOIN_REQUEST':
-      // Admin received a new applicant request
-      console.log('New join request:', notification.body);
-      break;
-
-    case 'COMMUNITY_JOIN_ACCEPTED':
-      // Applicant's request was accepted
-      console.log('You were accepted into:', notification.body);
-      // Trigger navigation or refetch joined communities
-      break;
-
-    case 'COMMUNITY_JOIN_REJECTED':
-      // Applicant's request was rejected
-      console.log('Join request was rejected:', notification.body);
-      break;
+  if (notification.type === 'COMMUNITY_JOIN_REQUEST') {
+    // Admin receives new applicant notification
+    toast.info(`New join request: ${notification.body}`);
+  } else if (notification.type === 'COMMUNITY_JOIN_ACCEPTED') {
+    // User accepted into community
+    toast.success(`You have been accepted into ${notification.metadata?.communityName || 'the community'}!`);
+  } else if (notification.type === 'COMMUNITY_JOIN_REJECTED') {
+    // User request rejected
+    toast.error(`Your join request was declined: ${notification.body}`);
   }
 });
 ```
 
 ---
 
-## 📐 Section 5: TypeScript Models & Interfaces
-
-Copy and paste these interfaces into your frontend project:
+## 📐 TypeScript Models & Interfaces
 
 ```typescript
 export type MembershipStatus =
@@ -369,18 +319,6 @@ export type MembershipStatus =
   | 'MEMBER'
   | 'PENDING_REQUEST'
   | 'NOT_MEMBER';
-
-export interface UserProfile {
-  id: string;
-  name: string;
-  email: string;
-  avatar: string | null;
-  role: string;
-  isOnboarded: boolean;
-  useCases: string[];
-  createdAt: string;
-  updatedAt: string;
-}
 
 export interface DiscoveredCommunity {
   id: string;
@@ -411,15 +349,16 @@ export interface CommunityJoinRequest {
     id: string;
     name: string;
     description: string | null;
+    icon: string | null;
   };
 }
 ```
 
 ---
 
-## 💻 Section 6: Ready-to-Use Frontend Code Examples
+## 💻 Ready-to-Use UI Code Examples
 
-### 6.1 React Web: Community Discovery Card
+### 1. Community Discovery Card (React Web)
 
 ```tsx
 import React, { useState } from 'react';
@@ -428,17 +367,17 @@ import { DiscoveredCommunity } from './types';
 
 export const CommunityCard: React.FC<{
   community: DiscoveredCommunity;
-  onStatusChange: () => void;
-}> = ({ community, onStatusChange }) => {
+  onRefresh: () => void;
+}> = ({ community, onRefresh }) => {
   const [loading, setLoading] = useState(false);
 
-  const requestToJoin = async () => {
+  const handleRequestJoin = async () => {
     try {
       setLoading(true);
       await axios.post(`/api/communities/${community.id}/join-requests`, {
-        message: 'Hello! I would love to collaborate in this community.',
+        message: 'Excited to join this community!',
       });
-      onStatusChange();
+      onRefresh();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Failed to send request');
     } finally {
@@ -446,11 +385,11 @@ export const CommunityCard: React.FC<{
     }
   };
 
-  const cancelRequest = async () => {
+  const handleCancelRequest = async () => {
     try {
       setLoading(true);
       await axios.delete(`/api/communities/${community.id}/join-requests`);
-      onStatusChange();
+      onRefresh();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Failed to cancel request');
     } finally {
@@ -482,7 +421,7 @@ export const CommunityCard: React.FC<{
           </span>
         ) : community.membershipStatus === 'PENDING_REQUEST' ? (
           <button
-            onClick={cancelRequest}
+            onClick={handleCancelRequest}
             disabled={loading}
             className="px-3 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-semibold rounded-full transition"
           >
@@ -490,7 +429,7 @@ export const CommunityCard: React.FC<{
           </button>
         ) : (
           <button
-            onClick={requestToJoin}
+            onClick={handleRequestJoin}
             disabled={loading}
             className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-full transition"
           >
@@ -505,7 +444,7 @@ export const CommunityCard: React.FC<{
 
 ---
 
-### 6.2 React Admin: Applicant Moderation Panel
+### 2. Admin Moderation Modal (React)
 
 ```tsx
 import React, { useEffect, useState } from 'react';
@@ -549,7 +488,7 @@ export const AdminJoinRequestsModal: React.FC<{
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
       <div className="bg-white dark:bg-zinc-900 rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl">
         <div className="flex justify-between items-center border-b pb-3">
-          <h3 className="text-lg font-bold">Community Join Requests</h3>
+          <h3 className="text-lg font-bold">Pending Join Requests</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 font-bold">✕</button>
         </div>
 
