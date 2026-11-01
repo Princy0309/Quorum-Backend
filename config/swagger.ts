@@ -1642,6 +1642,28 @@ export const swaggerDocument = {
         }
       }
     },
+    "/api/communities/join-requests/my": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Get user pending join requests",
+        "description": "Returns all pending community join requests submitted by the authenticated user with community details.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of pending community join requests"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
     "/api/communities/feed": {
       "get": {
         "tags": [
@@ -2200,6 +2222,270 @@ export const swaggerDocument = {
           },
           "404": {
             "description": "Invalid or expired invite token"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/join-requests": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List community join requests (Admin only)",
+        "description": "Allows community OWNER or ADMIN to view join requests. Can be filtered by status (PENDING, ACCEPTED, REJECTED, CANCELLED).",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["PENDING", "ACCEPTED", "REJECTED", "CANCELLED"],
+              "default": "PENDING"
+            },
+            "description": "Filter by join request status"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of join requests"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - Only OWNER or ADMIN can view join requests"
+          },
+          "404": {
+            "description": "Community not found"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Send community join request",
+        "description": "Sends a join request to community admins. If the community is open/public and auto-join is configured or user is already a member/pending, appropriate status is returned.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Community ID"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "example": "Hi! I would love to join and collaborate on AI projects."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Join request submitted successfully"
+          },
+          "400": {
+            "description": "Already a member or join request already pending"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Community not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Cancel pending join request",
+        "description": "Cancels a pending join request that the authenticated user previously sent to this community.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Community ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Join request cancelled successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "No pending join request found"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/join-requests/{requestId}/accept": {
+      "post": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Accept community join request (Admin only)",
+        "description": "Accepts a pending join request, adding the applicant as a MEMBER and notifying them in real time.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Join Request ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Join request accepted and member added"
+          },
+          "400": {
+            "description": "Request is not pending"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - Only OWNER or ADMIN can accept join requests"
+          },
+          "404": {
+            "description": "Community or request not found"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/join-requests/{requestId}/reject": {
+      "post": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Reject community join request (Admin only)",
+        "description": "Rejects a pending join request with an optional reason, and notifies the applicant.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Community ID"
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Join Request ID"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "example": "Community requirements not met."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Join request rejected"
+          },
+          "400": {
+            "description": "Request is not pending"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - Only OWNER or ADMIN can reject join requests"
+          },
+          "404": {
+            "description": "Community or request not found"
           }
         }
       }
