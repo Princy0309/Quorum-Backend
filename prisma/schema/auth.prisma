@@ -32,6 +32,7 @@ model User {
   communityMemberships     CommunityMember[]
   sentCommunityInvites     CommunityInvite[]         @relation("SentCommunityInvites")
   receivedCommunityInvites CommunityInvite[]         @relation("ReceivedCommunityInvites")
+  communityJoinRequests    CommunityJoinRequest[]
   communityPosts           CommunityPost[]
   communityComments        CommunityComment[]
   ownedOrganizations       Organization[]            @relation("OrgOwner")
