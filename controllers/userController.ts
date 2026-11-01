@@ -7,6 +7,7 @@ import {
   getUserProfile,
   updateUserProfile
 } from '../services/userService.js';
+import { getUserPresence, getMultipleUserPresences } from '../services/presenceService.js';
 import { sendSuccess } from '../utils/ApiResponse.js';
 
 export const getUserProfileController = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
@@ -82,5 +83,74 @@ export const searchUsersController = asyncHandler(async (req: Request, res: Resp
     },
     users: result.users,
     pagination: result.pagination
+  });
+});
+
+export const getUserPresenceController = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user?.id) {
+    return next(new ApiError(401, 'Unauthorized'));
+  }
+
+  const rawUserId = req.params.userId || req.params.id;
+  const rawParam = Array.isArray(rawUserId) ? rawUserId[0] : rawUserId;
+  const targetUserId = (!rawParam || (typeof rawParam === 'string' && rawParam.trim().toLowerCase() === 'me'))
+    ? req.user.id
+    : (typeof rawParam === 'string' ? rawParam.trim() : req.user.id);
+
+  const presence = await getUserPresence(targetUserId);
+
+  return res.status(200).json({
+    success: true,
+    statusCode: 200,
+    message: 'User presence retrieved successfully',
+    data: {
+      userId: targetUserId,
+      isOnline: presence.isOnline,
+      lastSeen: presence.lastSeen || null
+    }
+  });
+});
+
+export const getBatchUserPresenceController = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user?.id) {
+    return next(new ApiError(401, 'Unauthorized'));
+  }
+
+  let userIds: string[] = [];
+  if (Array.isArray(req.body?.userIds)) {
+    userIds = req.body.userIds.filter((id: any) => typeof id === 'string' && id.trim().length > 0);
+  } else if (typeof req.query.userIds === 'string') {
+    userIds = req.query.userIds.split(',').map((id) => id.trim()).filter(Boolean);
+  }
+
+  if (userIds.length === 0) {
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Presences retrieved successfully',
+      data: {
+        presences: {}
+      }
+    });
+  }
+
+  const boundedUserIds = userIds.slice(0, 100);
+  const presenceMap = await getMultipleUserPresences(boundedUserIds);
+  const presencesObj: Record<string, { isOnline: boolean; lastSeen: Date | null }> = {};
+
+  presenceMap.forEach((val, uId) => {
+    presencesObj[uId] = {
+      isOnline: val.isOnline,
+      lastSeen: val.lastSeen || null
+    };
+  });
+
+  return res.status(200).json({
+    success: true,
+    statusCode: 200,
+    message: 'Presences retrieved successfully',
+    data: {
+      presences: presencesObj
+    }
   });
 });

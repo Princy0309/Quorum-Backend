@@ -22,7 +22,8 @@ import {
   makeGroupAdminController,
   dismissGroupAdminController,
   editMessageController,
-  deleteMessageController
+  deleteMessageController,
+  getConversationPresenceController
 } from '../controllers/conversationController.js';
 import { createOrGetDMController } from '../controllers/dmController.js';
 
@@ -35,6 +36,7 @@ router.post('/direct', authMiddleware, chatLimiter, createOrGetDMController);
 router.post('/dm', authMiddleware, chatLimiter, createOrGetDMController);
 router.get('/search', authMiddleware, searchLimiter, getUserConversationsController);
 router.post('/group', authMiddleware, validate(createGroupSchema), createGroupConversationController);
+router.get('/:id/presence', authMiddleware, getConversationPresenceController);
 router.get('/:id', authMiddleware, getConversationDetailsController);
 router.get('/:id/messages', authMiddleware, getConversationMessagesController);
 router.patch('/:id/messages/:messageId', authMiddleware, validate(editMessageSchema), editMessageController);

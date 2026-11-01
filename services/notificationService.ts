@@ -1,5 +1,6 @@
 import prisma from '../config/prisma.js';
-import { sendFCMNotification } from '../config/firebase.js';
+import redis from '../config/redis.js';
+import { sendFCMNotification, PushPayload } from '../config/firebase.js';
 import { getMultipleUserPresences } from './presenceService.js';
 import logger from '../utils/logger.js';
 import type { 
@@ -111,32 +112,67 @@ export const unregisterDeviceToken = async (userId: string, token: string) => {
   });
 };
 
-export const sendPushToOfflineUsers = async (
+export interface SendPushOptions {
+  payloadData?: Record<string, string>;
+  conversationId?: string;
+  badge?: number;
+  sound?: string;
+  channelId?: string;
+  category?: string;
+  imageUrl?: string;
+  forcePush?: boolean;
+}
+
+export const sendPushNotification = async (
   recipientUserIds: string[],
   title: string,
   body: string,
-  payloadData?: Record<string, string>
+  options?: SendPushOptions
 ) => {
   if (!recipientUserIds || recipientUserIds.length === 0) return;
 
-  const presenceMap = await getMultipleUserPresences(recipientUserIds);
-  const offlineUserIds = recipientUserIds.filter((id) => !presenceMap.get(id)?.isOnline);
+  let targetUserIds = recipientUserIds;
 
-  if (offlineUserIds.length === 0) return;
+  if (!options?.forcePush) {
+    const presenceMap = await getMultipleUserPresences(recipientUserIds);
+    const appStateKeys = recipientUserIds.map((id) => `user_app_state:${id}`);
+    const appStates = await redis.mget(...appStateKeys);
+
+    targetUserIds = recipientUserIds.filter((id, idx) => {
+      const isOnline = !!presenceMap.get(id)?.isOnline;
+      const appState = appStates[idx];
+      return !isOnline || appState === 'background';
+    });
+  }
+
+  if (targetUserIds.length === 0) return;
 
   const devices = await prisma.deviceToken.findMany({
-    where: { userId: { in: offlineUserIds } },
-    select: { token: true },
+    where: { userId: { in: targetUserIds } },
+    select: { token: true, userId: true, platform: true },
   });
 
+  if (devices.length === 0) return;
+
   const tokens = devices.map((d) => d.token);
-  if (tokens.length === 0) return;
+
+  let badge = options?.badge;
+  if (badge === undefined && targetUserIds.length === 1) {
+    badge = await getUnreadNotificationCount(targetUserIds[0]);
+  }
 
   const result = await sendFCMNotification({
     tokens,
     title,
     body,
-    data: payloadData,
+    data: options?.payloadData,
+    badge,
+    sound: options?.sound || 'default',
+    channelId: options?.channelId || 'quorum_chat_messages',
+    conversationId: options?.conversationId,
+    category: options?.category || 'MESSAGE_REPLY',
+    imageUrl: options?.imageUrl,
+    priority: 'high',
   });
 
   if (result.invalidTokens && result.invalidTokens.length > 0) {
@@ -145,6 +181,19 @@ export const sendPushToOfflineUsers = async (
       where: { token: { in: result.invalidTokens } },
     });
   }
+};
+
+export const sendPushToOfflineUsers = async (
+  recipientUserIds: string[],
+  title: string,
+  body: string,
+  payloadData?: Record<string, string>,
+  options?: Omit<SendPushOptions, 'payloadData'>
+) => {
+  return await sendPushNotification(recipientUserIds, title, body, {
+    ...options,
+    payloadData,
+  });
 };
 
 export const getUserPreferences = async (userId: string) => {

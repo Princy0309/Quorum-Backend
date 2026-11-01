@@ -3,6 +3,7 @@ import { AuthenticatedSocket } from '../socketAuth.js';
 import { setUserOnline, setUserOffline, refreshUserPresence } from '../../services/presenceService.js';
 import { getCoParticipantUserIds } from '../../services/chatService.js';
 import { CHAT_EVENTS } from '../../utils/constants.js';
+import redis from '../../config/redis.js';
 import logger from '../../utils/logger.js';
 
 export const registerPresenceHandler = async (io: SocketIOServer, socket: AuthenticatedSocket) => {
@@ -27,8 +28,19 @@ export const registerPresenceHandler = async (io: SocketIOServer, socket: Authen
     });
   }, 25000);
 
+  socket.on('client:lifecycle', async (data: { state?: 'active' | 'background' }) => {
+    try {
+      const state = data?.state === 'background' ? 'background' : 'active';
+      await redis.set(`user_app_state:${userId}`, state, 'EX', 86400);
+      logger.debug(`User app lifecycle state updated`, { userId, state });
+    } catch (err: any) {
+      logger.warn('Failed to update user app lifecycle state in Redis', { userId, error: err.message });
+    }
+  });
+
   socket.on('disconnect', async () => {
     clearInterval(heartbeatInterval);
+    redis.del(`user_app_state:${userId}`).catch(() => {});
 
     try {
       const isLastDisconnect = await setUserOffline(userId, socket.id);
