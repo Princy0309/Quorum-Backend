@@ -50,6 +50,9 @@ model User {
   createdWhiteboards       Whiteboard[]              @relation("WhiteboardCreator")
   jiraLink                 UserJiraLink?
   installedJiraOrgs        OrgJiraIntegration[]      @relation("OrgJiraInstaller")
+  githubLink               UserGithubLink?
+  installedGithubOrgs      OrgGithubIntegration[]    @relation("OrgGithubInstaller")
+  linkedGithubRepos        GithubRepoLink[]          @relation("GithubRepoLinker")
 }
 
 model RefreshToken {

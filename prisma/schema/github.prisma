@@ -1,0 +1,69 @@
+model OrgGithubIntegration {
+  id                     String       @id @default(uuid())
+  organizationId         String       @unique
+  organization           Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  installedByUserId      String
+  installedByUser        User         @relation("OrgGithubInstaller", fields: [installedByUserId], references: [id], onDelete: Restrict)
+  installationId         String?
+  encryptedWebhookSecret String?
+  isActive               Boolean      @default(true)
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  @@index([organizationId])
+}
+
+model UserGithubLink {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  githubUserId          String
+  githubUsername        String
+  githubEmail           String?
+  encryptedAccessToken  String
+  encryptedRefreshToken String?
+  tokenExpiresAt        DateTime?
+  scope                 String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([userId])
+  @@index([githubUserId])
+}
+
+model GithubRepoLink {
+  id             String   @id @default(uuid())
+  teamId         String
+  team           Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  repoId         String
+  repoFullName   String
+  repoOwner      String
+  repoName       String
+  defaultBranch  String?
+  isPrivate      Boolean  @default(false)
+  linkedById     String
+  linkedBy       User     @relation("GithubRepoLinker", fields: [linkedById], references: [id], onDelete: Restrict)
+  linkedAt       DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([teamId, repoFullName])
+  @@index([teamId])
+  @@index([repoId])
+}
+
+model GithubWebhookEvent {
+  id             String    @id @default(uuid())
+  eventId        String    @unique
+  eventType      String
+  deliveryId     String?
+  payload        Json
+  signature      String?
+  signatureValid Boolean   @default(false)
+  processed      Boolean   @default(false)
+  processedAt    DateTime?
+  error          String?
+  createdAt      DateTime  @default(now())
+
+  @@index([eventId])
+  @@index([createdAt])
+}

@@ -23,6 +23,7 @@ model Organization {
   meetings           Meeting[]
   whiteboards        Whiteboard[]
   jiraIntegration    OrgJiraIntegration?
+  githubIntegration  OrgGithubIntegration?
 
   @@index([slug])
   @@index([ownerId])
@@ -83,7 +84,8 @@ model Team {
   members        TeamMember[]
   tasks          TeamTask[]
   invites        OrganizationInvite[]
-  jiraTickets    JiraTicketLink[] 
+  jiraTickets    JiraTicketLink[]
+  githubRepoLinks GithubRepoLink[]
   meetings       Meeting[]
 
 
