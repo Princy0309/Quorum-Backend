@@ -24,7 +24,14 @@ import {
   getCommunityChannels,
   getCommunityChannelById,
   updateCommunityChannel,
-  deleteCommunityChannel
+  deleteCommunityChannel,
+  discoverCommunities,
+  createCommunityJoinRequest,
+  getUserPendingJoinRequests,
+  cancelCommunityJoinRequest,
+  getCommunityJoinRequests,
+  acceptCommunityJoinRequest,
+  rejectCommunityJoinRequest
 } from '../services/communityService.js';
 import { ApiError } from '../utils/ApiError.js';
 
@@ -616,6 +623,154 @@ export const deleteChannelController = async (req: Request, res: Response, next:
     const result = await deleteCommunityChannel(userId, id, channelId);
     res.status(200).json({
       success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const validateRequestId = (id: unknown): string => {
+  if (!id || typeof id !== 'string' || !UUID_REGEX.test(id.trim())) {
+    throw new ApiError(400, 'Invalid request ID format');
+  }
+  return id.trim();
+};
+
+export const discoverCommunitiesController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const query = typeof req.query.q === 'string' ? req.query.q : (typeof req.query.search === 'string' ? req.query.search : undefined);
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+    const limit = typeof req.query.limit === 'string' && /^\d+$/.test(req.query.limit)
+      ? parseInt(req.query.limit, 10)
+      : 20;
+
+    const result = await discoverCommunities(userId, query, cursor, limit);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const createJoinRequestController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const communityId = validateCommunityId(req.params.id);
+    const message = typeof req.body?.message === 'string' ? req.body.message : undefined;
+
+    const result = await createCommunityJoinRequest(userId, communityId, message);
+    res.status(201).json({
+      success: true,
+      message: 'Join request sent successfully',
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getUserPendingJoinRequestsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const result = await getUserPendingJoinRequests(userId);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const cancelJoinRequestController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const communityId = validateCommunityId(req.params.id);
+    const result = await cancelCommunityJoinRequest(userId, communityId);
+    res.status(200).json({
+      success: true,
+      message: result.message
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getCommunityJoinRequestsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const communityId = validateCommunityId(req.params.id);
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+
+    const result = await getCommunityJoinRequests(userId, communityId, status);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const acceptJoinRequestController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const communityId = validateCommunityId(req.params.id);
+    const requestId = validateRequestId(req.params.requestId);
+
+    const result = await acceptCommunityJoinRequest(userId, communityId, requestId);
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const rejectJoinRequestController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const communityId = validateCommunityId(req.params.id);
+    const requestId = validateRequestId(req.params.requestId);
+
+    const result = await rejectCommunityJoinRequest(userId, communityId, requestId);
+    res.status(200).json({
+      success: true,
+      message: result.message,
       data: result
     });
   } catch (err) {
