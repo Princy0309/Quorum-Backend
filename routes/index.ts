@@ -20,6 +20,7 @@ import webhookRoutes from './webhookRoutes.js';
 
 import savedItemRoutes from './savedItemRoutes.js';
 import whiteboardRoutes from './whiteboardRoutes.js';
+import projectRoutes from './projectRoutes.js';
 
 const router = Router();
 
@@ -97,5 +98,8 @@ router.use('/v1/integrations/jira', jiraRoutes);
 
 router.use('/webhooks', webhookRoutes);
 router.use('/v1/webhooks', webhookRoutes);
+
+router.use('/projects', projectRoutes);
+router.use('/v1/projects', projectRoutes);
 
 export default router;

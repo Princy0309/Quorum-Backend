@@ -53,3 +53,9 @@ export const submitTaskDeliverableSchema = z.object({
   deliverableUrl: z.string().trim().min(1, 'Deliverable URL or file link is required'),
   deliverableNote: z.string().trim().max(1000).optional(),
 });
+
+export const approveTaskDeliverableSchema = z.object({
+  approved: z.boolean(),
+  feedback: z.string().trim().max(1000).optional(),
+});
+
