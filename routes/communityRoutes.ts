@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
-import { validate } from '../middlewares/validate.js';
+import { validate, validateQuery } from '../middlewares/validate.js';
 import {
   createCommunitySchema,
   updateCommunitySchema,
@@ -11,7 +11,10 @@ import {
   updateMemberRoleSchema,
   transferOwnershipSchema,
   createChannelSchema,
-  updateChannelSchema
+  updateChannelSchema,
+  sendJoinRequestSchema,
+  respondJoinRequestSchema,
+  searchCommunityQuerySchema
 } from '../validators/communityValidators.js';
 import { createPostSchema } from '../validators/postValidators.js';
 import {
@@ -40,7 +43,14 @@ import {
   getCommunityChannelsController,
   getChannelDetailsController,
   updateChannelController,
-  deleteChannelController
+  deleteChannelController,
+  discoverCommunitiesController,
+  createJoinRequestController,
+  getUserPendingJoinRequestsController,
+  cancelJoinRequestController,
+  getCommunityJoinRequestsController,
+  acceptJoinRequestController,
+  rejectJoinRequestController
 } from '../controllers/communityController.js';
 import {
   createPostController,
@@ -53,6 +63,10 @@ const router = Router();
 router.post('/', authMiddleware, validate(createCommunitySchema), createCommunityController);
 router.get('/', authMiddleware, getUserCommunitiesController);
 router.get('/feed', authMiddleware, getCommunityFeedController);
+router.get('/search', authMiddleware, validateQuery(searchCommunityQuerySchema), discoverCommunitiesController);
+router.get('/discover', authMiddleware, validateQuery(searchCommunityQuerySchema), discoverCommunitiesController);
+router.get('/join-requests/my', authMiddleware, getUserPendingJoinRequestsController);
+router.get('/join-requests/pending', authMiddleware, getUserPendingJoinRequestsController);
 
 router.get('/invitations/pending', authMiddleware, getUserPendingInvitesController);
 router.get('/invites/pending', authMiddleware, getUserPendingInvitesController);
@@ -89,6 +103,12 @@ router.patch('/:id/members/:userId/role', authMiddleware, validate(updateMemberR
 router.post('/:id/leave', authMiddleware, leaveCommunityController);
 router.post('/:id/transfer-ownership', authMiddleware, validate(transferOwnershipSchema), transferCommunityOwnershipController);
 router.delete('/:id/members/:userId', authMiddleware, removeCommunityMemberController);
+
+router.get('/:id/join-requests', authMiddleware, getCommunityJoinRequestsController);
+router.post('/:id/join-requests', authMiddleware, validate(sendJoinRequestSchema), createJoinRequestController);
+router.delete('/:id/join-requests', authMiddleware, cancelJoinRequestController);
+router.post('/:id/join-requests/:requestId/accept', authMiddleware, acceptJoinRequestController);
+router.post('/:id/join-requests/:requestId/reject', authMiddleware, rejectJoinRequestController);
 
 router.get('/:id/channels', authMiddleware, getCommunityChannelsController);
 router.post('/:id/channels', authMiddleware, validate(createChannelSchema), createChannelController);
