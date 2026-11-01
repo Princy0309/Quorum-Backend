@@ -7513,9 +7513,551 @@ export const swaggerDocument = {
           }
         }
       }
+    },
+    "/api/projects": {
+      "get": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Get user projects",
+        "description": "Retrieves all projects where the authenticated user is an internal member or external freelancer.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of user projects"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/projects/organization/{organizationId}": {
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Create a new project",
+        "description": "Creates a new project scoped to an organization with a dedicated group conversation channel.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Mobile App Redesign"
+                  },
+                  "description": {
+                    "type": "string",
+                    "example": "Cross-company collaboration project for mobile redesign"
+                  },
+                  "budget": {
+                    "type": "number",
+                    "example": 5000
+                  },
+                  "dueDate": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Project created successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Forbidden - requires ORG_ADMIN or TEAM_HEAD"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "List organization projects",
+        "description": "Returns all projects under an organization.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization projects retrieved"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}": {
+      "get": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Get project details",
+        "description": "Retrieves project metadata, members, and task counts.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project details"
+          },
+          "403": {
+            "description": "Forbidden - not a member of project"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Update project details",
+        "description": "Updates project name, description, budget, or status. (Project Manager / Org Admin only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project updated successfully"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Delete project",
+        "description": "Deletes project and cascades members and tasks. (Project Manager / Org Admin only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project deleted successfully"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/invites": {
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Invite collaborator to project",
+        "description": "Invites an external freelancer, client, or internal member with custom role and hourly rate.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "freelancer@example.com"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "PROJECT_MANAGER",
+                      "INTERNAL_MEMBER",
+                      "FREELANCER",
+                      "CLIENT"
+                    ],
+                    "default": "FREELANCER"
+                  },
+                  "hourlyRate": {
+                    "type": "number",
+                    "example": 50
+                  },
+                  "companyName": {
+                    "type": "string",
+                    "example": "Acme Freelance Studio"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Invite created successfully"
+          }
+        }
+      }
+    },
+    "/api/projects/accept-invite": {
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Accept project invite",
+        "description": "Validates invite token and adds the user as a project member and conversation participant.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Invite accepted and member enrolled"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/tasks": {
+      "get": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "List project tasks",
+        "description": "Retrieves all tasks in project with assignee and deliverable metadata.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "TODO",
+                "IN_PROGRESS",
+                "IN_REVIEW",
+                "COMPLETED",
+                "CANCELLED"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of tasks"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Create project task",
+        "description": "Assigns a new task to an internal member or external freelancer.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Implement Authentication UI"
+                  },
+                  "description": {
+                    "type": "string",
+                    "example": "Deliverable should match Figma specs"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "LOW",
+                      "MEDIUM",
+                      "HIGH",
+                      "URGENT"
+                    ],
+                    "default": "MEDIUM"
+                  },
+                  "assigneeId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "dueDate": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Task created successfully"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/tasks/{taskId}/deliverable": {
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Submit task deliverable",
+        "description": "Freelancer submits S3 deliverable file URL and notes for review, advancing task to IN_REVIEW.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "deliverableUrl"
+                ],
+                "properties": {
+                  "deliverableUrl": {
+                    "type": "string",
+                    "example": "https://s3.amazonaws.com/quorum/deliverable.zip"
+                  },
+                  "deliverableNote": {
+                    "type": "string",
+                    "example": "Finished Figma designs with assets export."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deliverable submitted for review"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/tasks/{taskId}/review": {
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Approve or reject deliverable",
+        "description": "Project Manager approves deliverable (completes task) or requests changes with feedback.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "approved"
+                ],
+                "properties": {
+                  "approved": {
+                    "type": "boolean",
+                    "example": true
+                  },
+                  "feedback": {
+                    "type": "string",
+                    "example": "Great work! Approved."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Review processed"
+          }
+        }
+      }
     }
   },
   "tags": [
+    {
+      "name": "Projects & Freelancer Collaboration",
+      "description": "Cross-organization and freelancer collaboration workspace with task assignment, deliverable review, and sandboxed access."
+    },
     {
       "name": "System & Health",
       "description": "System health checks, database status, Redis readiness, and CSRF token endpoints."
