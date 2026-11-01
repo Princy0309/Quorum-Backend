@@ -379,6 +379,7 @@ export const inviteProjectMember = async (
 
   return {
     invite,
+    token: invite.token,
     inviteUrl: `${process.env.APP_URL || 'https://app.quorum.me'}/projects/join?token=${token}`,
   };
 };
