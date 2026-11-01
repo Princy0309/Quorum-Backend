@@ -699,7 +699,9 @@ export const submitTaskDeliverable = async (
 export const approveTaskDeliverable = async (
   userId: string,
   projectId: string,
-  taskId: string
+  taskId: string,
+  approved: boolean = true,
+  feedback?: string
 ) => {
   await verifyProjectAdminAccess(userId, projectId);
 
@@ -711,9 +713,11 @@ export const approveTaskDeliverable = async (
     throw new ApiError(404, 'Task not found');
   }
 
-  const approved = await prisma.projectTask.update({
+  const updatedTask = await prisma.projectTask.update({
     where: { id: taskId },
-    data: { status: ProjectTaskStatus.COMPLETED },
+    data: {
+      status: approved ? ProjectTaskStatus.COMPLETED : ProjectTaskStatus.IN_PROGRESS,
+    },
   });
 
   if (task.assigneeId) {
@@ -722,20 +726,23 @@ export const approveTaskDeliverable = async (
         recipientId: task.assigneeId,
         actorId: userId,
         type: 'DIRECT_MESSAGE',
-        title: 'Task Approved! 🎉',
-        body: `Your work on "${task.title}" has been approved!`,
-        data: { projectId, taskId, status: 'COMPLETED' },
+        title: approved ? 'Task Approved! 🎉' : 'Changes Requested on Deliverable',
+        body: approved
+          ? `Your work on "${task.title}" has been approved!`
+          : `Changes requested on "${task.title}": ${feedback || 'Please revise your submission.'}`,
+        data: { projectId, taskId, status: approved ? 'COMPLETED' : 'IN_PROGRESS' },
       });
     } catch (err: any) {
-      logger.warn('Failed to notify freelancer of deliverable approval', { error: err.message });
+      logger.warn('Failed to notify freelancer of deliverable review', { error: err.message });
     }
   }
 
-  return approved;
+  return updatedTask;
 };
 
+
 // Helper: Ensure user is a Project Member (or Org Admin)
-const verifyProjectMemberAccess = async (userId: string, projectId: string) => {
+export const verifyProjectMemberAccess = async (userId: string, projectId: string) => {
   const member = await prisma.projectMember.findUnique({
     where: {
       projectId_userId: {
@@ -772,7 +779,7 @@ const verifyProjectMemberAccess = async (userId: string, projectId: string) => {
 };
 
 // Helper: Ensure user has Project Manager / Admin permissions
-const verifyProjectAdminAccess = async (userId: string, projectId: string) => {
+export const verifyProjectAdminAccess = async (userId: string, projectId: string) => {
   const member = await prisma.projectMember.findUnique({
     where: {
       projectId_userId: {
