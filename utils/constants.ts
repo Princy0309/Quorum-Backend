@@ -29,3 +29,15 @@ export const COMMUNITY_EVENTS = {
   COMMENT_NEW: 'community:comment:new',
   COMMENT_DELETED: 'community:comment:deleted'
 } as const;
+
+export const PROJECT_EVENTS = {
+  PROJECT_UPDATED: 'project:updated',
+  PROJECT_MEMBER_JOINED: 'project:member_joined',
+  PROJECT_MEMBER_REMOVED: 'project:member_removed',
+  TASK_CREATED: 'project:task_created',
+  TASK_UPDATED: 'project:task_updated',
+  TASK_STATUS_CHANGED: 'project:task_status_changed',
+  DELIVERABLE_SUBMITTED: 'project:deliverable_submitted',
+  DELIVERABLE_REVIEWED: 'project:deliverable_reviewed',
+} as const;
+

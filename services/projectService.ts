@@ -3,7 +3,38 @@ import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import { OrgRole, ProjectRole, ProjectStatus, ProjectTaskStatus, TaskPriority } from '@prisma/client';
 import { queueNotification } from '../queues/notificationQueue.js';
+import { getIO } from '../sockets/socketServer.js';
+import { PROJECT_EVENTS } from '../utils/constants.js';
 import logger from '../utils/logger.js';
+
+const emitToProject = async (projectId: string, event: string, payload: any) => {
+  try {
+    const io = getIO();
+    if (!io) return;
+
+    const conversation = await prisma.conversation.findUnique({
+      where: { projectId },
+      select: { id: true },
+    });
+
+    if (conversation) {
+      io.to(`conversation:${conversation.id}`).emit(event, payload);
+    }
+  } catch (err: any) {
+    logger.debug('Failed to emit project socket event', { projectId, event, error: err.message });
+  }
+};
+
+const emitToUser = (userId: string, event: string, payload: any) => {
+  try {
+    const io = getIO();
+    if (io) {
+      io.to(`user:${userId}`).emit(event, payload);
+    }
+  } catch (err: any) {
+    logger.debug('Failed to emit user socket event', { userId, event, error: err.message });
+  }
+};
 
 export interface CreateProjectInput {
   name: string;
@@ -426,6 +457,15 @@ export const acceptProjectInvite = async (userId: string, token: string) => {
     return member;
   });
 
+  emitToProject(invite.projectId, PROJECT_EVENTS.PROJECT_MEMBER_JOINED, {
+    projectId: invite.projectId,
+    member: result,
+  });
+  emitToUser(userId, PROJECT_EVENTS.PROJECT_MEMBER_JOINED, {
+    projectId: invite.projectId,
+    member: result,
+  });
+
   return {
     message: `Successfully joined ${invite.project.name}`,
     member: result,
@@ -479,6 +519,15 @@ export const removeProjectMember = async (
         },
       });
     }
+  });
+
+  emitToProject(projectId, PROJECT_EVENTS.PROJECT_MEMBER_REMOVED, {
+    projectId,
+    userId: targetUserId,
+  });
+  emitToUser(targetUserId, PROJECT_EVENTS.PROJECT_MEMBER_REMOVED, {
+    projectId,
+    userId: targetUserId,
   });
 
   return { message: 'Member removed from project successfully' };
@@ -544,6 +593,11 @@ export const createProjectTask = async (
     }
   }
 
+  emitToProject(projectId, PROJECT_EVENTS.TASK_CREATED, { projectId, task });
+  if (input.assigneeId) {
+    emitToUser(input.assigneeId, PROJECT_EVENTS.TASK_CREATED, { projectId, task });
+  }
+
   return task;
 };
 
@@ -606,7 +660,7 @@ export const updateProjectTask = async (
 
   const dueDate = input.dueDate !== undefined ? (input.dueDate ? new Date(input.dueDate) : null) : undefined;
 
-  return await prisma.projectTask.update({
+  const updatedTask = await prisma.projectTask.update({
     where: { id: taskId },
     data: {
       ...(input.title && { title: input.title.trim() }),
@@ -622,6 +676,13 @@ export const updateProjectTask = async (
       },
     },
   });
+
+  emitToProject(projectId, PROJECT_EVENTS.TASK_UPDATED, { projectId, task: updatedTask });
+  if (updatedTask.assigneeId) {
+    emitToUser(updatedTask.assigneeId, PROJECT_EVENTS.TASK_UPDATED, { projectId, task: updatedTask });
+  }
+
+  return updatedTask;
 };
 
 export const updateProjectTaskStatus = async (
@@ -649,6 +710,21 @@ export const updateProjectTaskStatus = async (
       },
     },
   });
+
+  emitToProject(projectId, PROJECT_EVENTS.TASK_STATUS_CHANGED, {
+    projectId,
+    taskId,
+    status,
+    task: updatedTask,
+  });
+  if (updatedTask.assigneeId) {
+    emitToUser(updatedTask.assigneeId, PROJECT_EVENTS.TASK_STATUS_CHANGED, {
+      projectId,
+      taskId,
+      status,
+      task: updatedTask,
+    });
+  }
 
   return updatedTask;
 };
@@ -693,6 +769,21 @@ export const submitTaskDeliverable = async (
     logger.warn('Failed to notify project manager of deliverable submission', { error: err.message });
   }
 
+  emitToProject(projectId, PROJECT_EVENTS.DELIVERABLE_SUBMITTED, {
+    projectId,
+    taskId,
+    deliverableUrl: updated.deliverableUrl,
+    deliverableNote: updated.deliverableNote,
+    task: updated,
+  });
+  emitToUser(task.project.createdById, PROJECT_EVENTS.DELIVERABLE_SUBMITTED, {
+    projectId,
+    taskId,
+    deliverableUrl: updated.deliverableUrl,
+    deliverableNote: updated.deliverableNote,
+    task: updated,
+  });
+
   return updated;
 };
 
@@ -735,6 +826,23 @@ export const approveTaskDeliverable = async (
     } catch (err: any) {
       logger.warn('Failed to notify freelancer of deliverable review', { error: err.message });
     }
+  }
+
+  emitToProject(projectId, PROJECT_EVENTS.DELIVERABLE_REVIEWED, {
+    projectId,
+    taskId,
+    approved,
+    feedback,
+    task: updatedTask,
+  });
+  if (task.assigneeId) {
+    emitToUser(task.assigneeId, PROJECT_EVENTS.DELIVERABLE_REVIEWED, {
+      projectId,
+      taskId,
+      approved,
+      feedback,
+      task: updatedTask,
+    });
   }
 
   return updatedTask;
