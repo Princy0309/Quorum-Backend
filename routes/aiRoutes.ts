@@ -24,11 +24,12 @@ import {
   deleteHistoryController
 } from '../controllers/aiController.js';
 import { uploadMiddleware } from '../controllers/uploadController.js';
+import { aiChatUploadMiddleware } from '../middlewares/aiUploadMiddleware.js';
 
 const router = Router();
 
 router.post('/upload', authMiddleware, aiRateLimiterMiddleware, uploadMiddleware, uploadAiFileController);
-router.post('/chat', authMiddleware, aiRateLimiterMiddleware, uploadMiddleware, validate(aiChatSchema), chatController);
+router.post('/chat', authMiddleware, aiRateLimiterMiddleware, aiChatUploadMiddleware, validate(aiChatSchema), chatController);
 router.post('/summarize', authMiddleware, aiRateLimiterMiddleware, validate(aiSummarySchema), summarizeChatController);
 router.post('/chat/:conversationId/summary', authMiddleware, aiRateLimiterMiddleware, validate(aiSummarySchema), summarizeChatController);
 router.post('/search', authMiddleware, aiRateLimiterMiddleware, validate(aiSearchSchema), searchWorkspaceController);

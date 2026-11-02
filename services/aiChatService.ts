@@ -144,6 +144,7 @@ const MIME_BY_EXT: Record<string, string> = {
   '.webp': 'image/webp',
   '.gif': 'image/gif',
   '.heic': 'image/heic',
+  '.heif': 'image/heif',
   '.svg': 'image/svg+xml',
   '.pdf': 'application/pdf',
   '.txt': 'text/plain',
@@ -151,15 +152,24 @@ const MIME_BY_EXT: Record<string, string> = {
   '.tsv': 'text/tab-separated-values',
   '.json': 'application/json',
   '.md': 'text/markdown',
+  '.markdown': 'text/markdown',
   '.ts': 'text/plain',
+  '.tsx': 'text/plain',
   '.js': 'text/plain',
+  '.jsx': 'text/plain',
   '.py': 'text/plain',
   '.html': 'text/html',
+  '.htm': 'text/html',
   '.css': 'text/css',
   '.xml': 'application/xml',
   '.yaml': 'text/yaml',
   '.yml': 'text/yaml',
   '.sql': 'text/plain',
+  '.log': 'text/plain',
+  '.sh': 'text/plain',
+  '.bash': 'text/plain',
+  '.env': 'text/plain',
+  '.rtf': 'text/plain',
 };
 
 const resolveMimeType = (fileName?: string, explicitMime?: string): string => {
@@ -172,7 +182,22 @@ const resolveMimeType = (fileName?: string, explicitMime?: string): string => {
 };
 
 const isGeminiInlineMedia = (mime: string): boolean => {
-  return mime.startsWith('image/') || mime === 'application/pdf';
+  const m = mime.toLowerCase();
+  if (m === 'image/svg+xml') return false; // SVG is XML text, handled via textAttachment
+  return (
+    m.startsWith('image/') ||
+    m === 'application/pdf' ||
+    m.startsWith('audio/') ||
+    m.startsWith('video/')
+  );
+};
+
+const isLikelyBinary = (buf: Buffer): boolean => {
+  const checkLen = Math.min(buf.length, 1024);
+  for (let i = 0; i < checkLen; i++) {
+    if (buf[i] === 0) return true;
+  }
+  return false;
 };
 
 export const askAiAssistant = async (
@@ -288,8 +313,20 @@ ABSOLUTE RESTRICTIONS & POLICY:
               fileUrl,
               fileSize: att.fileSize || buffer.length
             });
+          } else if (isLikelyBinary(buffer)) {
+            textAttachments.push({
+              fileName,
+              mimeType: mime,
+              content: `[Binary document file: ${fileName} (${mime}, ${buffer.length} bytes)]`
+            });
+            processedAttachments.push({
+              fileName,
+              fileType: mime,
+              fileUrl,
+              fileSize: att.fileSize || buffer.length
+            });
           } else {
-            const textContent = buffer.toString('utf-8').slice(0, 40000);
+            const textContent = buffer.toString('utf-8').slice(0, 50000);
             textAttachments.push({ fileName, mimeType: mime, content: textContent });
             processedAttachments.push({
               fileName,

@@ -1,7 +1,14 @@
 import { Server } from 'socket.io';
 import { registerSfuSignaling } from './sfuSignaling.js';
 import { handleJoinMeeting, handleLeaveMeeting, handleEndMeeting, handleDisconnectCleanup } from './meetingPresence.js';
-import { handleToggleMic, handleToggleCam, handleMuteParticipant, handleSendMeetingMessage } from './meetingControls.js';
+import {
+  handleToggleMic,
+  handleToggleCam,
+  handleMuteParticipant,
+  handleSendMeetingMessage,
+  handleSendMeetingReaction,
+  handleToggleHandRaise
+} from './meetingControls.js';
 import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.js';
 import logger from '../utils/logger.js';
 import { verifyAccessToken, verifyRefreshToken } from '../services/tokenService.js';
@@ -237,6 +244,12 @@ export const initSocketServer = (httpServer: any) => {
     socket.on('meeting:toggle-cam', (data, ack) => handleToggleCam(io, socket, data, ack));
     socket.on('meeting:mute-participant', (data, ack) => handleMuteParticipant(io, socket, data, ack));
     socket.on('meeting:send-message', (data, ack) => handleSendMeetingMessage(io, socket, data, ack));
+
+    socket.on('meeting:send-reaction', (data, ack) => handleSendMeetingReaction(io, socket, data, ack));
+    socket.on('meeting:reaction', (data, ack) => handleSendMeetingReaction(io, socket, data, ack));
+    socket.on('meeting:raise-hand', (data, ack) => handleToggleHandRaise(io, socket, { ...data, isHandRaised: true }, ack));
+    socket.on('meeting:lower-hand', (data, ack) => handleToggleHandRaise(io, socket, { ...data, isHandRaised: false }, ack));
+    socket.on('meeting:toggle-hand', (data, ack) => handleToggleHandRaise(io, socket, data, ack));
 
     socket.on('meeting:admit-participant', (data, ack) => handleAdmitParticipant(io, socket, data, ack));
     socket.on('meeting:reject-participant', (data, ack) => handleRejectParticipant(io, socket, data, ack));

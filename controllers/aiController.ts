@@ -17,6 +17,8 @@ import {
 } from '../services/aiHistoryService.js';
 import { getSignedUploadUrl, uploadBufferToS3 } from '../services/uploadService.js';
 
+import { extractUploadedFiles } from '../middlewares/aiUploadMiddleware.js';
+
 const sendAiSuccess = (res: Response, statusCode: number, message: string, data: any) => {
   return res.status(statusCode).json({
     statusCode,
@@ -35,9 +37,7 @@ export const chatController = asyncHandler(async (req: Request, res: Response) =
   const attachments: AiChatAttachmentInput[] = [];
 
   // 1. Direct multipart file uploads via multer (req.files or req.file)
-  const uploadedFiles = (req.files && Array.isArray(req.files) && req.files.length > 0)
-    ? req.files
-    : ((req as any).file ? [(req as any).file] : []);
+  const uploadedFiles = extractUploadedFiles(req);
 
   for (const file of uploadedFiles) {
     attachments.push({
@@ -48,11 +48,11 @@ export const chatController = asyncHandler(async (req: Request, res: Response) =
     });
   }
 
-  // 2. Attachments array in JSON body
-  const bodyAttachments = req.body?.attachments || req.body?.files;
+  // 2. Attachments array in JSON body (only process items with remote URL or base64Data to avoid duplicate entries)
+  const bodyAttachments = req.body?.attachments || (uploadedFiles.length === 0 ? req.body?.files : undefined);
   if (Array.isArray(bodyAttachments)) {
     for (const item of bodyAttachments) {
-      if (item && typeof item === 'object') {
+      if (item && typeof item === 'object' && (item.fileUrl || item.url || item.base64Data)) {
         attachments.push({
           fileUrl: item.fileUrl || item.url,
           fileName: item.fileName,
