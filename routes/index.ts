@@ -16,8 +16,7 @@ import notificationRoutes from './notificationRoutes.js';
 import calendarRoutes from './calendarRoutes.js';
 import jiraRoutes from './jiraRoutes.js';
 import webhookRoutes from './webhookRoutes.js';
-
-
+import githubRoutes from './githubRoutes.js';
 import savedItemRoutes from './savedItemRoutes.js';
 import whiteboardRoutes from './whiteboardRoutes.js';
 
@@ -94,6 +93,12 @@ router.use('/v1/whiteboards', whiteboardRoutes);
 
 router.use('/integrations/jira', jiraRoutes);
 router.use('/v1/integrations/jira', jiraRoutes);
+
+router.use('/integrations/github', githubRoutes);
+router.use('/v1/integrations/github', githubRoutes);
+router.use('/github', githubRoutes);
+router.use('/v1/github', githubRoutes);
+
 
 router.use('/webhooks', webhookRoutes);
 router.use('/v1/webhooks', webhookRoutes);
