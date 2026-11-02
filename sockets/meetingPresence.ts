@@ -17,6 +17,7 @@ export interface Participant {
     isMuted?: boolean;
     hostMuted?: boolean;
     isVideoOff?: boolean;
+    isHandRaised?: boolean;
 }
 
 export interface ParticipantDTO {
@@ -27,6 +28,7 @@ export interface ParticipantDTO {
     isMuted?: boolean;
     hostMuted?: boolean;
     isVideoOff?: boolean;
+    isHandRaised?: boolean;
 }
 
 export interface WaitingUser {
@@ -72,6 +74,7 @@ export const formatParticipants = (participantsMap: Map<string, Participant>): P
         isMuted: p.isMuted ?? false,
         hostMuted: p.hostMuted ?? false,
         isVideoOff: p.isVideoOff ?? false,
+        isHandRaised: p.isHandRaised ?? false,
     }));
 };
 

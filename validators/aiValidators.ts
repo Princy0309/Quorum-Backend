@@ -5,7 +5,7 @@ export const aiFileAttachmentSchema = z.object({
   url: z.string().url('Must be a valid URL').max(2048).optional(),
   fileName: z.string().trim().max(255).optional(),
   fileType: z.string().trim().max(100).optional(),
-  fileSize: z.coerce.number().int().min(0).max(26214400).optional(),
+  fileSize: z.coerce.number().int().min(0).max(10485760, 'fileSize cannot exceed 10MB').optional(),
   mimeType: z.string().trim().max(100).optional(),
   base64Data: z.string().optional(),
 }).passthrough();
@@ -25,13 +25,13 @@ export const aiChatSchema = z.object({
   url: z.string().url('Must be a valid URL').max(2048).optional(),
   fileName: z.string().trim().max(255).optional(),
   fileType: z.string().trim().max(100).optional(),
-  fileSize: z.coerce.number().int().min(0).max(26214400).optional(),
+  fileSize: z.coerce.number().int().min(0).max(10485760, 'fileSize cannot exceed 10MB').optional(),
   mimeType: z.string().trim().max(100).optional(),
   base64Data: z.string().optional(),
-  attachments: z.array(aiFileAttachmentSchema).max(5).optional(),
-  files: z.array(aiFileAttachmentSchema).max(5).optional(),
+  attachments: z.array(aiFileAttachmentSchema).max(5, 'Maximum 5 attachments allowed').optional(),
+  files: z.array(aiFileAttachmentSchema).max(5, 'Maximum 5 files allowed').optional(),
 }).passthrough().refine((data) => {
-  const hasText = Boolean((data.prompt && data.prompt.trim()) || (data.message && data.message.trim()));
+  const hasText = Boolean((data.prompt && data.prompt.trim().length > 0) || (data.message && data.message.trim().length > 0));
   const hasFile = Boolean(
     data.fileUrl ||
     data.url ||

@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { meetingRooms, SocketAckResponse } from './meetingPresence.js';
+import { meetingRooms, SocketAckResponse, normalizeMeetingCode } from './meetingPresence.js';
 import { peerConnectionManager } from '../sfu/peerConnection.js';
 
 export type MuteAction = 'mute' | 'unmute' | 'allow-unmute';
@@ -319,4 +319,150 @@ export const handleSendMeetingMessage = (
   io.to(normalizedCode).emit('meeting:new-message', messagePayload);
 
   ack?.({ success: true, data: messagePayload });
+};
+
+const reactionRateLimits = new Map<string, number[]>();
+
+export interface MeetingReactionPayload {
+  meetingCode: string;
+  emoji?: string;
+  reaction?: string;
+}
+
+export const handleSendMeetingReaction = (
+  io: Server,
+  socket: Socket,
+  payload: MeetingReactionPayload,
+  ack?: (res: SocketAckResponse) => void
+) => {
+  const user = socket.data.user;
+  if (!user || !user.id || !user.isAuthenticated) {
+    const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  const { meetingCode, emoji, reaction } = payload || {};
+  const normalizedCode = normalizeMeetingCode(meetingCode);
+  const selectedEmoji = typeof emoji === 'string' ? emoji.trim() : (typeof reaction === 'string' ? reaction.trim() : '');
+
+  if (!normalizedCode || !selectedEmoji) {
+    const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code and emoji or reaction are required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  if (selectedEmoji.length > 64) {
+    const err = { code: 'INVALID_PAYLOAD', message: 'Emoji/reaction cannot exceed 64 characters' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  const roomState = meetingRooms.get(normalizedCode);
+  if (!roomState) {
+    const err = { code: 'MEETING_NOT_FOUND', message: 'Meeting room not found' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  const participant = roomState.participants.get(user.id);
+  if (!participant || !participant.socketIds.has(socket.id)) {
+    const err = { code: 'NOT_ACTIVE_PARTICIPANT', message: 'You are not an active participant in this meeting' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  const now = Date.now();
+  const timestamps = (reactionRateLimits.get(user.id) || []).filter((t) => now - t < 3000);
+  if (timestamps.length >= 10) {
+    const err = { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many reactions sent. Please slow down.' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+  timestamps.push(now);
+  reactionRateLimits.set(user.id, timestamps);
+
+  if (reactionRateLimits.size > 500) {
+    for (const [uId, list] of reactionRateLimits.entries()) {
+      const active = list.filter((t) => now - t < 5000);
+      if (active.length === 0) {
+        reactionRateLimits.delete(uId);
+      } else {
+        reactionRateLimits.set(uId, active);
+      }
+    }
+  }
+
+  const reactionPayload = {
+    meetingCode: normalizedCode,
+    userId: user.id,
+    userName: user.name || participant.name || 'Participant',
+    emoji: selectedEmoji,
+    timestamp: new Date(),
+  };
+
+  io.to(normalizedCode).emit('meeting:reaction', reactionPayload);
+
+  ack?.({ success: true, data: reactionPayload });
+};
+
+export const handleToggleHandRaise = (
+  io: Server,
+  socket: Socket,
+  payload: { meetingCode: string; isHandRaised: boolean },
+  ack?: (res: SocketAckResponse) => void
+) => {
+  const user = socket.data.user;
+  if (!user || !user.id || !user.isAuthenticated) {
+    const err = { code: 'UNAUTHORIZED', message: 'Authentication required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  const { meetingCode, isHandRaised } = payload || {};
+  const normalizedCode = normalizeMeetingCode(meetingCode);
+
+  if (!normalizedCode || typeof isHandRaised !== 'boolean') {
+    const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code and isHandRaised status are required' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  const roomState = meetingRooms.get(normalizedCode);
+  if (!roomState) {
+    const err = { code: 'MEETING_NOT_FOUND', message: 'Meeting room not found' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  const participant = roomState.participants.get(user.id);
+  if (!participant || !participant.socketIds.has(socket.id)) {
+    const err = { code: 'NOT_ACTIVE_PARTICIPANT', message: 'You are not an active participant in this meeting' };
+    socket.emit('meeting:error', err);
+    ack?.({ success: false, ...err });
+    return;
+  }
+
+  participant.isHandRaised = isHandRaised;
+
+  const handPayload = {
+    meetingCode: normalizedCode,
+    userId: user.id,
+    userName: user.name || participant.name || 'Participant',
+    isHandRaised,
+    timestamp: new Date(),
+  };
+
+  io.to(normalizedCode).emit('meeting:hand-raise-status', handPayload);
+
+  ack?.({ success: true, data: handPayload });
 };
