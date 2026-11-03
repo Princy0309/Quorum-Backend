@@ -41,6 +41,8 @@ const envSchema = z.object({
   GITHUB_WEBHOOK_SECRET: z.string().optional().default(''),
   GITHUB_ENCRYPTION_KEY: z.string().optional().default(''),
   GITHUB_STATE_SECRET: z.string().optional().default(''),
+  TURNSTILE_SECRET_KEY: z.string().optional().default('1x0000000000000000000000000000000AA'),
+
 
 
 }).passthrough();
@@ -99,6 +101,8 @@ export const env = {
   GITHUB_WEBHOOK_SECRET: data?.GITHUB_WEBHOOK_SECRET || '',
   GITHUB_ENCRYPTION_KEY: data?.GITHUB_ENCRYPTION_KEY || '',
   GITHUB_STATE_SECRET: data?.GITHUB_STATE_SECRET || '',
+  TURNSTILE_SECRET_KEY: data?.TURNSTILE_SECRET_KEY || '1x0000000000000000000000000000000AA',
+
 
 
 };
