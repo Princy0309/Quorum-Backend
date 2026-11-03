@@ -23,13 +23,21 @@ export const createMeetingController = asyncHandler(
     if (!req.user?.id) {
       return next(new ApiError(401, 'Unauthorized, login required'));
     }
-
-    const rawOrgId = req.body?.organizationId;
-    const organizationId =
-      typeof rawOrgId === 'string' && rawOrgId.trim() && rawOrgId !== 'null' && rawOrgId !== 'undefined'
-        ? rawOrgId.trim()
+    const { organizationId, teamId, title } = req.body || {};
+    const cleanOrgId =
+      typeof organizationId === 'string' && organizationId.trim() && organizationId !== 'null' && organizationId !== 'undefined'
+        ? organizationId.trim()
         : undefined;
-    const meeting = await createMeeting(req.user.id, organizationId);
+    const cleanTeamId =
+      typeof teamId === 'string' && teamId.trim() && teamId !== 'null' && teamId !== 'undefined'
+        ? teamId.trim()
+        : undefined;
+    const cleanTitle =
+      typeof title === 'string' && title.trim()
+        ? title.trim()
+        : undefined;
+    const meeting = await createMeeting(req.user.id, cleanOrgId, cleanTeamId, cleanTitle);
+
 
     return res.status(201).json({
       success: true,
