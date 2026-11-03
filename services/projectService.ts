@@ -183,7 +183,7 @@ export const getOrganizationProjects = async (userId: string, organizationId: st
     },
   });
 
-  if (!orgMember) {
+  if (!orgMember || orgMember.role !== OrgRole.ORG_ADMIN) {
     const projectMemberships = await prisma.projectMember.findMany({
       where: {
         userId,
@@ -201,6 +201,7 @@ export const getOrganizationProjects = async (userId: string, organizationId: st
           },
         },
       },
+      orderBy: { joinedAt: 'desc' },
     });
 
     return projectMemberships.map((pm) => ({
@@ -228,9 +229,7 @@ export const getOrganizationProjects = async (userId: string, organizationId: st
 
   return projects.map((p) => ({
     ...p,
-    myRole:
-      p.members[0]?.role ||
-      (orgMember.role === OrgRole.ORG_ADMIN ? ProjectRole.PROJECT_MANAGER : ProjectRole.INTERNAL_MEMBER),
+    myRole: p.members[0]?.role || ProjectRole.PROJECT_MANAGER,
   }));
 };
 
@@ -298,23 +297,19 @@ export const getProjectDetails = async (userId: string, projectId: string) => {
   if (myMembership) {
     resolvedRole = myMembership.role;
   } else {
-    const orgMember = await prisma.organizationMember.findUnique({
+    const orgAdmin = await prisma.organizationMember.findFirst({
       where: {
-        organizationId_userId: {
-          organizationId: project.organizationId,
-          userId,
-        },
+        organizationId: project.organizationId,
+        userId,
+        role: OrgRole.ORG_ADMIN,
       },
     });
 
-    if (!orgMember) {
+    if (!orgAdmin) {
       throw new ApiError(403, 'You do not have access to this project');
     }
 
-    resolvedRole =
-      orgMember.role === OrgRole.ORG_ADMIN
-        ? ProjectRole.PROJECT_MANAGER
-        : ProjectRole.INTERNAL_MEMBER;
+    resolvedRole = ProjectRole.PROJECT_MANAGER;
   }
 
   return {
@@ -578,19 +573,21 @@ export const acceptProjectInvite = async (userId: string, token: string) => {
       throw new ApiError(400, 'This invite token has already been accepted or has expired');
     }
 
-    const member = await tx.projectMember.upsert({
+    const existingMember = await tx.projectMember.findUnique({
       where: {
         projectId_userId: {
           projectId: invite.projectId,
           userId,
         },
       },
-      update: {
-        role: invite.role,
-        companyId: invite.companyId,
-        companyName: invite.companyName,
-      },
-      create: {
+    });
+
+    if (existingMember) {
+      throw new ApiError(400, 'You are already a member of this project');
+    }
+
+    const member = await tx.projectMember.create({
+      data: {
         projectId: invite.projectId,
         userId,
         role: invite.role,
@@ -1118,6 +1115,10 @@ export const submitTaskDeliverable = async (
     throw new ApiError(404, 'Task not found');
   }
 
+  if (task.status === ProjectTaskStatus.COMPLETED || task.status === ProjectTaskStatus.CANCELLED) {
+    throw new ApiError(400, 'Cannot submit deliverable: task is already completed or cancelled');
+  }
+
   const isManagerOrAdmin =
     member.role === ProjectRole.PROJECT_MANAGER || (member as any).isOrgAdmin;
   const isAssignee = task.assigneeId === userId;
@@ -1195,6 +1196,7 @@ export const approveTaskDeliverable = async (
     where: { id: taskId },
     data: {
       status: approved ? ProjectTaskStatus.COMPLETED : ProjectTaskStatus.IN_PROGRESS,
+      ...(!approved && { deliverableUrl: null }),
     },
   });
 
@@ -1331,23 +1333,21 @@ export const verifyProjectMemberAccess = async (userId: string, projectId: strin
     throw new ApiError(404, 'Project not found');
   }
 
-  const orgMember = await prisma.organizationMember.findUnique({
+  const orgAdmin = await prisma.organizationMember.findFirst({
     where: {
-      organizationId_userId: {
-        organizationId: project.organizationId,
-        userId,
-      },
+      organizationId: project.organizationId,
+      userId,
+      role: OrgRole.ORG_ADMIN,
     },
   });
 
-  if (!orgMember) {
+  if (!orgAdmin) {
     throw new ApiError(403, 'You do not have access to this project');
   }
 
-  const isOrgAdmin = orgMember.role === OrgRole.ORG_ADMIN;
   return {
-    role: isOrgAdmin ? ProjectRole.PROJECT_MANAGER : ProjectRole.INTERNAL_MEMBER,
-    isOrgAdmin,
+    role: ProjectRole.PROJECT_MANAGER,
+    isOrgAdmin: true,
     isOrgMember: true,
   };
 };
