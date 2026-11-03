@@ -4,7 +4,7 @@ import { CHAT_EVENTS } from '../utils/constants.js';
 import logger from '../utils/logger.js';
 import { getIO } from '../sockets/socketServer.js';
 
-const safeEjectUserFromRoom = (conversationId: string, targetUserId: string, removedByUserId: string) => {
+export const safeEjectUserFromRoom = (conversationId: string, targetUserId: string, removedByUserId: string) => {
   try {
     const io = getIO();
     io.in(`user:${targetUserId}`).socketsLeave(`conversation:${conversationId}`);

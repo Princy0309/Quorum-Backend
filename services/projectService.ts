@@ -7,6 +7,7 @@ import { addProjectInviteEmailToQueue } from '../queues/emailQueue.js';
 import { getIO } from '../sockets/socketServer.js';
 import { PROJECT_EVENTS } from '../utils/constants.js';
 import logger from '../utils/logger.js';
+import { safeEjectUserFromRoom } from './chatService.js';
 
 const emitToProject = async (projectId: string, event: string, payload: any) => {
   try {
@@ -778,6 +779,11 @@ export const removeProjectMember = async (
     throw new ApiError(400, 'Cannot remove yourself using this endpoint. Use leave project instead.');
   }
 
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    include: { conversation: { select: { id: true } } },
+  });
+
   await prisma.$transaction(async (tx) => {
     await tx.projectTask.updateMany({
       where: {
@@ -798,11 +804,6 @@ export const removeProjectMember = async (
       },
     });
 
-    const project = await tx.project.findUnique({
-      where: { id: projectId },
-      include: { conversation: { select: { id: true } } },
-    });
-
     if (project?.conversation?.id) {
       await tx.conversationParticipant.deleteMany({
         where: {
@@ -812,6 +813,10 @@ export const removeProjectMember = async (
       });
     }
   });
+
+  if (project?.conversation?.id) {
+    safeEjectUserFromRoom(project.conversation.id, targetUserId, userId);
+  }
 
   emitToProject(projectId, PROJECT_EVENTS.PROJECT_MEMBER_REMOVED, {
     projectId,
@@ -999,6 +1004,11 @@ export const updateProjectTask = async (
     );
   }
 
+  const willClearDeliverable =
+    task.status === ProjectTaskStatus.IN_REVIEW &&
+    input.status !== undefined &&
+    input.status !== ProjectTaskStatus.IN_REVIEW;
+
   const dueDate = input.dueDate !== undefined ? (input.dueDate ? new Date(input.dueDate) : null) : undefined;
 
   const updatedTask = await prisma.projectTask.update({
@@ -1010,6 +1020,7 @@ export const updateProjectTask = async (
       ...(input.status && { status: input.status }),
       ...(dueDate !== undefined && { dueDate }),
       ...(input.assigneeId !== undefined && { assigneeId: input.assigneeId }),
+      ...(willClearDeliverable && { deliverableUrl: null, deliverableNote: null }),
     },
     include: {
       assignee: {
@@ -1070,9 +1081,15 @@ export const updateProjectTaskStatus = async (
     );
   }
 
+  const willClearDeliverableStatus =
+    task.status === ProjectTaskStatus.IN_REVIEW && status !== ProjectTaskStatus.IN_REVIEW;
+
   const updatedTask = await prisma.projectTask.update({
     where: { id: taskId },
-    data: { status },
+    data: {
+      status,
+      ...(willClearDeliverableStatus && { deliverableUrl: null, deliverableNote: null }),
+    },
     include: {
       assignee: {
         select: { id: true, name: true, email: true, avatar: true },
