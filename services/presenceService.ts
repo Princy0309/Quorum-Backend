@@ -1,4 +1,5 @@
 import redis from '../config/redis.js';
+import prisma from '../config/prisma.js';
 
 const PRESENCE_TTL_SECONDS = 60;
 const STALE_SOCKET_THRESHOLD_MS = 60 * 1000;
@@ -73,49 +74,82 @@ export const setUserOffline = async (userId: string, socketId: string): Promise<
   }
 };
 
-export const getUserPresence = async (userId: string) => {
+export const getUserPresence = async (userId: string): Promise<{ isOnline: boolean; lastSeen?: Date | null }> => {
   const data = await redis.get(`presence:${userId}`);
-  if (!data) {
-    return { isOnline: false };
-  }
-
   if (data === 'online') {
-    return { isOnline: true };
+    return { isOnline: true, lastSeen: null };
   }
 
+  if (data) {
+    try {
+      const parsed = JSON.parse(data);
+      return { isOnline: false, lastSeen: parsed.lastSeen ? new Date(parsed.lastSeen) : null };
+    } catch (err) {
+      // Fall through to database fallback
+    }
+  }
+
+  // Fallback to database user lastLogin if Redis presence is missing or expired
   try {
-    const parsed = JSON.parse(data);
-    return { isOnline: false, lastSeen: parsed.lastSeen };
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { lastLogin: true }
+    });
+    return { isOnline: false, lastSeen: user?.lastLogin || null };
   } catch (err) {
-    return { isOnline: false };
+    return { isOnline: false, lastSeen: null };
   }
 };
 
-export const getMultipleUserPresences = async (userIds: string[]) => {
+export const getMultipleUserPresences = async (
+  userIds: string[]
+): Promise<Map<string, { isOnline: boolean; lastSeen?: Date | null }>> => {
   if (!userIds || userIds.length === 0) {
-    return new Map<string, { isOnline: boolean; lastSeen?: Date }>();
+    return new Map<string, { isOnline: boolean; lastSeen?: Date | null }>();
   }
 
   const keys = userIds.map((id) => `presence:${id}`);
   const results = await redis.mget(...keys);
 
-  const presenceMap = new Map<string, { isOnline: boolean; lastSeen?: Date }>();
+  const presenceMap = new Map<string, { isOnline: boolean; lastSeen?: Date | null }>();
+  const missingUserIds: string[] = [];
 
   results.forEach((val, idx) => {
     const userId = userIds[idx];
     if (!val) {
-      presenceMap.set(userId, { isOnline: false });
+      missingUserIds.push(userId);
+      presenceMap.set(userId, { isOnline: false, lastSeen: null });
     } else if (val === 'online') {
-      presenceMap.set(userId, { isOnline: true });
+      presenceMap.set(userId, { isOnline: true, lastSeen: null });
     } else {
       try {
         const parsed = JSON.parse(val);
-        presenceMap.set(userId, { isOnline: false, lastSeen: parsed.lastSeen });
+        presenceMap.set(userId, {
+          isOnline: false,
+          lastSeen: parsed.lastSeen ? new Date(parsed.lastSeen) : null
+        });
       } catch (err) {
-        presenceMap.set(userId, { isOnline: false });
+        missingUserIds.push(userId);
+        presenceMap.set(userId, { isOnline: false, lastSeen: null });
       }
     }
   });
+
+  if (missingUserIds.length > 0) {
+    try {
+      const users = await prisma.user.findMany({
+        where: { id: { in: missingUserIds } },
+        select: { id: true, lastLogin: true }
+      });
+      for (const u of users) {
+        if (u.lastLogin) {
+          presenceMap.set(u.id, { isOnline: false, lastSeen: u.lastLogin });
+        }
+      }
+    } catch (err) {
+      // Fallback best effort
+    }
+  }
 
   return presenceMap;
 };

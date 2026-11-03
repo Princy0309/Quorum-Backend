@@ -197,6 +197,7 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         );
 
         const senderName = (message as any).sender?.name || 'Someone';
+        const senderAvatar = (message as any).sender?.avatar || undefined;
 
         if (mentionedRecipientIds.length > 0) {
           sendPushToOfflineUsers(
@@ -208,6 +209,13 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
               messageId: message.id,
               isMention: 'true',
               type: 'MENTION'
+            },
+            {
+              conversationId: message.conversationId,
+              category: 'MESSAGE_REPLY',
+              imageUrl: senderAvatar,
+              channelId: 'quorum_chat_messages',
+              sound: 'default'
             }
           ).catch((err) => {
             logger.error('Background FCM mention notification dispatch error', { error: err.message });
@@ -219,7 +227,18 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
             standardRecipientIds,
             `New message from ${senderName}`,
             rawContent || 'Sent an attachment',
-            { conversationId: message.conversationId, messageId: message.id }
+            {
+              conversationId: message.conversationId,
+              messageId: message.id,
+              type: 'CHAT_MESSAGE'
+            },
+            {
+              conversationId: message.conversationId,
+              category: 'MESSAGE_REPLY',
+              imageUrl: senderAvatar,
+              channelId: 'quorum_chat_messages',
+              sound: 'default'
+            }
           ).catch((err) => {
             logger.error('Background FCM notification dispatch error', { error: err.message });
           });

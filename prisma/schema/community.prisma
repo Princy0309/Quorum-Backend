@@ -14,6 +14,7 @@ model Community {
   owner       User              @relation("CommunityOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members     CommunityMember[]
   invites     CommunityInvite[]
+  joinRequests CommunityJoinRequest[]
   channels    CommunityChannel[]
   posts       CommunityPost[]
 
@@ -108,4 +109,30 @@ model CommunityComment {
   @@index([postId])
   @@index([authorId])
   @@index([createdAt])
+}
+
+enum JoinRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+model CommunityJoinRequest {
+  id           String            @id @default(uuid())
+  communityId  String
+  userId       String
+  status       JoinRequestStatus @default(PENDING)
+  message      String?
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  community    Community         @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([communityId])
+  @@index([userId])
+  @@index([status])
 }

@@ -2,7 +2,7 @@ import { Queue, Worker, Job } from 'bullmq';
 import { queueRedisConnection } from './emailQueue.js';
 import prisma from '../config/prisma.js';
 import { getIO } from '../sockets/socketServer.js';
-import { sendPushToOfflineUsers } from '../services/notificationService.js';
+import { sendPushToOfflineUsers, sendPushNotification } from '../services/notificationService.js';
 import { getMultipleUserPresences } from '../services/presenceService.js';
 import logger from '../utils/logger.js';
 import type { CreateNotificationInput } from '../types/index.js';
@@ -105,7 +105,7 @@ export const notificationWorker = new Worker(
       logger.warn('[NotificationWorker] Presence check failed', { error: err.message });
     }
 
-    if (isOnline && allowInApp && notification) {
+    if (allowInApp && notification) {
       try {
         const io = getIO();
         io.to(`user:${recipientId}`).emit('notification:new', notification);
@@ -113,7 +113,9 @@ export const notificationWorker = new Worker(
       } catch (socketErr: any) {
         logger.debug('[NotificationWorker] Socket broadcast skipped', { error: socketErr.message });
       }
-    } else if (!isOnline && allowPush){
+    }
+
+    if (allowPush) {
       try {
         const stringifiedData: Record<string, string> = { type };
         if (data && typeof data === 'object') {
@@ -122,10 +124,17 @@ export const notificationWorker = new Worker(
           }
         }
 
-        await sendPushToOfflineUsers([recipientId], title, body, stringifiedData);
-        logger.info(`[NotificationWorker] Dispatched FCM push to user:${recipientId}`);
+        const conversationId = (data as any)?.conversationId || (data as any)?.communityId;
+        await sendPushNotification([recipientId], title, body, {
+          payloadData: stringifiedData,
+          conversationId,
+          channelId: type.includes('CHAT') ? 'quorum_chat_messages' : 'quorum_general_notifications',
+          category: type.includes('CHAT') ? 'MESSAGE_REPLY' : undefined,
+          sound: 'default'
+        });
+        logger.info(`[NotificationWorker] Dispatched push to user:${recipientId}`);
       } catch (pushErr: any) {
-        logger.warn('[NotificationWorker] FCM push dispatch failed', { error: pushErr.message });
+        logger.warn('[NotificationWorker] Push dispatch failed', { error: pushErr.message });
       }
     }
 
