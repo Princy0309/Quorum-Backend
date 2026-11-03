@@ -10,6 +10,8 @@ import {
   deleteProject,
   inviteProjectMember,
   acceptProjectInvite,
+  getProjectInvitePreview,
+  updateProjectMember,
   removeProjectMember,
   createProjectTask,
   getProjectTasks,
@@ -17,6 +19,9 @@ import {
   updateProjectTaskStatus,
   submitTaskDeliverable,
   approveTaskDeliverable,
+  addProjectResource,
+  getProjectResources,
+  deleteProjectResource,
 } from '../services/projectService.js';
 import { ProjectTaskStatus } from '@prisma/client';
 
@@ -26,7 +31,6 @@ const getParamString = (param: unknown): string | undefined => {
   return undefined;
 };
 
-// 1. Create a new Project
 export const createProjectController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -49,7 +53,6 @@ export const createProjectController = asyncHandler(
   }
 );
 
-// 2. Get Organization Projects
 export const getOrganizationProjectsController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -71,7 +74,6 @@ export const getOrganizationProjectsController = asyncHandler(
   }
 );
 
-// 3. Get User Projects (all projects where user is internal member or external freelancer)
 export const getUserProjectsController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -88,7 +90,6 @@ export const getUserProjectsController = asyncHandler(
   }
 );
 
-// 4. Get Project Details
 export const getProjectDetailsController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -109,7 +110,6 @@ export const getProjectDetailsController = asyncHandler(
   }
 );
 
-// 5. Update Project Details
 export const updateProjectController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -130,7 +130,6 @@ export const updateProjectController = asyncHandler(
   }
 );
 
-// 6. Delete Project
 export const deleteProjectController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -140,16 +139,15 @@ export const deleteProjectController = asyncHandler(
       getParamString(req.params.projectId) || getParamString(req.params.id);
     if (!projectId) throw new ApiError(400, 'Project ID is required');
 
-    await deleteProject(userId, projectId);
+    const result = await deleteProject(userId, projectId);
     return res.status(200).json({
       success: true,
       statusCode: 200,
-      message: 'Project deleted successfully',
+      message: result.message,
     });
   }
 );
 
-// 7. Invite Member to Project (External Freelancer or Internal Member)
 export const inviteProjectMemberController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -170,7 +168,6 @@ export const inviteProjectMemberController = asyncHandler(
   }
 );
 
-// 8. Accept Project Invite
 export const acceptProjectInviteController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -193,7 +190,49 @@ export const acceptProjectInviteController = asyncHandler(
   }
 );
 
-// 9. Remove Member from Project
+export const getProjectInvitePreviewController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const token =
+      getParamString(req.params.token) || req.body?.token || req.query?.token;
+    if (!token || typeof token !== 'string') {
+      throw new ApiError(400, 'Invite token is required');
+    }
+
+    const preview = await getProjectInvitePreview(token);
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Project invite details retrieved successfully',
+      data: preview,
+      invite: preview,
+    });
+  }
+);
+
+export const updateProjectMemberController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.user?.id;
+    if (!userId) throw new ApiError(401, 'Unauthorized');
+
+    const projectId =
+      getParamString(req.params.projectId) || getParamString(req.params.id);
+    const targetUserId =
+      getParamString(req.params.userId) || getParamString(req.params.memberId);
+    if (!projectId || !targetUserId) {
+      throw new ApiError(400, 'Project ID and target User ID are required');
+    }
+
+    const member = await updateProjectMember(userId, projectId, targetUserId, req.body);
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Project member updated successfully',
+      data: member,
+      member,
+    });
+  }
+);
+
 export const removeProjectMemberController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -216,7 +255,6 @@ export const removeProjectMemberController = asyncHandler(
   }
 );
 
-// 10. Create Project Task
 export const createProjectTaskController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -237,7 +275,6 @@ export const createProjectTaskController = asyncHandler(
   }
 );
 
-// 11. Get Project Tasks
 export const getProjectTasksController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -247,7 +284,7 @@ export const getProjectTasksController = asyncHandler(
       getParamString(req.params.projectId) || getParamString(req.params.id);
     if (!projectId) throw new ApiError(400, 'Project ID is required');
 
-    const statusParam = getParamString(req.query.status) as ProjectTaskStatus | undefined;
+    const statusParam = getParamString(req.query.status);
     const assigneeIdParam = getParamString(req.query.assigneeId);
 
     const tasks = await getProjectTasks(
@@ -267,7 +304,6 @@ export const getProjectTasksController = asyncHandler(
   }
 );
 
-// 12. Update Project Task
 export const updateProjectTaskController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -291,7 +327,6 @@ export const updateProjectTaskController = asyncHandler(
   }
 );
 
-// 13. Update Project Task Status
 export const updateProjectTaskStatusController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -321,7 +356,6 @@ export const updateProjectTaskStatusController = asyncHandler(
   }
 );
 
-// 14. Submit Task Deliverable (Freelancer)
 export const submitTaskDeliverableController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -352,7 +386,6 @@ export const submitTaskDeliverableController = asyncHandler(
   }
 );
 
-// 15. Approve or Reject Task Deliverable (Project Manager / Org Admin)
 export const approveTaskDeliverableController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user?.id;
@@ -384,6 +417,67 @@ export const approveTaskDeliverableController = asyncHandler(
         : 'Deliverable rejected with feedback requested',
       data: task,
       task,
+    });
+  }
+);
+
+export const addProjectResourceController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.user?.id;
+    if (!userId) throw new ApiError(401, 'Unauthorized');
+
+    const projectId =
+      getParamString(req.params.projectId) || getParamString(req.params.id);
+    if (!projectId) throw new ApiError(400, 'Project ID is required');
+
+    const resource = await addProjectResource(userId, projectId, req.body);
+    return res.status(201).json({
+      success: true,
+      statusCode: 201,
+      message: 'Project resource uploaded successfully',
+      data: resource,
+      resource,
+    });
+  }
+);
+
+export const getProjectResourcesController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.user?.id;
+    if (!userId) throw new ApiError(401, 'Unauthorized');
+
+    const projectId =
+      getParamString(req.params.projectId) || getParamString(req.params.id);
+    if (!projectId) throw new ApiError(400, 'Project ID is required');
+
+    const resources = await getProjectResources(userId, projectId);
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Project resources retrieved successfully',
+      data: resources,
+      resources,
+    });
+  }
+);
+
+export const deleteProjectResourceController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.user?.id;
+    if (!userId) throw new ApiError(401, 'Unauthorized');
+
+    const projectId =
+      getParamString(req.params.projectId) || getParamString(req.params.id);
+    const resourceId = getParamString(req.params.resourceId);
+    if (!projectId || !resourceId) {
+      throw new ApiError(400, 'Project ID and Resource ID are required');
+    }
+
+    const result = await deleteProjectResource(userId, projectId, resourceId);
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: result.message,
     });
   }
 );

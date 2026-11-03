@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
-import { validate } from '../middlewares/validate.js';
+import { validate, validateQuery } from '../middlewares/validate.js';
 import {
   requireProjectMember,
   requireProjectAdmin,
@@ -9,11 +9,14 @@ import {
   createProjectSchema,
   updateProjectSchema,
   inviteProjectMemberSchema,
+  updateProjectMemberRoleSchema,
   createProjectTaskSchema,
   updateProjectTaskSchema,
+  getProjectTasksQuerySchema,
   updateTaskStatusSchema,
   submitTaskDeliverableSchema,
   approveTaskDeliverableSchema,
+  createProjectResourceSchema,
 } from '../validators/projectValidators.js';
 import {
   createProjectController,
@@ -24,6 +27,8 @@ import {
   deleteProjectController,
   inviteProjectMemberController,
   acceptProjectInviteController,
+  getProjectInvitePreviewController,
+  updateProjectMemberController,
   removeProjectMemberController,
   createProjectTaskController,
   getProjectTasksController,
@@ -31,26 +36,21 @@ import {
   updateProjectTaskStatusController,
   submitTaskDeliverableController,
   approveTaskDeliverableController,
+  addProjectResourceController,
+  getProjectResourcesController,
+  deleteProjectResourceController,
 } from '../controllers/projectController.js';
 
 const router = Router();
 
-// ==========================================
-// 1. User & Invitation Level Endpoints
-// ==========================================
-
-// List all projects user is a member/collaborator of (internal or external)
 router.get('/', authMiddleware, getUserProjectsController);
 router.get('/my-projects', authMiddleware, getUserProjectsController);
 
-// Accept project invitation (freelancers & external partners)
 router.post('/accept-invite', authMiddleware, acceptProjectInviteController);
 router.post('/invites/accept', authMiddleware, acceptProjectInviteController);
-router.get('/invites/accept/:token', authMiddleware, acceptProjectInviteController);
 
-// ==========================================
-// 2. Organization Level Project Endpoints
-// ==========================================
+router.get('/invites/preview/:token', getProjectInvitePreviewController);
+router.get('/invites/:token', getProjectInvitePreviewController);
 
 router.post(
   '/organization/:organizationId',
@@ -75,10 +75,6 @@ router.get(
   authMiddleware,
   getOrganizationProjectsController
 );
-
-// ==========================================
-// 3. Project Detail & Member Management
-// ==========================================
 
 router.get('/:id', authMiddleware, requireProjectMember, getProjectDetailsController);
 router.patch(
@@ -90,7 +86,6 @@ router.patch(
 );
 router.delete('/:id', authMiddleware, requireProjectAdmin, deleteProjectController);
 
-// Invite external freelancer or internal member to project
 router.post(
   '/:id/invites',
   authMiddleware,
@@ -106,7 +101,14 @@ router.post(
   inviteProjectMemberController
 );
 
-// Remove member/freelancer from project
+router.patch(
+  '/:id/members/:userId',
+  authMiddleware,
+  requireProjectAdmin,
+  validate(updateProjectMemberRoleSchema),
+  updateProjectMemberController
+);
+
 router.delete(
   '/:id/members/:userId',
   authMiddleware,
@@ -114,14 +116,14 @@ router.delete(
   removeProjectMemberController
 );
 
-// ==========================================
-// 4. Tasks & Deliverables Workflow
-// ==========================================
+router.get(
+  '/:id/tasks',
+  authMiddleware,
+  requireProjectMember,
+  validateQuery(getProjectTasksQuerySchema),
+  getProjectTasksController
+);
 
-// List tasks for a project
-router.get('/:id/tasks', authMiddleware, requireProjectMember, getProjectTasksController);
-
-// Create task in project (Admin / Project Manager)
 router.post(
   '/:id/tasks',
   authMiddleware,
@@ -130,7 +132,6 @@ router.post(
   createProjectTaskController
 );
 
-// Update task details
 router.patch(
   '/:id/tasks/:taskId',
   authMiddleware,
@@ -139,7 +140,6 @@ router.patch(
   updateProjectTaskController
 );
 
-// Fast status progression (TODO -> IN_PROGRESS -> etc.)
 router.patch(
   '/:id/tasks/:taskId/status',
   authMiddleware,
@@ -148,7 +148,6 @@ router.patch(
   updateProjectTaskStatusController
 );
 
-// Submit deliverable (Freelancers)
 router.post(
   '/:id/tasks/:taskId/deliverable',
   authMiddleware,
@@ -157,13 +156,34 @@ router.post(
   submitTaskDeliverableController
 );
 
-// Approve or reject deliverable (Admin / Project Manager)
 router.post(
   '/:id/tasks/:taskId/review',
   authMiddleware,
   requireProjectAdmin,
   validate(approveTaskDeliverableSchema),
   approveTaskDeliverableController
+);
+
+router.post(
+  '/:id/resources',
+  authMiddleware,
+  requireProjectMember,
+  validate(createProjectResourceSchema),
+  addProjectResourceController
+);
+
+router.get(
+  '/:id/resources',
+  authMiddleware,
+  requireProjectMember,
+  getProjectResourcesController
+);
+
+router.delete(
+  '/:id/resources/:resourceId',
+  authMiddleware,
+  requireProjectMember,
+  deleteProjectResourceController
 );
 
 export default router;

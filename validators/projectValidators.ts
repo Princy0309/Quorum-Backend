@@ -19,14 +19,21 @@ export const inviteProjectMemberSchema = z.object({
   email: z.string().trim().email('Invalid email address'),
   role: z.enum(['PROJECT_MANAGER', 'INTERNAL_MEMBER', 'FREELANCER', 'CLIENT']).default('FREELANCER'),
   hourlyRate: z.number().positive('Hourly rate must be a positive number').optional(),
+  companyId: z.string().uuid('Invalid company ID format').optional().nullable(),
   companyName: z.string().trim().max(100).optional(),
 });
 
-export const updateProjectMemberRoleSchema = z.object({
-  role: z.enum(['PROJECT_MANAGER', 'INTERNAL_MEMBER', 'FREELANCER', 'CLIENT']),
-  hourlyRate: z.number().positive().optional().nullable(),
-  companyName: z.string().trim().max(100).optional().nullable(),
-});
+export const updateProjectMemberRoleSchema = z
+  .object({
+    role: z.enum(['PROJECT_MANAGER', 'INTERNAL_MEMBER', 'FREELANCER', 'CLIENT']).optional(),
+    hourlyRate: z.number().positive('Hourly rate must be a positive number').optional().nullable(),
+    companyId: z.string().uuid('Invalid company ID format').optional().nullable(),
+    companyName: z.string().trim().max(100).optional().nullable(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'At least one field must be provided for update',
+  });
+
 
 export const createProjectTaskSchema = z.object({
   title: z.string().trim().min(1, 'Task title is required').max(200, 'Title cannot exceed 200 characters'),
@@ -45,6 +52,11 @@ export const updateProjectTaskSchema = z.object({
   assigneeId: z.string().uuid().optional().nullable(),
 });
 
+export const getProjectTasksQuerySchema = z.object({
+  status: z.enum(['TODO', 'IN_PROGRESS', 'IN_REVIEW', 'COMPLETED', 'CANCELLED']).optional(),
+  assigneeId: z.string().uuid('Invalid assignee ID format').optional(),
+});
+
 export const updateTaskStatusSchema = z.object({
   status: z.enum(['TODO', 'IN_PROGRESS', 'IN_REVIEW', 'COMPLETED', 'CANCELLED']),
 });
@@ -57,5 +69,13 @@ export const submitTaskDeliverableSchema = z.object({
 export const approveTaskDeliverableSchema = z.object({
   approved: z.boolean(),
   feedback: z.string().trim().max(1000).optional(),
+});
+
+export const createProjectResourceSchema = z.object({
+  title: z.string().trim().min(1, 'Resource title is required').max(200, 'Title cannot exceed 200 characters'),
+  fileUrl: z.string().trim().url('Invalid file URL').max(2048),
+  fileName: z.string().trim().max(255).optional(),
+  fileType: z.string().trim().max(100).optional(),
+  fileSize: z.coerce.number().int().positive().optional(),
 });
 

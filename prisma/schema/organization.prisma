@@ -21,6 +21,8 @@ model Organization {
   invites      OrganizationInvite[]
   teams        Team[]
   projects     Project[]
+  collaboratingMembers ProjectMember[] @relation("ProjectMemberCompany")
+  collaboratingInvites ProjectInvite[] @relation("ProjectInviteCompany")
   meetings           Meeting[]
   whiteboards        Whiteboard[]
   jiraIntegration    OrgJiraIntegration?

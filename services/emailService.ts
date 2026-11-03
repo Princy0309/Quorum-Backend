@@ -6,6 +6,7 @@ import {
   getMeetingInviteEmailHtml,
   getScopedMeetingInviteEmailHtml,
   getOTPEmailHtml,
+  getProjectInviteEmailHtml,
 } from '../utils/emailTemplate.js';
 
 export const transporter = nodemailer.createTransport({
@@ -141,4 +142,34 @@ export const sendScopedMeetingInviteEmail = async (
 
 
 
-export default { transporter, sendOTPEmail, sendNotificationDigestEmail, sendOrgInviteEmail };
+export const sendProjectInviteEmail = async (
+  to: string,
+  inviterName: string,
+  projectName: string,
+  orgName: string,
+  role: string,
+  inviteLink: string,
+  expiresInDays: number = 7,
+  companyName?: string
+): Promise<any> => {
+  const html = getProjectInviteEmailHtml(
+    inviterName,
+    projectName,
+    orgName,
+    role,
+    inviteLink,
+    expiresInDays,
+    companyName
+  );
+
+  const subject = `${inviterName} invited you to collaborate on "${projectName}"`;
+
+  return await transporter.sendMail({
+    from: `"Quorum Projects" <${process.env.SMTP_USER}>`,
+    to,
+    subject,
+    html,
+  });
+};
+
+export default { transporter, sendOTPEmail, sendNotificationDigestEmail, sendOrgInviteEmail, sendProjectInviteEmail };

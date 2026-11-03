@@ -3,6 +3,7 @@ import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import { OrgRole, ProjectRole, ProjectStatus, ProjectTaskStatus, TaskPriority } from '@prisma/client';
 import { queueNotification } from '../queues/notificationQueue.js';
+import { addProjectInviteEmailToQueue } from '../queues/emailQueue.js';
 import { getIO } from '../sockets/socketServer.js';
 import { PROJECT_EVENTS } from '../utils/constants.js';
 import logger from '../utils/logger.js';
@@ -55,7 +56,23 @@ export interface InviteProjectMemberInput {
   email: string;
   role?: ProjectRole;
   hourlyRate?: number;
+  companyId?: string | null;
   companyName?: string;
+}
+
+export interface UpdateProjectMemberInput {
+  role?: ProjectRole;
+  hourlyRate?: number | null;
+  companyId?: string | null;
+  companyName?: string | null;
+}
+
+export interface CreateProjectResourceInput {
+  title: string;
+  fileUrl: string;
+  fileName?: string;
+  fileType?: string;
+  fileSize?: number;
 }
 
 export interface CreateProjectTaskInput {
@@ -118,12 +135,14 @@ export const createProject = async (
             user: {
               select: { id: true, name: true, email: true, avatar: true },
             },
+            company: {
+              select: { id: true, name: true, slug: true, logo: true },
+            },
           },
         },
       },
     });
 
-    // Create a linked conversation for project-wide real-time collaboration
     await tx.conversation.create({
       data: {
         type: 'project',
@@ -156,7 +175,6 @@ export const getOrganizationProjects = async (userId: string, organizationId: st
   });
 
   if (!orgMember) {
-    // If not a full organization member, check if user is an external collaborator on any project in this org
     const projectMemberships = await prisma.projectMember.findMany({
       where: {
         userId,
@@ -166,7 +184,7 @@ export const getOrganizationProjects = async (userId: string, organizationId: st
         project: {
           include: {
             _count: {
-              select: { members: true, tasks: true },
+              select: { members: true, tasks: true, resources: true },
             },
             createdBy: {
               select: { id: true, name: true, email: true, avatar: true },
@@ -182,12 +200,11 @@ export const getOrganizationProjects = async (userId: string, organizationId: st
     }));
   }
 
-  // Internal organization member: can view all organization projects
   const projects = await prisma.project.findMany({
     where: { organizationId },
     include: {
       _count: {
-        select: { members: true, tasks: true },
+        select: { members: true, tasks: true, resources: true },
       },
       createdBy: {
         select: { id: true, name: true, email: true, avatar: true },
@@ -202,7 +219,9 @@ export const getOrganizationProjects = async (userId: string, organizationId: st
 
   return projects.map((p) => ({
     ...p,
-    myRole: p.members[0]?.role || (orgMember.role === OrgRole.ORG_ADMIN ? ProjectRole.PROJECT_MANAGER : null),
+    myRole:
+      p.members[0]?.role ||
+      (orgMember.role === OrgRole.ORG_ADMIN ? ProjectRole.PROJECT_MANAGER : ProjectRole.INTERNAL_MEMBER),
   }));
 };
 
@@ -216,7 +235,7 @@ export const getUserProjects = async (userId: string) => {
             select: { id: true, name: true, slug: true, logo: true },
           },
           _count: {
-            select: { members: true, tasks: true },
+            select: { members: true, tasks: true, resources: true },
           },
         },
       },
@@ -245,6 +264,9 @@ export const getProjectDetails = async (userId: string, projectId: string) => {
           user: {
             select: { id: true, name: true, email: true, avatar: true },
           },
+          company: {
+            select: { id: true, name: true, slug: true, logo: true },
+          },
         },
         orderBy: { joinedAt: 'asc' },
       },
@@ -252,7 +274,7 @@ export const getProjectDetails = async (userId: string, projectId: string) => {
         select: { id: true },
       },
       _count: {
-        select: { tasks: true, members: true },
+        select: { tasks: true, members: true, resources: true },
       },
     },
   });
@@ -261,8 +283,12 @@ export const getProjectDetails = async (userId: string, projectId: string) => {
     throw new ApiError(404, 'Project not found');
   }
 
-  const isMember = project.members.some((m) => m.userId === userId);
-  if (!isMember) {
+  const myMembership = project.members.find((m) => m.userId === userId);
+  let resolvedRole: ProjectRole;
+
+  if (myMembership) {
+    resolvedRole = myMembership.role;
+  } else {
     const orgMember = await prisma.organizationMember.findUnique({
       where: {
         organizationId_userId: {
@@ -272,16 +298,19 @@ export const getProjectDetails = async (userId: string, projectId: string) => {
       },
     });
 
-    if (!orgMember || orgMember.role !== OrgRole.ORG_ADMIN) {
+    if (!orgMember) {
       throw new ApiError(403, 'You do not have access to this project');
     }
-  }
 
-  const myMembership = project.members.find((m) => m.userId === userId);
+    resolvedRole =
+      orgMember.role === OrgRole.ORG_ADMIN
+        ? ProjectRole.PROJECT_MANAGER
+        : ProjectRole.INTERNAL_MEMBER;
+  }
 
   return {
     ...project,
-    myRole: myMembership?.role || ProjectRole.PROJECT_MANAGER,
+    myRole: resolvedRole,
     conversationId: project.conversation?.id || null,
   };
 };
@@ -346,8 +375,52 @@ export const inviteProjectMember = async (
     throw new ApiError(400, 'User is already a member of this project');
   }
 
+  const existingPendingInvite = await prisma.projectInvite.findFirst({
+    where: {
+      projectId,
+      email,
+      isAccepted: false,
+      expiresAt: { gt: new Date() },
+    },
+  });
+
+  if (existingPendingInvite) {
+    throw new ApiError(400, 'A pending invitation has already been sent to this email address');
+  }
+
+  let companyName = input.companyName?.trim() || null;
+  if (input.companyId) {
+    const companyOrg = await prisma.organization.findUnique({
+      where: { id: input.companyId },
+      select: { id: true, name: true },
+    });
+    if (!companyOrg) {
+      throw new ApiError(404, 'Collaborating company organization not found');
+    }
+    companyName = companyOrg.name;
+  }
+
+  const targetUser = await prisma.user.findUnique({ where: { email } });
+  if (input.companyId && targetUser) {
+    const isCompanyMember = await prisma.organizationMember.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId: input.companyId,
+          userId: targetUser.id,
+        },
+      },
+    });
+
+    if (!isCompanyMember) {
+      throw new ApiError(
+        400,
+        'The invited user is not a verified member of the specified collaborating organization'
+      );
+    }
+  }
+
   const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   const invite = await prisma.projectInvite.create({
     data: {
@@ -356,12 +429,39 @@ export const inviteProjectMember = async (
       role: input.role || ProjectRole.FREELANCER,
       token,
       inviterId: userId,
+      companyId: input.companyId || null,
+      companyName,
       expiresAt,
+    },
+    include: {
+      company: {
+        select: { id: true, name: true, slug: true, logo: true },
+      },
     },
   });
 
-  // If the user already has an account, queue an in-app and push notification
-  const targetUser = await prisma.user.findUnique({ where: { email } });
+  const inviter = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true },
+  });
+
+  const inviteUrl = `${process.env.APP_URL || 'https://app.quorum.me'}/projects/join?token=${token}`;
+
+  try {
+    await addProjectInviteEmailToQueue({
+      email,
+      inviterName: inviter?.name || 'A team member',
+      projectName: project.name,
+      orgName: project.organization.name,
+      role: input.role || ProjectRole.FREELANCER,
+      inviteLink: inviteUrl,
+      expiresInDays: 7,
+      companyName: companyName || undefined,
+    });
+  } catch (err: any) {
+    logger.warn('Failed to queue project invite email', { error: err.message });
+  }
+
   if (targetUser) {
     try {
       await queueNotification({
@@ -380,7 +480,7 @@ export const inviteProjectMember = async (
   return {
     invite,
     token: invite.token,
-    inviteUrl: `${process.env.APP_URL || 'https://app.quorum.me'}/projects/join?token=${token}`,
+    inviteUrl,
   };
 };
 
@@ -390,6 +490,9 @@ export const acceptProjectInvite = async (userId: string, token: string) => {
     include: {
       project: {
         include: { conversation: { select: { id: true } } },
+      },
+      company: {
+        select: { id: true, name: true, slug: true, logo: true },
       },
     },
   });
@@ -411,14 +514,42 @@ export const acceptProjectInvite = async (userId: string, token: string) => {
     throw new ApiError(404, 'User not found');
   }
 
+  if (user.email.toLowerCase() !== invite.email.toLowerCase()) {
+    throw new ApiError(403, 'This invitation was issued to a different email address');
+  }
+
+  if (invite.companyId) {
+    const isCompanyMember = await prisma.organizationMember.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId: invite.companyId,
+          userId,
+        },
+      },
+    });
+
+    if (!isCompanyMember) {
+      throw new ApiError(
+        403,
+        'You must be a verified member of the designated partner company to accept this invitation'
+      );
+    }
+  }
+
   const result = await prisma.$transaction(async (tx) => {
-    // 1. Mark invite accepted
-    await tx.projectInvite.update({
-      where: { id: invite.id },
+    const updatedInvite = await tx.projectInvite.updateMany({
+      where: {
+        id: invite.id,
+        isAccepted: false,
+        expiresAt: { gt: new Date() },
+      },
       data: { isAccepted: true },
     });
 
-    // 2. Add as Project Member
+    if (updatedInvite.count === 0) {
+      throw new ApiError(400, 'This invite token has already been accepted or has expired');
+    }
+
     const member = await tx.projectMember.upsert({
       where: {
         projectId_userId: {
@@ -426,18 +557,24 @@ export const acceptProjectInvite = async (userId: string, token: string) => {
           userId,
         },
       },
-      update: { role: invite.role },
+      update: {
+        role: invite.role,
+        companyId: invite.companyId,
+        companyName: invite.companyName,
+      },
       create: {
         projectId: invite.projectId,
         userId,
         role: invite.role,
+        companyId: invite.companyId,
+        companyName: invite.companyName,
       },
       include: {
         project: { select: { id: true, name: true } },
+        company: { select: { id: true, name: true, slug: true, logo: true } },
       },
     });
 
-    // 3. Add to project group conversation
     if (invite.project.conversation?.id) {
       await tx.conversationParticipant.upsert({
         where: {
@@ -473,6 +610,111 @@ export const acceptProjectInvite = async (userId: string, token: string) => {
   };
 };
 
+export const getProjectInvitePreview = async (token: string) => {
+  const invite = await prisma.projectInvite.findUnique({
+    where: { token },
+    include: {
+      project: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          organization: { select: { id: true, name: true, logo: true } },
+        },
+      },
+      inviter: {
+        select: { id: true, name: true, email: true, avatar: true },
+      },
+      company: {
+        select: { id: true, name: true, slug: true, logo: true },
+      },
+    },
+  });
+
+  if (!invite) {
+    throw new ApiError(404, 'Invalid or expired project invite token');
+  }
+
+  const isExpired = new Date() > invite.expiresAt;
+
+  return {
+    id: invite.id,
+    projectId: invite.projectId,
+    projectName: invite.project.name,
+    projectDescription: invite.project.description,
+    organization: invite.project.organization,
+    inviter: invite.inviter,
+    role: invite.role,
+    company: invite.company,
+    companyName: invite.companyName,
+    email: invite.email,
+    isAccepted: invite.isAccepted,
+    isExpired,
+    expiresAt: invite.expiresAt,
+  };
+};
+
+export const updateProjectMember = async (
+  userId: string,
+  projectId: string,
+  targetUserId: string,
+  input: UpdateProjectMemberInput
+) => {
+  await verifyProjectAdminAccess(userId, projectId);
+
+  const existingMember = await prisma.projectMember.findUnique({
+    where: {
+      projectId_userId: {
+        projectId,
+        userId: targetUserId,
+      },
+    },
+  });
+
+  if (!existingMember) {
+    throw new ApiError(404, 'Member not found in this project');
+  }
+
+  let companyName = input.companyName !== undefined ? (input.companyName ? input.companyName.trim() : null) : undefined;
+  if (input.companyId) {
+    const companyOrg = await prisma.organization.findUnique({
+      where: { id: input.companyId },
+      select: { id: true, name: true },
+    });
+    if (!companyOrg) {
+      throw new ApiError(404, 'Collaborating company organization not found');
+    }
+    companyName = companyOrg.name;
+  } else if (input.companyId === null) {
+    companyName = null;
+  }
+
+  const updatedMember = await prisma.projectMember.update({
+    where: {
+      projectId_userId: {
+        projectId,
+        userId: targetUserId,
+      },
+    },
+    data: {
+      ...(input.role && { role: input.role }),
+      ...(input.hourlyRate !== undefined && { hourlyRate: input.hourlyRate }),
+      ...(input.companyId !== undefined && { companyId: input.companyId }),
+      ...(companyName !== undefined && { companyName }),
+    },
+    include: {
+      user: {
+        select: { id: true, name: true, email: true, avatar: true },
+      },
+      company: {
+        select: { id: true, name: true, slug: true, logo: true },
+      },
+    },
+  });
+
+  return updatedMember;
+};
+
 export const removeProjectMember = async (
   userId: string,
   projectId: string,
@@ -498,6 +740,16 @@ export const removeProjectMember = async (
   }
 
   await prisma.$transaction(async (tx) => {
+    await tx.projectTask.updateMany({
+      where: {
+        projectId,
+        assigneeId: targetUserId,
+      },
+      data: {
+        assigneeId: null,
+      },
+    });
+
     await tx.projectMember.delete({
       where: {
         projectId_userId: {
@@ -605,15 +857,22 @@ export const createProjectTask = async (
 export const getProjectTasks = async (
   userId: string,
   projectId: string,
-  status?: ProjectTaskStatus,
+  status?: string,
   assigneeId?: string
 ) => {
   await verifyProjectMemberAccess(userId, projectId);
 
+  if (status && !Object.values(ProjectTaskStatus).includes(status as ProjectTaskStatus)) {
+    throw new ApiError(
+      400,
+      `Invalid task status: "${status}". Valid values are: ${Object.values(ProjectTaskStatus).join(', ')}`
+    );
+  }
+
   return await prisma.projectTask.findMany({
     where: {
       projectId,
-      ...(status && { status }),
+      ...(status && { status: status as ProjectTaskStatus }),
       ...(assigneeId && { assigneeId }),
     },
     include: {
@@ -634,7 +893,7 @@ export const updateProjectTask = async (
   taskId: string,
   input: UpdateProjectTaskInput
 ) => {
-  await verifyProjectMemberAccess(userId, projectId);
+  const member = await verifyProjectMemberAccess(userId, projectId);
 
   const task = await prisma.projectTask.findUnique({
     where: { id: taskId, projectId },
@@ -642,6 +901,41 @@ export const updateProjectTask = async (
 
   if (!task) {
     throw new ApiError(404, 'Task not found');
+  }
+
+  const isManagerOrAdmin =
+    member.role === ProjectRole.PROJECT_MANAGER || (member as any).isOrgAdmin;
+  const isCreator = task.createdById === userId;
+  const isAssignee = task.assigneeId === userId;
+
+  if (!isManagerOrAdmin) {
+    if (
+      input.status &&
+      (input.status === ProjectTaskStatus.COMPLETED || input.status === ProjectTaskStatus.CANCELLED)
+    ) {
+      throw new ApiError(
+        403,
+        'Only project managers can mark tasks as completed or cancelled. Please submit a deliverable for review instead.'
+      );
+    }
+
+    if (!isCreator) {
+      if (!isAssignee) {
+        throw new ApiError(403, 'You do not have permission to modify this task');
+      }
+
+      if (
+        input.assigneeId !== undefined ||
+        input.priority !== undefined ||
+        input.title !== undefined ||
+        input.dueDate !== undefined
+      ) {
+        throw new ApiError(
+          403,
+          'Only project managers or the task creator can modify task assignment, priority, title, or due date'
+        );
+      }
+    }
   }
 
   if (input.assigneeId) {
@@ -692,7 +986,7 @@ export const updateProjectTaskStatus = async (
   taskId: string,
   status: ProjectTaskStatus
 ) => {
-  await verifyProjectMemberAccess(userId, projectId);
+  const member = await verifyProjectMemberAccess(userId, projectId);
 
   const task = await prisma.projectTask.findUnique({
     where: { id: taskId, projectId },
@@ -700,6 +994,27 @@ export const updateProjectTaskStatus = async (
 
   if (!task) {
     throw new ApiError(404, 'Task not found');
+  }
+
+  const isManagerOrAdmin =
+    member.role === ProjectRole.PROJECT_MANAGER || (member as any).isOrgAdmin;
+  const isCreator = task.createdById === userId;
+  const isAssignee = task.assigneeId === userId;
+
+  if (!isManagerOrAdmin && !isCreator && !isAssignee) {
+    throw new ApiError(
+      403,
+      'Only the task assignee, creator, or project managers can change the task status'
+    );
+  }
+
+  if (!isManagerOrAdmin) {
+    if (status === ProjectTaskStatus.COMPLETED || status === ProjectTaskStatus.CANCELLED) {
+      throw new ApiError(
+        403,
+        'Only project managers can mark tasks as completed or cancelled. Please submit a deliverable for review instead.'
+      );
+    }
   }
 
   const updatedTask = await prisma.projectTask.update({
@@ -736,7 +1051,7 @@ export const submitTaskDeliverable = async (
   taskId: string,
   input: { deliverableUrl: string; deliverableNote?: string }
 ) => {
-  await verifyProjectMemberAccess(userId, projectId);
+  const member = await verifyProjectMemberAccess(userId, projectId);
 
   const task = await prisma.projectTask.findUnique({
     where: { id: taskId, projectId },
@@ -745,6 +1060,14 @@ export const submitTaskDeliverable = async (
 
   if (!task) {
     throw new ApiError(404, 'Task not found');
+  }
+
+  const isManagerOrAdmin =
+    member.role === ProjectRole.PROJECT_MANAGER || (member as any).isOrgAdmin;
+  const isAssignee = task.assigneeId === userId;
+
+  if (!isAssignee && !isManagerOrAdmin) {
+    throw new ApiError(403, 'Only the assigned member can submit deliverables for this task');
   }
 
   const updated = await prisma.projectTask.update({
@@ -756,7 +1079,6 @@ export const submitTaskDeliverable = async (
     },
   });
 
-  // Notify the project manager that deliverable is submitted
   try {
     await queueNotification({
       recipientId: task.project.createdById,
@@ -849,8 +1171,81 @@ export const approveTaskDeliverable = async (
   return updatedTask;
 };
 
+export const addProjectResource = async (
+  userId: string,
+  projectId: string,
+  input: CreateProjectResourceInput
+) => {
+  await verifyProjectMemberAccess(userId, projectId);
 
-// Helper: Ensure user is a Project Member (or Org Admin)
+  const resource = await prisma.projectResource.create({
+    data: {
+      projectId,
+      title: input.title.trim(),
+      fileUrl: input.fileUrl.trim(),
+      fileName: input.fileName?.trim() || null,
+      fileType: input.fileType?.trim() || null,
+      fileSize: input.fileSize || null,
+      uploadedById: userId,
+    },
+    include: {
+      uploadedBy: {
+        select: { id: true, name: true, email: true, avatar: true },
+      },
+    },
+  });
+
+  emitToProject(projectId, 'project:resource_added', { projectId, resource });
+
+  return resource;
+};
+
+export const getProjectResources = async (userId: string, projectId: string) => {
+  await verifyProjectMemberAccess(userId, projectId);
+
+  return await prisma.projectResource.findMany({
+    where: { projectId },
+    include: {
+      uploadedBy: {
+        select: { id: true, name: true, email: true, avatar: true },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+};
+
+export const deleteProjectResource = async (
+  userId: string,
+  projectId: string,
+  resourceId: string
+) => {
+  const member = await verifyProjectMemberAccess(userId, projectId);
+
+  const resource = await prisma.projectResource.findUnique({
+    where: { id: resourceId, projectId },
+  });
+
+  if (!resource) {
+    throw new ApiError(404, 'Resource not found');
+  }
+
+  const isManagerOrAdmin =
+    member.role === ProjectRole.PROJECT_MANAGER || (member as any).isOrgAdmin;
+  const isUploader = resource.uploadedById === userId;
+
+  if (!isManagerOrAdmin && !isUploader) {
+    throw new ApiError(403, 'You do not have permission to delete this resource');
+  }
+
+  await prisma.projectResource.delete({
+    where: { id: resourceId },
+  });
+
+  emitToProject(projectId, 'project:resource_deleted', { projectId, resourceId });
+
+  return { message: 'Resource deleted successfully' };
+};
+
 export const verifyProjectMemberAccess = async (userId: string, projectId: string) => {
   const member = await prisma.projectMember.findUnique({
     where: {
@@ -872,22 +1267,27 @@ export const verifyProjectMemberAccess = async (userId: string, projectId: strin
     throw new ApiError(404, 'Project not found');
   }
 
-  const orgAdmin = await prisma.organizationMember.findFirst({
+  const orgMember = await prisma.organizationMember.findUnique({
     where: {
-      organizationId: project.organizationId,
-      userId,
-      role: OrgRole.ORG_ADMIN,
+      organizationId_userId: {
+        organizationId: project.organizationId,
+        userId,
+      },
     },
   });
 
-  if (!orgAdmin) {
-    throw new ApiError(403, 'You are not a member of this project');
+  if (!orgMember) {
+    throw new ApiError(403, 'You do not have access to this project');
   }
 
-  return { role: ProjectRole.PROJECT_MANAGER };
+  const isOrgAdmin = orgMember.role === OrgRole.ORG_ADMIN;
+  return {
+    role: isOrgAdmin ? ProjectRole.PROJECT_MANAGER : ProjectRole.INTERNAL_MEMBER,
+    isOrgAdmin,
+    isOrgMember: true,
+  };
 };
 
-// Helper: Ensure user has Project Manager / Admin permissions
 export const verifyProjectAdminAccess = async (userId: string, projectId: string) => {
   const member = await prisma.projectMember.findUnique({
     where: {
@@ -923,5 +1323,5 @@ export const verifyProjectAdminAccess = async (userId: string, projectId: string
     throw new ApiError(403, 'Only project managers or organization admins can perform this action');
   }
 
-  return { role: ProjectRole.PROJECT_MANAGER };
+  return { role: ProjectRole.PROJECT_MANAGER, isOrgAdmin: true };
 };
