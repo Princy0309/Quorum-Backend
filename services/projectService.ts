@@ -143,7 +143,7 @@ export const createProject = async (
       },
     });
 
-    await tx.conversation.create({
+    const conversation = await tx.conversation.create({
       data: {
         type: 'project',
         name: createdProject.name,
@@ -156,9 +156,18 @@ export const createProject = async (
           },
         },
       },
+      select: {
+        id: true,
+        type: true,
+        name: true,
+      },
     });
 
-    return createdProject;
+    return {
+      ...createdProject,
+      conversation,
+      conversationId: conversation.id,
+    };
   });
 
   return project;
@@ -375,6 +384,15 @@ export const inviteProjectMember = async (
     throw new ApiError(400, 'User is already a member of this project');
   }
 
+  await prisma.projectInvite.deleteMany({
+    where: {
+      projectId,
+      email,
+      isAccepted: false,
+      expiresAt: { lte: new Date() },
+    },
+  });
+
   const existingPendingInvite = await prisma.projectInvite.findFirst({
     where: {
       projectId,
@@ -422,23 +440,31 @@ export const inviteProjectMember = async (
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-  const invite = await prisma.projectInvite.create({
-    data: {
-      projectId,
-      email,
-      role: input.role || ProjectRole.FREELANCER,
-      token,
-      inviterId: userId,
-      companyId: input.companyId || null,
-      companyName,
-      expiresAt,
-    },
-    include: {
-      company: {
-        select: { id: true, name: true, slug: true, logo: true },
+  let invite;
+  try {
+    invite = await prisma.projectInvite.create({
+      data: {
+        projectId,
+        email,
+        role: input.role || ProjectRole.FREELANCER,
+        token,
+        inviterId: userId,
+        companyId: input.companyId || null,
+        companyName,
+        expiresAt,
       },
-    },
-  });
+      include: {
+        company: {
+          select: { id: true, name: true, slug: true, logo: true },
+        },
+      },
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2002' || err?.message?.includes('ProjectInvite_active_email_key')) {
+      throw new ApiError(400, 'A pending invitation has already been sent to this email address');
+    }
+    throw err;
+  }
 
   const inviter = await prisma.user.findUnique({
     where: { id: userId },
@@ -459,7 +485,9 @@ export const inviteProjectMember = async (
       companyName: companyName || undefined,
     });
   } catch (err: any) {
-    logger.warn('Failed to queue project invite email', { error: err.message });
+    await prisma.projectInvite.delete({ where: { id: invite.id } }).catch(() => {});
+    logger.error('Failed to queue project invite email', { error: err.message });
+    throw new ApiError(500, 'Failed to queue invitation email. Please try again.');
   }
 
   if (targetUser) {
@@ -683,6 +711,20 @@ export const updateProjectMember = async (
     });
     if (!companyOrg) {
       throw new ApiError(404, 'Collaborating company organization not found');
+    }
+    const isCompanyMember = await prisma.organizationMember.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId: input.companyId,
+          userId: targetUserId,
+        },
+      },
+    });
+    if (!isCompanyMember) {
+      throw new ApiError(
+        400,
+        'The user is not a verified member of the specified collaborating organization'
+      );
     }
     companyName = companyOrg.name;
   } else if (input.companyId === null) {
@@ -953,6 +995,13 @@ export const updateProjectTask = async (
     }
   }
 
+  if (input.status === ProjectTaskStatus.IN_REVIEW && !task.deliverableUrl) {
+    throw new ApiError(
+      400,
+      'Cannot set task to IN_REVIEW without submitting a deliverable URL'
+    );
+  }
+
   const dueDate = input.dueDate !== undefined ? (input.dueDate ? new Date(input.dueDate) : null) : undefined;
 
   const updatedTask = await prisma.projectTask.update({
@@ -1015,6 +1064,13 @@ export const updateProjectTaskStatus = async (
         'Only project managers can mark tasks as completed or cancelled. Please submit a deliverable for review instead.'
       );
     }
+  }
+
+  if (status === ProjectTaskStatus.IN_REVIEW && !task.deliverableUrl) {
+    throw new ApiError(
+      400,
+      'Cannot set task to IN_REVIEW without submitting a deliverable URL'
+    );
   }
 
   const updatedTask = await prisma.projectTask.update({
@@ -1125,6 +1181,14 @@ export const approveTaskDeliverable = async (
 
   if (!task) {
     throw new ApiError(404, 'Task not found');
+  }
+
+  if (!task.deliverableUrl) {
+    throw new ApiError(400, 'Cannot approve task: no deliverable has been submitted for this task');
+  }
+
+  if (task.status !== ProjectTaskStatus.IN_REVIEW) {
+    throw new ApiError(400, 'Cannot approve task: task is not currently awaiting review');
   }
 
   const updatedTask = await prisma.projectTask.update({

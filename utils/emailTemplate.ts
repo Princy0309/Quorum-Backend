@@ -289,6 +289,15 @@ export const getNotificationDigestHtml = (
   return wrapInDarkMasterShell(content, 'You received this email based on your Quorum notification preferences.');
 };
 
+const escapeHtml = (str: string): string => {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
 export const getProjectInviteEmailHtml = (
   inviterName: string,
   projectName: string,
@@ -298,11 +307,18 @@ export const getProjectInviteEmailHtml = (
   expiresInDays: number = 7,
   companyName?: string
 ): string => {
-  const headline = `Invitation to collaborate on "${projectName}"`;
-  const companyRow = companyName
+  const safeInviter = escapeHtml(inviterName);
+  const safeProject = escapeHtml(projectName);
+  const safeOrg = escapeHtml(orgName);
+  const safeRole = escapeHtml(role);
+  const safeCompany = companyName ? escapeHtml(companyName) : '';
+  const safeLink = escapeHtml(inviteLink);
+
+  const headline = `Invitation to collaborate on &quot;${safeProject}&quot;`;
+  const companyRow = safeCompany
     ? `<tr>
         <td style="color: #64748B; font-size: 13px; padding: 5px 0;">Partner Company:</td>
-        <td align="right" style="color: #F8FAFC; font-size: 13px; font-weight: 600; padding: 5px 0;">${companyName}</td>
+        <td align="right" style="color: #F8FAFC; font-size: 13px; font-weight: 600; padding: 5px 0;">${safeCompany}</td>
       </tr>`
     : '';
 
@@ -311,37 +327,37 @@ export const getProjectInviteEmailHtml = (
       ${headline}
     </h1>
     <p style="color: #94A3B8; font-size: 14px; margin: 0 0 24px 0; line-height: 1.5;">
-      <strong style="color: #FFFFFF;">${inviterName}</strong> from <strong style="color: #FFFFFF;">${orgName}</strong> has invited you to collaborate on project <strong style="color: #A5B4FC;">"${projectName}"</strong>.
+      <strong style="color: #FFFFFF;">${safeInviter}</strong> from <strong style="color: #FFFFFF;">${safeOrg}</strong> has invited you to collaborate on project <strong style="color: #A5B4FC;">"${safeProject}"</strong>.
     </p>
     <div style="background-color: rgba(22, 31, 48, 0.85); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 14px; padding: 18px 24px; margin: 0 auto 28px auto; text-align: left;">
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
         <tr>
           <td style="color: #64748B; font-size: 13px; padding: 5px 0;">Invited By:</td>
-          <td align="right" style="color: #F8FAFC; font-size: 13px; font-weight: 600; padding: 5px 0;">${inviterName}</td>
+          <td align="right" style="color: #F8FAFC; font-size: 13px; font-weight: 600; padding: 5px 0;">${safeInviter}</td>
         </tr>
         <tr>
           <td style="color: #64748B; font-size: 13px; padding: 5px 0;">Host Organization:</td>
-          <td align="right" style="color: #F8FAFC; font-size: 13px; font-weight: 600; padding: 5px 0;">${orgName}</td>
+          <td align="right" style="color: #F8FAFC; font-size: 13px; font-weight: 600; padding: 5px 0;">${safeOrg}</td>
         </tr>
         <tr>
           <td style="color: #64748B; font-size: 13px; padding: 5px 0;">Project:</td>
-          <td align="right" style="color: #F8FAFC; font-size: 13px; font-weight: 600; padding: 5px 0;">${projectName}</td>
+          <td align="right" style="color: #F8FAFC; font-size: 13px; font-weight: 600; padding: 5px 0;">${safeProject}</td>
         </tr>
         ${companyRow}
         <tr>
           <td style="color: #64748B; font-size: 13px; padding: 5px 0;">Role:</td>
-          <td align="right" style="color: #A5B4FC; font-size: 13px; font-weight: 600; padding: 5px 0;">${role}</td>
+          <td align="right" style="color: #A5B4FC; font-size: 13px; font-weight: 600; padding: 5px 0;">${safeRole}</td>
         </tr>
       </table>
     </div>
     <div style="margin: 28px 0 20px 0;">
-      <a href="${inviteLink}" style="background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%); color: #FFFFFF; padding: 14px 38px; text-decoration: none; border-radius: 10px; font-weight: 600; font-size: 15px; display: inline-block; box-shadow: 0 4px 20px rgba(139, 92, 246, 0.45); letter-spacing: -0.2px;">
+      <a href="${safeLink}" style="background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%); color: #FFFFFF; padding: 14px 38px; text-decoration: none; border-radius: 10px; font-weight: 600; font-size: 15px; display: inline-block; box-shadow: 0 4px 20px rgba(139, 92, 246, 0.45); letter-spacing: -0.2px;">
         Join Project
       </a>
     </div>
     <p style="font-size: 12px; color: #64748B; line-height: 1.5; margin: 0;">
       Or copy and paste this URL into your browser:<br/>
-      <a href="${inviteLink}" style="color: #A5B4FC; word-break: break-all; text-decoration: none;">${inviteLink}</a>
+      <a href="${safeLink}" style="color: #A5B4FC; word-break: break-all; text-decoration: none;">${safeLink}</a>
     </p>
   `;
 

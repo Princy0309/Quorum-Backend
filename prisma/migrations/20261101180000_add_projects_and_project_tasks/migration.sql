@@ -128,6 +128,7 @@ CREATE INDEX IF NOT EXISTS "ProjectInvite_projectId_idx" ON "ProjectInvite"("pro
 CREATE INDEX IF NOT EXISTS "ProjectInvite_token_idx" ON "ProjectInvite"("token");
 CREATE INDEX IF NOT EXISTS "ProjectInvite_email_idx" ON "ProjectInvite"("email");
 CREATE INDEX IF NOT EXISTS "ProjectInvite_companyId_idx" ON "ProjectInvite"("companyId");
+CREATE UNIQUE INDEX IF NOT EXISTS "ProjectInvite_active_email_key" ON "ProjectInvite"("projectId", lower("email")) WHERE "isAccepted" = false;
 
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "ProjectTask_projectId_idx" ON "ProjectTask"("projectId");
