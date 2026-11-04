@@ -54,6 +54,8 @@ model User {
   githubLink               UserGithubLink?
   installedGithubOrgs      OrgGithubIntegration[]    @relation("OrgGithubInstaller")
   linkedGithubRepos        GithubRepoLink[]          @relation("GithubRepoLinker")
+  messageReactions         MessageReaction[]
+  pollVotes                PollVote[]
 }
 
 model RefreshToken {

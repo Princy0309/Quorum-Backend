@@ -6,7 +6,12 @@ import {
   createGroupSchema,
   addParticipantsSchema,
   updateGroupSchema,
-  editMessageSchema
+  editMessageSchema,
+  deleteMessageSchema,
+  toggleReactionSchema,
+  forwardMessagesSchema,
+  createPollSchema,
+  votePollSchema
 } from '../validators/chatValidators.js';
 import {
   getUserConversationsController,
@@ -23,7 +28,11 @@ import {
   dismissGroupAdminController,
   editMessageController,
   deleteMessageController,
-  getConversationPresenceController
+  getConversationPresenceController,
+  toggleMessageReactionController,
+  forwardMessagesController,
+  createPollController,
+  votePollController
 } from '../controllers/conversationController.js';
 import { createOrGetDMController } from '../controllers/dmController.js';
 
@@ -36,11 +45,16 @@ router.post('/direct', authMiddleware, chatLimiter, createOrGetDMController);
 router.post('/dm', authMiddleware, chatLimiter, createOrGetDMController);
 router.get('/search', authMiddleware, searchLimiter, getUserConversationsController);
 router.post('/group', authMiddleware, validate(createGroupSchema), createGroupConversationController);
+router.post('/messages/forward', authMiddleware, validate(forwardMessagesSchema), forwardMessagesController);
+router.post('/:id/messages/poll', authMiddleware, validate(createPollSchema), createPollController);
+router.post('/:id/messages/:messageId/poll/vote', authMiddleware, validate(votePollSchema), votePollController);
+router.post('/:id/polls/:pollId/vote', authMiddleware, validate(votePollSchema), votePollController);
 router.get('/:id/presence', authMiddleware, getConversationPresenceController);
 router.get('/:id', authMiddleware, getConversationDetailsController);
 router.get('/:id/messages', authMiddleware, getConversationMessagesController);
 router.patch('/:id/messages/:messageId', authMiddleware, validate(editMessageSchema), editMessageController);
-router.delete('/:id/messages/:messageId', authMiddleware, deleteMessageController);
+router.delete('/:id/messages/:messageId', authMiddleware, validate(deleteMessageSchema), deleteMessageController);
+router.post('/:id/messages/:messageId/reactions', authMiddleware, validate(toggleReactionSchema), toggleMessageReactionController);
 router.get('/:id/search', authMiddleware, searchConversationMessagesController);
 router.patch('/:id', authMiddleware, validate(updateGroupSchema), updateGroupConversationController);
 router.post('/:id/participants', authMiddleware, validate(addParticipantsSchema), addGroupParticipantsController);

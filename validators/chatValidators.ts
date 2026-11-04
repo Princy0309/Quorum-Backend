@@ -51,16 +51,39 @@ export const sendMessageSchema = z.object({
   fileType: z.string().optional().nullable(),
   type: z.string().optional().nullable(),
   fileName: z.string().trim().max(255).optional().nullable(),
-  fileSize: z.number().int().min(0).max(26214400).optional().nullable()
+  fileSize: z.number().int().min(0).max(26214400).optional().nullable(),
+  replyToId: z.string().trim().max(100).optional().nullable(),
+  audioDuration: z.number().min(0).max(7200).optional().nullable(),
+  audioWaveform: z.array(z.number()).max(256).optional().default([]),
+  poll: z.object({
+    question: z.string().trim().min(1).max(500),
+    options: z.array(z.string().trim().min(1).max(200)).min(2).max(12),
+    allowMultipleAnswers: z.boolean().optional().default(false)
+  }).optional()
 })
   .passthrough()
   .refine((val) => {
     const hasText = Boolean((val.content && val.content.trim()) || (val.caption && val.caption.trim()));
     const hasMedia = Boolean((val.fileUrl && val.fileUrl.trim()) || (val.url && val.url.trim()));
-    return hasText || hasMedia;
+    const hasPoll = Boolean(val.poll && val.poll.question && val.poll.options && val.poll.options.length >= 2);
+    return hasText || hasMedia || hasPoll;
   }, {
-    message: 'Message must contain either non-empty text content or an attachment URL'
+    message: 'Message must contain either non-empty text content, an attachment URL, or a poll'
   });
+
+export const createPollSchema = z.object({
+  question: z.string().trim().min(1, 'Poll question is required').max(500),
+  options: z.array(z.string().trim().min(1, 'Poll option text cannot be empty').max(200))
+    .min(2, 'A poll must have at least 2 options')
+    .max(12, 'A poll cannot have more than 12 options'),
+  allowMultipleAnswers: z.boolean().optional().default(false),
+  clientMessageId: z.string().trim().max(100).optional(),
+  replyToId: z.string().trim().max(100).optional().nullable()
+}).passthrough();
+
+export const votePollSchema = z.object({
+  optionIds: z.array(z.string().trim().min(1).max(100)).min(1, 'At least one option ID is required').max(12)
+}).passthrough();
 
 export const readMessageSchema = z.object({
   conversationId: z.string().trim().min(1).max(100),
@@ -73,7 +96,17 @@ export const editMessageSchema = z.object({
 
 export const deleteMessageSchema = z.object({
   conversationId: z.string().trim().min(1).max(100).optional(),
-  messageId: z.string().trim().min(1).max(100).optional()
+  messageId: z.string().trim().min(1).max(100).optional(),
+  deleteForEveryone: z.boolean().optional()
+}).passthrough();
+
+export const toggleReactionSchema = z.object({
+  emoji: z.string().trim().min(1, 'Emoji is required').max(32)
+}).passthrough();
+
+export const forwardMessagesSchema = z.object({
+  messageIds: z.array(z.string().trim().min(1).max(100)).min(1, 'At least one messageId is required').max(50),
+  targetConversationIds: z.array(z.string().trim().min(1).max(100)).min(1, 'At least one targetConversationId is required').max(20)
 }).passthrough();
 
 export const typingSchema = z.object({
@@ -141,6 +174,6 @@ export const signUploadSchema = z.object({
   communityId: z.string().trim().max(100).optional(),
   fileName: z.string().trim().min(1).max(255),
   fileSize: z.number().int().min(1).max(26214400),
-  fileType: z.enum(['image', 'file', 'document']).optional(),
+  fileType: z.enum(['image', 'file', 'document', 'audio', 'voice']).optional(),
   folder: z.string().trim().max(100).optional()
 }).passthrough();
