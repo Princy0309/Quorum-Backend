@@ -1,10 +1,40 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket } from '../socketAuth.js';
-import { setUserOnline, setUserOffline, refreshUserPresence } from '../../services/presenceService.js';
+import {
+  setUserOnline,
+  setUserOffline,
+  refreshUserPresence,
+  setUserCustomStatus,
+  clearUserCustomStatus,
+  UserPresenceData,
+  CustomStatusInput,
+} from '../../services/presenceService.js';
 import { getCoParticipantUserIds } from '../../services/chatService.js';
 import { CHAT_EVENTS } from '../../utils/constants.js';
 import redis from '../../config/redis.js';
 import logger from '../../utils/logger.js';
+
+export const broadcastUserPresenceUpdate = async (
+  io: SocketIOServer,
+  userId: string,
+  presence: UserPresenceData
+) => {
+  try {
+    const contacts = await getCoParticipantUserIds(userId);
+    contacts.forEach((contactId) => {
+      io.to(`user:${contactId}`).emit(CHAT_EVENTS.PRESENCE_STATUS_UPDATED, {
+        userId,
+        isOnline: presence.isOnline,
+        status: presence.status,
+        statusMessage: presence.statusMessage || null,
+        statusExpiresAt: presence.statusExpiresAt || null,
+        lastSeen: presence.lastSeen || null,
+      });
+    });
+  } catch (err: any) {
+    logger.error('Failed to broadcast user presence update', { userId, error: err.message });
+  }
+};
 
 export const registerPresenceHandler = async (io: SocketIOServer, socket: AuthenticatedSocket) => {
   const userId = socket.data.user?.id;
@@ -38,6 +68,26 @@ export const registerPresenceHandler = async (io: SocketIOServer, socket: Authen
     }
   });
 
+  socket.on('presence:set-status', async (data: CustomStatusInput, ack?: (res: any) => void) => {
+    try {
+      const updated = await setUserCustomStatus(userId, data);
+      await broadcastUserPresenceUpdate(io, userId, updated);
+      if (typeof ack === 'function') ack({ success: true, data: updated });
+    } catch (err: any) {
+      if (typeof ack === 'function') ack({ success: false, error: err.message });
+    }
+  });
+
+  socket.on('presence:clear-status', async (_data: any, ack?: (res: any) => void) => {
+    try {
+      const updated = await clearUserCustomStatus(userId);
+      await broadcastUserPresenceUpdate(io, userId, updated);
+      if (typeof ack === 'function') ack({ success: true, data: updated });
+    } catch (err: any) {
+      if (typeof ack === 'function') ack({ success: false, error: err.message });
+    }
+  });
+
   socket.on('disconnect', async () => {
     clearInterval(heartbeatInterval);
     redis.del(`user_app_state:${userId}`).catch(() => {});
@@ -50,7 +100,7 @@ export const registerPresenceHandler = async (io: SocketIOServer, socket: Authen
         contacts.forEach((contactId) => {
           io.to(`user:${contactId}`).emit(CHAT_EVENTS.PRESENCE_OFFLINE, {
             userId,
-            lastSeen
+            lastSeen,
           });
         });
       }

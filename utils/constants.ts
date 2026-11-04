@@ -6,6 +6,7 @@ export const CHAT_EVENTS = {
   TYPING_STOP: 'typing:stop',
   PRESENCE_ONLINE: 'presence:online',
   PRESENCE_OFFLINE: 'presence:offline',
+  PRESENCE_STATUS_UPDATED: 'presence:status-updated',
   CONVERSATION_JOIN: 'conversation:join',
   CONVERSATION_LEAVE: 'conversation:leave',
   CONVERSATION_UPDATE: 'conversation:update',

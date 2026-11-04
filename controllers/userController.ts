@@ -9,6 +9,9 @@ import {
 } from '../services/userService.js';
 import { getUserPresence, getMultipleUserPresences, setUserCustomStatus, clearUserCustomStatus} from '../services/presenceService.js';
 import { sendSuccess } from '../utils/ApiResponse.js';
+import { getIO } from '../sockets/socketServer.js';
+import { broadcastUserPresenceUpdate } from '../sockets/handlers/presenceHandler.js';
+
 
 export const getUserProfileController = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   if (!req.user?.id) {
@@ -160,7 +163,6 @@ export const getBatchUserPresenceController = asyncHandler(async (req: Request, 
     },
   });
 });
-
 export const updateUserStatusController = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   if (!req.user?.id) {
     return next(new ApiError(401, 'Unauthorized'));
@@ -173,6 +175,13 @@ export const updateUserStatusController = asyncHandler(async (req: Request, res:
     clearAfterMinutes,
   });
 
+  try {
+    const io = getIO();
+    broadcastUserPresenceUpdate(io, req.user.id, updatedPresence).catch(() => {});
+  } catch {
+    // Socket server not initialized in isolated tests
+  }
+
   return sendSuccess(res, 200, 'User status updated successfully', {
     presence: updatedPresence,
   });
@@ -184,6 +193,13 @@ export const clearUserStatusController = asyncHandler(async (req: Request, res: 
   }
 
   const updatedPresence = await clearUserCustomStatus(req.user.id);
+
+  try {
+    const io = getIO();
+    broadcastUserPresenceUpdate(io, req.user.id, updatedPresence).catch(() => {});
+  } catch {
+    // Socket server not initialized in isolated tests
+  }
 
   return sendSuccess(res, 200, 'User status reset to default successfully', {
     presence: updatedPresence,
