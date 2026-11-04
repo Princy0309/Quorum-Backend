@@ -3926,6 +3926,239 @@ export const swaggerDocument = {
         }
       }
     },
+    "/api/meetings/{code}/polls": {
+      "get": {
+        "tags": [
+          "Meetings & Video Calls"
+        ],
+        "summary": "Get live meeting polls",
+        "description": "Retrieves all active and closed polls in the meeting room with real-time vote tallies and option voters.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting code"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meeting polls fetched successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Meeting not found"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Meetings & Video Calls"
+        ],
+        "summary": "Create live meeting poll",
+        "description": "Creates and broadcasts a new live poll in an active video meeting room. Broadcasts meeting:poll-created event.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting code"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "question",
+                  "options"
+                ],
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "example": "Should we extend the sprint deadline?"
+                  },
+                  "options": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "Yes, extend",
+                      "No, keep deadline"
+                    ]
+                  },
+                  "allowMultipleAnswers": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Meeting poll created successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Meeting not found"
+          }
+        }
+      }
+    },
+    "/api/meetings/{code}/polls/{pollId}/vote": {
+      "post": {
+        "tags": [
+          "Meetings & Video Calls"
+        ],
+        "summary": "Vote on live meeting poll",
+        "description": "Casts or toggles a vote on a meeting poll. Broadcasts meeting:poll-updated event with updated tallies to all participants in the meeting room.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting code"
+          },
+          {
+            "name": "pollId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting poll ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "optionIds"
+                ],
+                "properties": {
+                  "optionIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "opt-uuid-1"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Vote recorded successfully"
+          },
+          "400": {
+            "description": "Poll is closed or invalid options"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Meeting or poll not found"
+          }
+        }
+      }
+    },
+    "/api/meetings/{code}/polls/{pollId}/close": {
+      "patch": {
+        "tags": [
+          "Meetings & Video Calls"
+        ],
+        "summary": "Close live meeting poll",
+        "description": "Closes an active meeting poll to prevent further voting. Broadcasts meeting:poll-closed event. Only the meeting host or poll creator can close the poll.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting code"
+          },
+          {
+            "name": "pollId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting poll ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meeting poll closed successfully"
+          },
+          "403": {
+            "description": "Only meeting host or poll creator can close the poll"
+          },
+          "404": {
+            "description": "Meeting or poll not found"
+          }
+        }
+      }
+    },
     "/api/uploads/sign": {
       "post": {
         "tags": [

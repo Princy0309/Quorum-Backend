@@ -9,6 +9,12 @@ import {
   handleSendMeetingReaction,
   handleToggleHandRaise
 } from './meetingControls.js';
+import {
+  handleCreateMeetingPoll,
+  handleVoteMeetingPoll,
+  handleCloseMeetingPoll,
+  handleGetMeetingPolls
+} from './meetingPolls.js';
 import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.js';
 import logger from '../utils/logger.js';
 import { verifyAccessToken, verifyRefreshToken } from '../services/tokenService.js';
@@ -293,6 +299,15 @@ export const initSocketServer = (httpServer: any) => {
 
     socket.on('meeting:admit-participant', (data, ack) => handleAdmitParticipant(io, socket, data, ack));
     socket.on('meeting:reject-participant', (data, ack) => handleRejectParticipant(io, socket, data, ack));
+
+    socket.on('meeting:create-poll', (data, ack) => handleCreateMeetingPoll(io, socket, data, ack));
+    socket.on('meeting:poll-create', (data, ack) => handleCreateMeetingPoll(io, socket, data, ack));
+    socket.on('meeting:vote-poll', (data, ack) => handleVoteMeetingPoll(io, socket, data, ack));
+    socket.on('meeting:poll-vote', (data, ack) => handleVoteMeetingPoll(io, socket, data, ack));
+    socket.on('meeting:close-poll', (data, ack) => handleCloseMeetingPoll(io, socket, data, ack));
+    socket.on('meeting:poll-close', (data, ack) => handleCloseMeetingPoll(io, socket, data, ack));
+    socket.on('meeting:get-polls', (data, ack) => handleGetMeetingPolls(io, socket, data, ack));
+    socket.on('meeting:polls-get', (data, ack) => handleGetMeetingPolls(io, socket, data, ack));
 
     socket.on('disconnect', () => {
       logger.info(`[Socket] Client disconnected: ${socket.id}`);
