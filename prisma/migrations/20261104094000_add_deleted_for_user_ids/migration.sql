@@ -1,0 +1,1 @@
+ALTER TABLE "Message" ADD COLUMN "deletedForUserIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

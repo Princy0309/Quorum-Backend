@@ -30,24 +30,89 @@ model ConversationParticipant {
 }
 
 model Message {
-  id              String       @id @default(uuid())
-  conversationId  String
-  senderId        String
-  content         String
-  fileUrl         String?
-  fileType        String?
-  fileName        String?
-  fileSize        Int?
-  isPinned        Boolean      @default(false)
-  clientMessageId String?
-  seq             Int          @default(0)
-  mentionedUserIds String[]    @default([])
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender          User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  id               String            @id @default(uuid())
+  conversationId   String
+  senderId         String
+  content          String
+  fileUrl          String?
+  fileType         String?
+  fileName         String?
+  fileSize         Int?
+  audioDuration    Int?
+  audioWaveform    Float[]           @default([])
+  deletedForUserIds String[]         @default([])
+  isPinned         Boolean           @default(false)
+  clientMessageId  String?
+  seq              Int               @default(0)
+  mentionedUserIds String[]          @default([])
+  replyToId        String?
+  isEdited         Boolean           @default(false)
+  editedAt         DateTime?
+  isForwarded      Boolean           @default(false)
+  forwardCount     Int               @default(0)
+  isDeleted        Boolean           @default(false)
+  deletedAt        DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  conversation     Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender           User              @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo          Message?          @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies          Message[]         @relation("MessageReplies")
+  reactions        MessageReaction[]
+  poll             Poll?
 
   @@unique([conversationId, seq])
   @@unique([conversationId, senderId, clientMessageId])
   @@index([conversationId, seq])
+  @@index([replyToId])
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+  @@index([userId])
+}
+
+model Poll {
+  id                   String       @id @default(uuid())
+  messageId            String       @unique
+  question             String
+  allowMultipleAnswers Boolean      @default(false)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  message              Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  options              PollOption[]
+}
+
+model PollOption {
+  id        String     @id @default(uuid())
+  pollId    String
+  text      String
+  order     Int        @default(0)
+  createdAt DateTime   @default(now())
+  poll      Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes     PollVote[]
+
+  @@index([pollId])
+}
+
+model PollVote {
+  id           String     @id @default(uuid())
+  pollOptionId String
+  userId       String
+  createdAt    DateTime   @default(now())
+  option       PollOption @relation(fields: [pollOptionId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([pollOptionId, userId])
+  @@index([pollOptionId])
+  @@index([userId])
 }
