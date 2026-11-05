@@ -7,18 +7,21 @@ import { resolveConversationId } from './chatService.js';
 
 const ALLOWED_EXTENSIONS = new Set([
   '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.heic',
-  '.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.txt', '.csv', '.zip'
+  '.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.txt', '.csv', '.zip',
+  '.mp3', '.wav', '.m4a', '.aac', '.ogg', '.opus', '.webm', '.flac'
 ]);
 
 const BLOCKED_EXTENSIONS = new Set([
   '.exe', '.bat', '.cmd', '.sh', '.bin', '.apk', '.dll', '.js', '.mjs', '.cjs',
   '.ts', '.php', '.vbs', '.scr', '.msi', '.com', '.pif', '.jar',
-  '.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac', '.wma',
-  '.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v', '.3gp'
+  '.wma',
+  '.mp4', '.mov', '.avi', '.mkv', '.m4v', '.3gp'
 ]);
 
 const CATEGORY_LIMITS: Record<string, number> = {
   image: 10 * 1024 * 1024,
+  audio: 25 * 1024 * 1024,
+  voice: 25 * 1024 * 1024,
   file: 25 * 1024 * 1024
 };
 
@@ -39,12 +42,22 @@ const MIME_TYPES: Record<string, string> = {
   '.ppt': 'application/vnd.ms-powerpoint',
   '.txt': 'text/plain',
   '.csv': 'text/csv',
-  '.zip': 'application/zip'
+  '.zip': 'application/zip',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.ogg': 'audio/ogg',
+  '.opus': 'audio/opus',
+  '.webm': 'audio/webm',
+  '.flac': 'audio/flac'
 };
 
-const resolveFileCategory = (ext: string): 'image' | 'file' => {
+const resolveFileCategory = (ext: string): 'image' | 'audio' | 'file' => {
   const imageExts = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.heic']);
   if (imageExts.has(ext)) return 'image';
+  const audioExts = new Set(['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.opus', '.webm', '.flac']);
+  if (audioExts.has(ext)) return 'audio';
   return 'file';
 };
 
@@ -109,7 +122,7 @@ export const authorizeChatFileUpload = async (
     metadata: {
       fileName: cleanName,
       fileSize,
-      fileType: category,
+      fileType: clientFileType === 'voice' ? 'voice' : category,
       maxAllowedSize,
       contentType: mimeType
     }
