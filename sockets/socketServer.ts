@@ -21,6 +21,8 @@ import { registerTypingHandler } from './handlers/typingHandler.js';
 import { registerPresenceHandler } from './handlers/presenceHandler.js';
 import { registerCommunityHandler } from './handlers/communityHandler.js';
 import { registerWhiteboardHandler } from './handlers/whiteboardHandler.js';
+import { broadcastUserPresenceUpdate } from './handlers/presenceHandler.js';
+import { setMeetingPresence, setScreenSharePresence } from '../services/presenceService.js';
 
 let ioInstance: Server | null = null;
 
@@ -236,9 +238,47 @@ export const initSocketServer = (httpServer: any) => {
 
     registerSfuSignaling(io, socket);
 
-    socket.on('meeting:join', (data, ack) => handleJoinMeeting(io, socket, data?.meetingCode, ack));
-    socket.on('meeting:leave', (data, ack) => handleLeaveMeeting(io, socket, data?.meetingCode, ack));
+    socket.on('meeting:join', (data, ack) => {
+      handleJoinMeeting(io, socket, data?.meetingCode, ack);
+      if (socket.data.user?.id) {
+        setMeetingPresence(socket.data.user.id, true).then((updated) => {
+          broadcastUserPresenceUpdate(io, socket.data.user.id, updated).catch(() => { });
+        }).catch(() => { });
+      }
+    });
+
+    socket.on('meeting:leave', (data, ack) => {
+      handleLeaveMeeting(io, socket, data?.meetingCode, ack);
+      if (socket.data.user?.id) {
+        setScreenSharePresence(socket.data.user.id, false).catch(() => { });
+        setMeetingPresence(socket.data.user.id, false).then((updated) => {
+          broadcastUserPresenceUpdate(io, socket.data.user.id, updated).catch(() => { });
+        }).catch(() => { });
+      }
+    });
+
     socket.on('meeting:end', (data, ack) => handleEndMeeting(io, socket, data, ack));
+
+    socket.on('meeting:screen-share', async (data: { meetingCode: string; isSharing: boolean }, ack?: (res: any) => void) => {
+      const userId = socket.data.user?.id;
+      if (!userId) return ack?.({ success: false, message: 'Unauthorized' });
+
+      try {
+        const isSharing = Boolean(data?.isSharing);
+        const updated = await setScreenSharePresence(userId, isSharing);
+        await broadcastUserPresenceUpdate(io, userId, updated);
+        if (data?.meetingCode) {
+          io.to(data.meetingCode.trim().toLowerCase()).emit('meeting:screen-share-changed', {
+            userId,
+            isSharing,
+          });
+        }
+        ack?.({ success: true, isSharing });
+      } catch (err: any) {
+        logger.warn(`Failed to update screen share presence: ${err.message}`);
+        ack?.({ success: false, message: err.message });
+      }
+    });
 
     socket.on('meeting:toggle-mic', (data, ack) => handleToggleMic(io, socket, data, ack));
     socket.on('meeting:toggle-cam', (data, ack) => handleToggleCam(io, socket, data, ack));

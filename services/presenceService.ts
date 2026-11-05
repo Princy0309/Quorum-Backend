@@ -101,8 +101,17 @@ export const setUserOffline = async (userId: string, socketId: string): Promise<
 export const getUserPresence = async (userId: string): Promise<UserPresenceData> => {
   const presenceKey = `presence:${userId}`;
   const customStatusKey = `user:custom_status:${userId}`;
+  const meetingKey = `user:meeting_state:${userId}`;
+  const screenShareKey = `user:screen_share:${userId}`;
+  const appStateKey = `user_app_state:${userId}`;
 
-  const [presenceRaw, customRaw] = await redis.mget(presenceKey, customStatusKey);
+  const [presenceRaw, customRaw, meetingRaw, screenRaw, appStateRaw] = await redis.mget(
+    presenceKey,
+    customStatusKey,
+    meetingKey,
+    screenShareKey,
+    appStateKey
+  );
 
   let isOnline = false;
   let lastSeen: Date | null = null;
@@ -123,16 +132,30 @@ export const getUserPresence = async (userId: string): Promise<UserPresenceData>
   let statusMessage: string | null = null;
   let statusExpiresAt: Date | null = null;
 
-  if (customRaw) {
-    try {
-      const parsedCustom = JSON.parse(customRaw);
-      if (parsedCustom.status) {
-        status = isOnline ? parsedCustom.status : 'OFFLINE';
-        statusMessage = parsedCustom.statusMessage || null;
-        statusExpiresAt = parsedCustom.statusExpiresAt ? new Date(parsedCustom.statusExpiresAt) : null;
+  if (isOnline) {
+    if (screenRaw === 'sharing') {
+      // 1. Screen sharing forces DO NOT DISTURB
+      status = 'DO_NOT_DISTURB';
+      statusMessage = 'Presenting screen';
+    } else if (meetingRaw === 'in_meeting') {
+      // 2. Active meeting marks user BUSY
+      status = 'BUSY';
+      statusMessage = 'In a meeting';
+    } else if (customRaw) {
+      // 3. User manual selection (BUSY, DND, BE_RIGHT_BACK, AWAY)
+      try {
+        const parsedCustom = JSON.parse(customRaw);
+        if (parsedCustom.status) {
+          status = parsedCustom.status;
+          statusMessage = parsedCustom.statusMessage || null;
+          statusExpiresAt = parsedCustom.statusExpiresAt ? new Date(parsedCustom.statusExpiresAt) : null;
+        }
+      } catch (err: any) {
+        logger.warn(`[PresenceService] Invalid custom status JSON for user ${userId}: ${err.message}`);
       }
-    } catch (err: any){
-      logger.warn(`[PresenceService] Invalid custom status JSON for user ${userId}: ${err.message}`);
+    } else if (appStateRaw === 'background') {
+      // 4. App minimized / inactive
+      status = 'AWAY';
     }
   }
 
@@ -279,5 +302,25 @@ export const setUserCustomStatus = async (
 export const clearUserCustomStatus = async (userId: string): Promise<UserPresenceData> => {
   const customStatusKey = `user:custom_status:${userId}`;
   await redis.del(customStatusKey);
+  return getUserPresence(userId);
+};
+
+export const setMeetingPresence = async (userId: string, inMeeting: boolean): Promise<UserPresenceData> => {
+  const meetingKey = `user:meeting_state:${userId}`;
+  if (inMeeting) {
+    await redis.set(meetingKey, 'in_meeting', 'EX', 14400); // 4-hour safety TTL
+  } else {
+    await redis.del(meetingKey);
+  }
+  return getUserPresence(userId);
+};
+
+export const setScreenSharePresence = async (userId: string, isSharing: boolean): Promise<UserPresenceData> => {
+  const screenShareKey = `user:screen_share:${userId}`;
+  if (isSharing) {
+    await redis.set(screenShareKey, 'sharing', 'EX', 14400); // 4-hour safety TTL
+  } else {
+    await redis.del(screenShareKey);
+  }
   return getUserPresence(userId);
 };
