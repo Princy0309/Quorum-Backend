@@ -62,6 +62,8 @@ model User {
   assignedProjectTasks     ProjectTask[]             @relation("ProjectTaskAssignee")
   createdProjectTasks      ProjectTask[]             @relation("ProjectTaskCreator")
   uploadedProjectResources ProjectResource[]         @relation("ProjectResourceUploader")
+  createdMeetingPolls      MeetingPoll[]             @relation("MeetingPollCreator")
+  meetingPollVotes         MeetingPollVote[]         @relation("MeetingPollVoter")
 }
 
 model RefreshToken {

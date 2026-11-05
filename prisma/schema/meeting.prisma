@@ -31,6 +31,7 @@ model Meeting {
 
   whiteboards         WhiteboardMeeting[]
   originWhiteboards   Whiteboard[]     @relation("MeetingOriginWhiteboards")
+  polls               MeetingPoll[]
 
   @@index([organizationId])
   @@index([organizationId, scheduledStartTime])
@@ -38,5 +39,54 @@ model Meeting {
   @@index([teamId, scheduledStartTime])
   @@index([scopeType])
   @@index([scheduledStartTime])
+}
 
+enum MeetingPollStatus {
+  ACTIVE
+  CLOSED
+}
+
+model MeetingPoll {
+  id                   String              @id @default(uuid())
+  meetingId            String
+  creatorId            String
+  question             String
+  allowMultipleAnswers Boolean             @default(false)
+  isAnonymous          Boolean             @default(false)
+  status               MeetingPollStatus   @default(ACTIVE)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  closedAt             DateTime?
+  meeting              Meeting             @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  creator              User                @relation("MeetingPollCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  options              MeetingPollOption[]
+
+  @@index([meetingId])
+  @@index([creatorId])
+  @@index([meetingId, status])
+}
+
+model MeetingPollOption {
+  id        String            @id @default(uuid())
+  pollId    String
+  text      String
+  order     Int               @default(0)
+  createdAt DateTime          @default(now())
+  poll      MeetingPoll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes     MeetingPollVote[]
+
+  @@index([pollId])
+}
+
+model MeetingPollVote {
+  id           String            @id @default(uuid())
+  pollOptionId String
+  userId       String
+  createdAt    DateTime          @default(now())
+  option       MeetingPollOption @relation(fields: [pollOptionId], references: [id], onDelete: Cascade)
+  user         User              @relation("MeetingPollVoter", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([pollOptionId, userId])
+  @@index([pollOptionId])
+  @@index([userId])
 }
