@@ -24,3 +24,27 @@ export const updateProfileSchema = z.object({
         return val;
     }, z.boolean().optional()),
 });
+
+export const updateStatusSchema = z.object({
+  status: z.enum([
+    'AVAILABLE',
+    'BUSY',
+    'DO_NOT_DISTURB',
+    'BE_RIGHT_BACK',
+    'AWAY',
+    'OFFLINE',
+  ]),
+  statusMessage: z
+    .string()
+    .trim()
+    .max(100, 'Status message cannot exceed 100 characters')
+    .optional()
+    .nullable(),
+  clearAfterMinutes: z
+    .number()
+    .int()
+    .min(1, 'Duration must be at least 1 minute')
+    .max(10080, 'Duration cannot exceed 7 days')
+    .optional()
+    .nullable(),
+});

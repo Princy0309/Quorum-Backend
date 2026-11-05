@@ -21,7 +21,12 @@ const generateCode = (): string => {
   return `${part()}-${part()}-${part()}`;
 };
 
-export const createMeeting = async (hostId: string, organizationId?: string) => {
+export const createMeeting = async (
+  hostId: string, 
+  organizationId?: string,
+  teamId?: string,
+  title?: string
+) => {
   let code: string;
   let attempts = 0;
   do {
@@ -51,19 +56,38 @@ export const createMeeting = async (hostId: string, organizationId?: string) => 
     }
   }
 
+  
+      let effectiveOrgId = organizationId;
+  if (teamId && !effectiveOrgId) {
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      select: { organizationId: true },
+    });
+    if (team) {
+      effectiveOrgId = team.organizationId;
+    }
+  }
+
   let meeting;
   try {
     meeting = await prisma.meeting.create({
       data: {
         code,
+        title: title?.trim() || null,
         hostId,
-        organizationId: organizationId || null,
+        organizationId: effectiveOrgId || null,
+        teamId: teamId || null,
         waitingRoom: true,
         status: MeetingStatus.ACTIVE,
         admitted: [hostId],
-        scopeType: organizationId ? MeetingScopeType.ORGANIZATION : MeetingScopeType.PERSONAL,
+        scopeType: teamId
+          ? MeetingScopeType.TEAM
+          : effectiveOrgId
+          ? MeetingScopeType.ORGANIZATION
+          : MeetingScopeType.PERSONAL,
       },
     });
+
   } catch (err: any) {
     if (err?.code === 'P2022' || err?.message?.includes('scopeType') || err?.message?.includes('does not exist')) {
       logger.warn('[MeetingService] Missing schema detected on createMeeting, auto-repairing Meeting schema...');
@@ -132,9 +156,18 @@ export const createMeeting = async (hostId: string, organizationId?: string) => 
     }
   }
 
+  if (meeting.scopeType !== MeetingScopeType.PERSONAL) {
+    syncMeetingCalendarAndNotifications(meeting).catch((err) =>
+      logger.error('[MeetingService] Background notification sync error on instant meeting:', err)
+    );
+  }
+
   return {
     code: meeting.code,
+    title: meeting.title,
+    scopeType: meeting.scopeType,
     organizationId: meeting.organizationId,
+    teamId: meeting.teamId,
     link: `${env.CLIENT_URL}/meet/${meeting.code}`,
   };
 };

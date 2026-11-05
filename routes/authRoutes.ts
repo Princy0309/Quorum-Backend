@@ -4,11 +4,12 @@ import { register, login, refreshToken, logout, logoutAll, getMe } from '../cont
 import { authMiddleware, requireEmailVerified } from '../middlewares/authMiddleware.js';
 import { validate } from '../middlewares/validate.js';
 import { registerSchema, loginSchema } from '../validators/authValidators.js';
+import { requireCaptcha } from '../middlewares/captchaMiddleware.js';
 
 const router = Router();
 
-router.post('/register', registerLimiter, validate(registerSchema), register);
-router.post('/login', loginLimiter, validate(loginSchema), login);
+router.post('/register', registerLimiter, requireCaptcha, validate(registerSchema), register);
+router.post('/login', loginLimiter, requireCaptcha, validate(loginSchema), login);
 router.post('/refresh-token', refreshLimiter, refreshToken);
 router.post('/refresh', refreshLimiter, refreshToken);
 router.post('/logout', logout);

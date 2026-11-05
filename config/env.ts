@@ -35,6 +35,15 @@ const envSchema = z.object({
   JIRA_REDIRECT_URI: z.string().url(),
   JIRA_ENCRYPTION_KEY: z.string().length(64, 'JIRA_ENCRYPTION_KEY must be 64 hex chars (32 bytes)'),
   JIRA_STATE_SECRET: z.string().min(32, 'JIRA_STATE_SECRET must be at least 32 chars'),
+  GITHUB_CLIENT_ID: z.string().optional().default(''),
+  GITHUB_CLIENT_SECRET: z.string().optional().default(''),
+  GITHUB_REDIRECT_URI: z.string().optional().default(''),
+  GITHUB_WEBHOOK_SECRET: z.string().optional().default(''),
+  GITHUB_ENCRYPTION_KEY: z.string().optional().default(''),
+  GITHUB_STATE_SECRET: z.string().optional().default(''),
+  TURNSTILE_SECRET_KEY: z.string().optional().default('1x0000000000000000000000000000000AA'),
+
+
 
 }).passthrough();
 
@@ -85,6 +94,16 @@ export const env = {
   JIRA_REDIRECT_URI: data?.JIRA_REDIRECT_URI,
   JIRA_ENCRYPTION_KEY: data?.JIRA_ENCRYPTION_KEY,
   JIRA_STATE_SECRET: data?.JIRA_STATE_SECRET,
+
+  GITHUB_CLIENT_ID: data?.GITHUB_CLIENT_ID || '',
+  GITHUB_CLIENT_SECRET: data?.GITHUB_CLIENT_SECRET || '',
+  GITHUB_REDIRECT_URI: data?.GITHUB_REDIRECT_URI || '',
+  GITHUB_WEBHOOK_SECRET: data?.GITHUB_WEBHOOK_SECRET || '',
+  GITHUB_ENCRYPTION_KEY: data?.GITHUB_ENCRYPTION_KEY || '',
+  GITHUB_STATE_SECRET: data?.GITHUB_STATE_SECRET || '',
+  TURNSTILE_SECRET_KEY: data?.TURNSTILE_SECRET_KEY || '1x0000000000000000000000000000000AA',
+
+
 
 };
 

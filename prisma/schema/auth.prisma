@@ -51,6 +51,11 @@ model User {
   createdWhiteboards       Whiteboard[]              @relation("WhiteboardCreator")
   jiraLink                 UserJiraLink?
   installedJiraOrgs        OrgJiraIntegration[]      @relation("OrgJiraInstaller")
+  githubLink               UserGithubLink?
+  installedGithubOrgs      OrgGithubIntegration[]    @relation("OrgGithubInstaller")
+  linkedGithubRepos        GithubRepoLink[]          @relation("GithubRepoLinker")
+  messageReactions         MessageReaction[]
+  pollVotes                PollVote[]
   createdProjects          Project[]                 @relation("ProjectCreator")
   projectMemberships       ProjectMember[]
   projectInvitesSent       ProjectInvite[]           @relation("ProjectInviter")

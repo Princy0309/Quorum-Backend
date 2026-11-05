@@ -5,11 +5,13 @@ import {
   getUserProfileController,
   updateUserProfileController,
   getUserPresenceController,
-  getBatchUserPresenceController
+  getBatchUserPresenceController,
+  updateUserStatusController,
+  clearUserStatusController,
 } from '../controllers/userController.js';
 import { authMiddleware, requireEmailVerified } from '../middlewares/authMiddleware.js';
 import { validate } from '../middlewares/validate.js';
-import { onboardingSchema, updateProfileSchema } from '../validators/userValidators.js';
+import { onboardingSchema, updateProfileSchema, updateStatusSchema } from '../validators/userValidators.js';
 import { searchLimiter } from '../middlewares/rateLimiter.js';
 import { uploadMiddleware } from '../controllers/uploadController.js';
 
@@ -44,6 +46,8 @@ router.patch(
 );
 
 // Presence endpoints
+router.patch('/status', authMiddleware, validate(updateStatusSchema), updateUserStatusController);
+router.delete('/status', authMiddleware, clearUserStatusController);
 router.get('/presence', authMiddleware, getBatchUserPresenceController);
 router.post('/presence/batch', authMiddleware, getBatchUserPresenceController);
 router.get('/presence/:userId', authMiddleware, getUserPresenceController);

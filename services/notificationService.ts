@@ -3,14 +3,14 @@ import redis from '../config/redis.js';
 import { sendFCMNotification, PushPayload } from '../config/firebase.js';
 import { getMultipleUserPresences } from './presenceService.js';
 import logger from '../utils/logger.js';
-import type { 
+import type {
   GetNotificationsOptions,
   PaginatedNotificationsResult,
   UpdateNotificationPreferenceInput
 } from '../types/index.js';
 
 export const getUserNotifications = async (
-  userId: string, 
+  userId: string,
   options: GetNotificationsOptions = {}
 ): Promise<PaginatedNotificationsResult> => {
   const page = Math.max(1, Number(options.page) || 1);
@@ -139,10 +139,16 @@ export const sendPushNotification = async (
     const appStates = await redis.mget(...appStateKeys);
 
     targetUserIds = recipientUserIds.filter((id, idx) => {
-      const isOnline = !!presenceMap.get(id)?.isOnline;
+      const userPresence = presenceMap.get(id);
+     
+      if (userPresence?.status === 'DO_NOT_DISTURB') {
+        return false;
+      }
+      const isOnline = !!userPresence?.isOnline;
       const appState = appStates[idx];
       return !isOnline || appState === 'background';
     });
+
   }
 
   if (targetUserIds.length === 0) return;

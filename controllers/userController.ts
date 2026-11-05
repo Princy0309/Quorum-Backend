@@ -7,8 +7,11 @@ import {
   getUserProfile,
   updateUserProfile
 } from '../services/userService.js';
-import { getUserPresence, getMultipleUserPresences } from '../services/presenceService.js';
+import { getUserPresence, getMultipleUserPresences, setUserCustomStatus, clearUserCustomStatus} from '../services/presenceService.js';
 import { sendSuccess } from '../utils/ApiResponse.js';
+import { getIO } from '../sockets/socketServer.js';
+import { broadcastUserPresenceUpdate } from '../sockets/handlers/presenceHandler.js';
+
 
 export const getUserProfileController = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   if (!req.user?.id) {
@@ -106,8 +109,11 @@ export const getUserPresenceController = asyncHandler(async (req: Request, res: 
     data: {
       userId: targetUserId,
       isOnline: presence.isOnline,
-      lastSeen: presence.lastSeen || null
-    }
+      status: presence.status,
+      statusMessage: presence.statusMessage || null,
+      statusExpiresAt: presence.statusExpiresAt || null,
+      lastSeen: presence.lastSeen || null,
+    },
   });
 });
 
@@ -129,19 +135,22 @@ export const getBatchUserPresenceController = asyncHandler(async (req: Request, 
       statusCode: 200,
       message: 'Presences retrieved successfully',
       data: {
-        presences: {}
-      }
+        presences: {},
+      },
     });
   }
 
   const boundedUserIds = userIds.slice(0, 100);
   const presenceMap = await getMultipleUserPresences(boundedUserIds);
-  const presencesObj: Record<string, { isOnline: boolean; lastSeen: Date | null }> = {};
+  const presencesObj: Record<string, any> = {};
 
   presenceMap.forEach((val, uId) => {
     presencesObj[uId] = {
       isOnline: val.isOnline,
-      lastSeen: val.lastSeen || null
+      status: val.status,
+      statusMessage: val.statusMessage || null,
+      statusExpiresAt: val.statusExpiresAt || null,
+      lastSeen: val.lastSeen || null,
     };
   });
 
@@ -150,7 +159,49 @@ export const getBatchUserPresenceController = asyncHandler(async (req: Request, 
     statusCode: 200,
     message: 'Presences retrieved successfully',
     data: {
-      presences: presencesObj
-    }
+      presences: presencesObj,
+    },
+  });
+});
+export const updateUserStatusController = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user?.id) {
+    return next(new ApiError(401, 'Unauthorized'));
+  }
+
+  const { status, statusMessage, clearAfterMinutes } = req.body;
+  const updatedPresence = await setUserCustomStatus(req.user.id, {
+    status,
+    statusMessage,
+    clearAfterMinutes,
+  });
+
+  try {
+    const io = getIO();
+    broadcastUserPresenceUpdate(io, req.user.id, updatedPresence).catch(() => {});
+  } catch {
+    // Socket server not initialized in isolated tests
+  }
+
+  return sendSuccess(res, 200, 'User status updated successfully', {
+    presence: updatedPresence,
+  });
+});
+
+export const clearUserStatusController = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user?.id) {
+    return next(new ApiError(401, 'Unauthorized'));
+  }
+
+  const updatedPresence = await clearUserCustomStatus(req.user.id);
+
+  try {
+    const io = getIO();
+    broadcastUserPresenceUpdate(io, req.user.id, updatedPresence).catch(() => {});
+  } catch {
+    // Socket server not initialized in isolated tests
+  }
+
+  return sendSuccess(res, 200, 'User status reset to default successfully', {
+    presence: updatedPresence,
   });
 });

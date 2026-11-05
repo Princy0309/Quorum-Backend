@@ -6,6 +6,7 @@ export const CHAT_EVENTS = {
   TYPING_STOP: 'typing:stop',
   PRESENCE_ONLINE: 'presence:online',
   PRESENCE_OFFLINE: 'presence:offline',
+  PRESENCE_STATUS_UPDATED: 'presence:status-updated',
   CONVERSATION_JOIN: 'conversation:join',
   CONVERSATION_LEAVE: 'conversation:leave',
   CONVERSATION_UPDATE: 'conversation:update',
@@ -13,7 +14,13 @@ export const CHAT_EVENTS = {
   MESSAGE_EDIT: 'message:edit',
   MESSAGE_UPDATED: 'message:updated',
   MESSAGE_DELETE: 'message:delete',
-  MESSAGE_DELETED: 'message:deleted'
+  MESSAGE_DELETED: 'message:deleted',
+  MESSAGE_REACT: 'message:react',
+  MESSAGE_REACTION_UPDATED: 'message:reaction_updated',
+  MESSAGE_FORWARD: 'message:forward',
+  MESSAGE_FORWARDED: 'message:forwarded',
+  POLL_VOTE: 'poll:vote',
+  POLL_UPDATED: 'poll:updated'
 } as const;
 
 export const COMMUNITY_EVENTS = {

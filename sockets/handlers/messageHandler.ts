@@ -1,6 +1,16 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket } from '../socketAuth.js';
-import { saveMessage, markMessageAsRead, isParticipant, resolveConversationId, editMessage, deleteMessage } from '../../services/chatService.js';
+import {
+  saveMessage,
+  markMessageAsRead,
+  isParticipant,
+  resolveConversationId,
+  editMessage,
+  deleteMessage,
+  toggleMessageReaction,
+  forwardMessages,
+  votePoll
+} from '../../services/chatService.js';
 import { sendPushToOfflineUsers } from '../../services/notificationService.js';
 import { checkSocketMessageRateLimit } from '../../middlewares/rateLimiter.js';
 import { sendMessageSchema, readMessageSchema } from '../../validators/chatValidators.js';
@@ -21,6 +31,16 @@ interface SendMessagePayload {
   name?: string;
   fileSize?: number;
   size?: number;
+  replyToId?: string;
+  audioDuration?: number;
+  duration?: number;
+  audioWaveform?: number[];
+  waveform?: number[];
+  poll?: {
+    question: string;
+    options: string[];
+    allowMultipleAnswers?: boolean;
+  };
 }
 
 interface ReadMessagePayload {
@@ -149,6 +169,14 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         const fileName = (value.fileName || (value as any).name) || undefined;
         const fileSize = typeof value.fileSize === 'number' ? value.fileSize : (typeof (value as any).size === 'number' ? (value as any).size : undefined);
         const mentions = Array.isArray((value as any).mentions) ? (value as any).mentions : undefined;
+        const replyToId = typeof value.replyToId === 'string' ? value.replyToId : (typeof (value as any).replyToId === 'string' ? (value as any).replyToId : undefined);
+        const audioDuration = typeof (value as any).audioDuration === 'number'
+          ? (value as any).audioDuration
+          : (typeof (value as any).duration === 'number' ? (value as any).duration : undefined);
+        const audioWaveform = Array.isArray((value as any).audioWaveform)
+          ? (value as any).audioWaveform
+          : (Array.isArray((value as any).waveform) ? (value as any).waveform : undefined);
+        const poll = (value as any).poll;
 
         const { message, participants, isDuplicate } = await saveMessage(
           senderId,
@@ -159,7 +187,11 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           clientMessageId || undefined,
           fileName,
           fileSize,
-          mentions
+          mentions,
+          replyToId,
+          audioDuration,
+          audioWaveform,
+          poll
         );
 
         if (isDuplicate) {
@@ -371,7 +403,7 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
   socket.on(
     CHAT_EVENTS.MESSAGE_DELETE,
     async (
-      payload: { conversationId: string; messageId: string },
+      payload: { conversationId: string; messageId: string; deleteForEveryone?: boolean },
       callback?: (response: SocketCallbackResponse) => void
     ) => {
       try {
@@ -386,7 +418,8 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           return;
         }
 
-        const result = await deleteMessage(userId, payload.conversationId, payload.messageId);
+        const deleteForEveryone = payload?.deleteForEveryone !== false;
+        const result = await deleteMessage(userId, payload.conversationId, payload.messageId, deleteForEveryone);
         if (callback) {
           callback({ success: true, data: result });
         }
@@ -398,6 +431,120 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
             callback(formatErrorResponse(code, err.message));
           } else {
             callback(formatErrorResponse('SERVER_ERROR', 'Failed to delete message'));
+          }
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.MESSAGE_REACT,
+    async (
+      payload: { conversationId: string; messageId: string; emoji: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId || !socket.data.user?.isAuthenticated) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
+          return;
+        }
+
+        if (!payload?.conversationId || !payload?.messageId || !payload?.emoji?.trim()) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId, messageId, and non-empty emoji are required'));
+          return;
+        }
+
+        const result = await toggleMessageReaction(userId, payload.conversationId, payload.messageId, payload.emoji.trim());
+        if (callback) {
+          callback({ success: true, data: result });
+        }
+      } catch (err: any) {
+        logger.error('Error toggling reaction via socket', { error: err.message });
+        if (callback) {
+          if (err instanceof ApiError) {
+            const code = err.statusCode === 403 ? 'FORBIDDEN' : err.statusCode === 404 ? 'NOT_FOUND' : 'INVALID_PAYLOAD';
+            callback(formatErrorResponse(code, err.message));
+          } else {
+            callback(formatErrorResponse('SERVER_ERROR', 'Failed to update reaction'));
+          }
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.MESSAGE_FORWARD,
+    async (
+      payload: { messageIds: string[]; targetConversationIds: string[] },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId || !socket.data.user?.isAuthenticated) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
+          return;
+        }
+
+        if (
+          !Array.isArray(payload?.messageIds) ||
+          payload.messageIds.length === 0 ||
+          !Array.isArray(payload?.targetConversationIds) ||
+          payload.targetConversationIds.length === 0
+        ) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'messageIds and targetConversationIds must be non-empty arrays'));
+          return;
+        }
+
+        const result = await forwardMessages(userId, payload.messageIds, payload.targetConversationIds);
+        if (callback) {
+          callback({ success: true, data: result });
+        }
+      } catch (err: any) {
+        logger.error('Error forwarding messages via socket', { error: err.message });
+        if (callback) {
+          if (err instanceof ApiError) {
+            const code = err.statusCode === 403 ? 'FORBIDDEN' : err.statusCode === 404 ? 'NOT_FOUND' : 'INVALID_PAYLOAD';
+            callback(formatErrorResponse(code, err.message));
+          } else {
+            callback(formatErrorResponse('SERVER_ERROR', 'Failed to forward messages'));
+          }
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.POLL_VOTE,
+    async (
+      payload: { conversationId: string; messageId?: string; pollId?: string; optionIds: string[] },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId || !socket.data.user?.isAuthenticated) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
+          return;
+        }
+
+        const pollIdOrMessageId = payload?.pollId || payload?.messageId;
+        if (!payload?.conversationId || !pollIdOrMessageId || !Array.isArray(payload?.optionIds) || payload.optionIds.length === 0) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId, messageId or pollId, and non-empty optionIds array are required'));
+          return;
+        }
+
+        const result = await votePoll(userId, payload.conversationId, pollIdOrMessageId, payload.optionIds);
+        if (callback) {
+          callback({ success: true, data: result });
+        }
+      } catch (err: any) {
+        logger.error('Error voting on poll via socket', { error: err.message });
+        if (callback) {
+          if (err instanceof ApiError) {
+            const code = err.statusCode === 403 ? 'FORBIDDEN' : err.statusCode === 404 ? 'NOT_FOUND' : 'INVALID_PAYLOAD';
+            callback(formatErrorResponse(code, err.message));
+          } else {
+            callback(formatErrorResponse('SERVER_ERROR', 'Failed to vote on poll'));
           }
         }
       }
