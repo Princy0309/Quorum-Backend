@@ -48,3 +48,15 @@ export const PROJECT_EVENTS = {
   DELIVERABLE_REVIEWED: 'project:deliverable_reviewed',
 } as const;
 
+export const OFFICE_EVENTS = {
+  JOIN: 'office:join',
+  LEAVE: 'office:leave',
+  CHANGE_ZONE: 'office:change-zone',
+  ZONE_CHANGED: 'office:zone-changed',
+  KNOCK: 'office:knock',
+  KNOCKED: 'office:knocked',
+  USER_JOINED: 'office:user-joined',
+  USER_LEFT: 'office:user-left',
+  STATE_UPDATED: 'office:state-updated',
+} as const;
+

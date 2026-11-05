@@ -21,6 +21,7 @@ import { registerTypingHandler } from './handlers/typingHandler.js';
 import { registerPresenceHandler } from './handlers/presenceHandler.js';
 import { registerCommunityHandler } from './handlers/communityHandler.js';
 import { registerWhiteboardHandler } from './handlers/whiteboardHandler.js';
+import { registerOfficeHandler } from './handlers/officeHandler.js';
 import { broadcastUserPresenceUpdate } from './handlers/presenceHandler.js';
 import { setMeetingPresence, setScreenSharePresence } from '../services/presenceService.js';
 
@@ -189,6 +190,7 @@ export const initSocketServer = (httpServer: any) => {
     registerPresenceHandler(io, socket as any);
     registerCommunityHandler(io, socket as any);
     registerWhiteboardHandler(io, socket as any);
+    registerOfficeHandler(io, socket as any);
 
     const handleDynamicAuth = async (data: { token?: string }, ack?: (res: any) => void) => {
       try {
