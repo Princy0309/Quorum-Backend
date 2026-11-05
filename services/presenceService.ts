@@ -16,6 +16,7 @@ export interface UserPresenceData {
   statusMessage?: string | null;
   statusExpiresAt?: Date | null;
   lastSeen?: Date | null;
+  isInMeeting?: boolean;
 }
 
 export interface CustomStatusInput {
@@ -177,6 +178,7 @@ export const getUserPresence = async (userId: string): Promise<UserPresenceData>
     statusMessage,
     statusExpiresAt,
     lastSeen,
+    isInMeeting: meetingRaw === 'in_meeting',
   };
 };
 
