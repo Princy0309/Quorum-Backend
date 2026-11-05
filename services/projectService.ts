@@ -949,7 +949,6 @@ export const updateProjectTask = async (
 
   const isManagerOrAdmin =
     member.role === ProjectRole.PROJECT_MANAGER || (member as any).isOrgAdmin;
-  const isCreator = task.createdById === userId;
   const isAssignee = task.assigneeId === userId;
 
   if (!isManagerOrAdmin) {
@@ -963,22 +962,20 @@ export const updateProjectTask = async (
       );
     }
 
-    if (!isCreator) {
-      if (!isAssignee) {
-        throw new ApiError(403, 'You do not have permission to modify this task');
-      }
+    if (!isAssignee) {
+      throw new ApiError(403, 'Only project managers or the assigned member can modify this task');
+    }
 
-      if (
-        input.assigneeId !== undefined ||
-        input.priority !== undefined ||
-        input.title !== undefined ||
-        input.dueDate !== undefined
-      ) {
-        throw new ApiError(
-          403,
-          'Only project managers or the task creator can modify task assignment, priority, title, or due date'
-        );
-      }
+    if (
+      input.assigneeId !== undefined ||
+      input.priority !== undefined ||
+      input.title !== undefined ||
+      input.dueDate !== undefined
+    ) {
+      throw new ApiError(
+        403,
+        'Only project managers can modify task assignment, priority, title, or due date'
+      );
     }
   }
 
@@ -1055,13 +1052,12 @@ export const updateProjectTaskStatus = async (
 
   const isManagerOrAdmin =
     member.role === ProjectRole.PROJECT_MANAGER || (member as any).isOrgAdmin;
-  const isCreator = task.createdById === userId;
   const isAssignee = task.assigneeId === userId;
 
-  if (!isManagerOrAdmin && !isCreator && !isAssignee) {
+  if (!isManagerOrAdmin && !isAssignee) {
     throw new ApiError(
       403,
-      'Only the task assignee, creator, or project managers can change the task status'
+      'Only the task assignee or project managers can change the task status'
     );
   }
 
@@ -1134,6 +1130,10 @@ export const submitTaskDeliverable = async (
 
   if (task.status === ProjectTaskStatus.COMPLETED || task.status === ProjectTaskStatus.CANCELLED) {
     throw new ApiError(400, 'Cannot submit deliverable: task is already completed or cancelled');
+  }
+
+  if (task.status === ProjectTaskStatus.IN_REVIEW) {
+    throw new ApiError(400, 'Cannot submit deliverable: task is already in review awaiting manager approval');
   }
 
   const isManagerOrAdmin =
