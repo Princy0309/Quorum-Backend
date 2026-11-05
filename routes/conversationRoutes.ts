@@ -30,6 +30,7 @@ import {
   deleteMessageController,
   getConversationPresenceController,
   toggleMessageReactionController,
+  getMessageReactionsController,
   forwardMessagesController,
   createPollController,
   votePollController
@@ -55,6 +56,7 @@ router.get('/:id/messages', authMiddleware, getConversationMessagesController);
 router.patch('/:id/messages/:messageId', authMiddleware, validate(editMessageSchema), editMessageController);
 router.delete('/:id/messages/:messageId', authMiddleware, validate(deleteMessageSchema), deleteMessageController);
 router.post('/:id/messages/:messageId/reactions', authMiddleware, validate(toggleReactionSchema), toggleMessageReactionController);
+router.get('/:id/messages/:messageId/reactions', authMiddleware, getMessageReactionsController);
 router.get('/:id/search', authMiddleware, searchConversationMessagesController);
 router.patch('/:id', authMiddleware, validate(updateGroupSchema), updateGroupConversationController);
 router.post('/:id/participants', authMiddleware, validate(addParticipantsSchema), addGroupParticipantsController);

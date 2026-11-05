@@ -17,6 +17,7 @@ export const CHAT_EVENTS = {
   MESSAGE_DELETED: 'message:deleted',
   MESSAGE_REACT: 'message:react',
   MESSAGE_REACTION_UPDATED: 'message:reaction_updated',
+  MESSAGE_GET_REACTIONS: 'message:get-reactions',
   MESSAGE_FORWARD: 'message:forward',
   MESSAGE_FORWARDED: 'message:forwarded',
   POLL_VOTE: 'poll:vote',

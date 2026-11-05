@@ -1176,6 +1176,128 @@ export const swaggerDocument = {
         }
       }
     },
+    "/api/conversations/{id}/messages/{messageId}/reactions": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Toggle reaction on message",
+        "description": "Toggles an emoji reaction on a message. If the user already reacted with this emoji, it is removed; otherwise, it is added. Broadcasts message:reaction_updated event.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Conversation ID or recipient user ID"
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Message ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "emoji"
+                ],
+                "properties": {
+                  "emoji": {
+                    "type": "string",
+                    "example": "👍"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reaction toggled successfully"
+          },
+          "400": {
+            "description": "Bad Request - invalid emoji or message is deleted"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Conversation or message not found"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Get reaction details and users breakdown for message (WhatsApp style)",
+        "description": "Retrieves reaction summaries grouped by emoji with counts, requesting user reaction state, and user details (id, name, avatar) of who gave what reaction. Supports optional ?emoji filter.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Conversation ID or recipient user ID"
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Message ID"
+          },
+          {
+            "name": "emoji",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter reactions by specific emoji (e.g. 👍 or ❤️)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reaction details fetched successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Conversation or message not found"
+          }
+        }
+      }
+    },
     "/api/conversations/{id}/search": {
       "get": {
         "tags": [

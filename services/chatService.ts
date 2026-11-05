@@ -258,16 +258,30 @@ export const deriveFileTypeFromUrl = (fileUrl?: string): string | undefined => {
   }
 };
 
-export const formatReactions = (reactions: { emoji: string; userId: string }[]) => {
-  const map = new Map<string, string[]>();
+export const formatReactions = (reactions: any[], currentUserId?: string) => {
+  if (!Array.isArray(reactions) || reactions.length === 0) return [];
+  const map = new Map<string, { userIds: string[]; users: { id: string; name: string; avatar: string | null }[] }>();
   for (const r of reactions) {
-    if (!map.has(r.emoji)) map.set(r.emoji, []);
-    map.get(r.emoji)!.push(r.userId);
+    if (!r?.emoji) continue;
+    if (!map.has(r.emoji)) {
+      map.set(r.emoji, { userIds: [], users: [] });
+    }
+    const group = map.get(r.emoji)!;
+    if (r.userId) {
+      group.userIds.push(r.userId);
+      group.users.push({
+        id: r.user?.id || r.userId,
+        name: r.user?.name || 'User',
+        avatar: r.user?.avatar || null
+      });
+    }
   }
-  return Array.from(map.entries()).map(([emoji, userIds]) => ({
+  return Array.from(map.entries()).map(([emoji, data]) => ({
     emoji,
-    count: userIds.length,
-    userIds
+    count: data.userIds.length,
+    hasReacted: Boolean(currentUserId && data.userIds.includes(currentUserId)),
+    userIds: data.userIds,
+    users: data.users
   }));
 };
 
@@ -357,7 +371,15 @@ export const messageInclude = {
     select: {
       id: true,
       emoji: true,
-      userId: true
+      userId: true,
+      createdAt: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      }
     }
   },
   poll: {
@@ -542,7 +564,7 @@ export const saveMessage = async (
         return {
           message: {
             ...existingMessage,
-            reactions: formatReactions((existingMessage as any).reactions || []),
+            reactions: formatReactions((existingMessage as any).reactions || [], senderId),
             poll: formatPoll((existingMessage as any).poll, senderId),
             mentionedUsers: existingMentionedUsers
           },
@@ -616,7 +638,7 @@ export const saveMessage = async (
           return {
             message: {
               ...existingMessage,
-              reactions: formatReactions((existingMessage as any).reactions || []),
+              reactions: formatReactions((existingMessage as any).reactions || [], senderId),
               poll: formatPoll((existingMessage as any).poll, senderId),
               mentionedUsers: existingMentionedUsers
             },
@@ -636,7 +658,7 @@ export const saveMessage = async (
     return {
       message: {
         ...message,
-        reactions: formatReactions((message as any).reactions || []),
+        reactions: formatReactions((message as any).reactions || [], senderId),
         poll: formatPoll((message as any).poll, senderId),
         mentionedUsers
       },
@@ -716,7 +738,7 @@ export const getConversationMessages = async (
 
   const enrichedMessages = messages.map((msg: any) => ({
     ...msg,
-    reactions: formatReactions(msg.reactions || []),
+    reactions: formatReactions(msg.reactions || [], userId),
     poll: formatPoll(msg.poll, userId),
     mentionedUsers: (msg.mentionedUserIds || [])
       .map((mId: string) => mentionedUserMap.get(mId))
@@ -1043,7 +1065,7 @@ export const searchConversationMessages = async (
 
   const enrichedMessages = messages.map((msg: any) => ({
     ...msg,
-    reactions: formatReactions((msg as any).reactions || []),
+    reactions: formatReactions((msg as any).reactions || [], userId),
     poll: formatPoll((msg as any).poll, userId)
   }));
 
@@ -1616,7 +1638,7 @@ export const editMessage = async (
 
   const enrichedMessage = {
     ...updatedMessage,
-    reactions: formatReactions((updatedMessage as any).reactions || []),
+    reactions: formatReactions((updatedMessage as any).reactions || [], userId),
     poll: formatPoll((updatedMessage as any).poll, userId),
     mentionedUsers
   };
@@ -1891,10 +1913,22 @@ export const toggleMessageReaction = async (
 
   const allReactions = await prisma.messageReaction.findMany({
     where: { messageId },
-    select: { emoji: true, userId: true }
+    select: {
+      id: true,
+      emoji: true,
+      userId: true,
+      createdAt: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      }
+    }
   });
 
-  const formatted = formatReactions(allReactions);
+  const formatted = formatReactions(allReactions, userId);
 
   try {
     const io = getIO();
@@ -1922,6 +1956,86 @@ export const toggleMessageReaction = async (
     userId,
     action,
     reactions: formatted
+  };
+};
+
+export const getMessageReactions = async (
+  userId: string,
+  conversationIdOrTarget: string,
+  messageId: string,
+  emojiFilter?: string
+) => {
+  const resolvedConversationId = await resolveConversationId(userId, conversationIdOrTarget);
+  if (!resolvedConversationId) {
+    throw new ApiError(404, 'Conversation not found or you are not a participant');
+  }
+
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: { id: true, conversationId: true, isDeleted: true }
+  });
+
+  if (!message || message.conversationId !== resolvedConversationId) {
+    throw new ApiError(404, 'Message not found in this conversation');
+  }
+
+  if (message.isDeleted) {
+    throw new ApiError(400, 'Cannot view reactions for a deleted message');
+  }
+
+  const allReactions = await prisma.messageReaction.findMany({
+    where: {
+      messageId,
+      ...(emojiFilter && { emoji: emojiFilter.trim() })
+    },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      emoji: true,
+      userId: true,
+      createdAt: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      }
+    }
+  });
+
+  const allReactionsForSummary = emojiFilter
+    ? await prisma.messageReaction.findMany({
+        where: { messageId },
+        select: {
+          emoji: true,
+          userId: true
+        }
+      })
+    : allReactions;
+
+  const summary = formatReactions(allReactionsForSummary, userId);
+  const totalCount = allReactionsForSummary.length;
+
+  const reactionList = allReactions.map((r) => ({
+    id: r.id,
+    emoji: r.emoji,
+    userId: r.userId,
+    createdAt: r.createdAt,
+    isMe: r.userId === userId,
+    user: {
+      id: r.user?.id || r.userId,
+      name: r.user?.name || 'User',
+      avatar: r.user?.avatar || null
+    }
+  }));
+
+  return {
+    messageId,
+    conversationId: resolvedConversationId,
+    totalCount,
+    summary,
+    reactions: reactionList
   };
 };
 
