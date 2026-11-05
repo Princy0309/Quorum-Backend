@@ -32,6 +32,8 @@ model Meeting {
   whiteboards         WhiteboardMeeting[]
   originWhiteboards   Whiteboard[]     @relation("MeetingOriginWhiteboards")
   polls               MeetingPoll[]
+  documents           DocumentMeeting[]
+  originDocuments     Document[]       @relation("MeetingOriginDocuments")
 
   @@index([organizationId])
   @@index([organizationId, scheduledStartTime])

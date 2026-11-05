@@ -47,6 +47,7 @@ model Project {
   resources      ProjectResource[]
   invites        ProjectInvite[]
   conversation   Conversation?     @relation("ProjectConversation")
+  documents      Document[]
 
   @@index([organizationId])
   @@index([createdById])

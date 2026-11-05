@@ -25,6 +25,7 @@ model Organization {
   collaboratingInvites ProjectInvite[] @relation("ProjectInviteCompany")
   meetings           Meeting[]
   whiteboards        Whiteboard[]
+  documents          Document[]
   jiraIntegration    OrgJiraIntegration?
   githubIntegration  OrgGithubIntegration?
 
@@ -90,6 +91,7 @@ model Team {
   jiraTickets    JiraTicketLink[]
   githubRepoLinks GithubRepoLink[]
   meetings       Meeting[]
+  documents      Document[]
 
 
   @@unique([organizationId, name])

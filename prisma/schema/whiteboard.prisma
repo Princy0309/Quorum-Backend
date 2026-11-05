@@ -12,6 +12,7 @@ model Whiteboard {
   createdBy      User                @relation("WhiteboardCreator", fields: [createdById], references: [id], onDelete: Cascade)
   meeting        Meeting?            @relation("MeetingOriginWhiteboards", fields: [meetingId], references: [id], onDelete: SetNull)
   meetings       WhiteboardMeeting[]
+  documents      DocumentWhiteboard[]
 
   @@index([organizationId])
   @@index([createdById])

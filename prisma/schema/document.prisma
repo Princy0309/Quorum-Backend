@@ -1,0 +1,88 @@
+enum DocumentScopeType {
+  PERSONAL
+  ORGANIZATION
+  TEAM
+  PROJECT
+}
+
+enum DocumentPermission {
+  VIEW
+  COMMENT
+  EDIT
+}
+
+model Document {
+  id             String                 @id @default(uuid())
+  title          String
+  content        Json                   @default("{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\"}]}")
+  scopeType      DocumentScopeType      @default(PERSONAL)
+  createdById    String
+  organizationId String?
+  teamId         String?
+  projectId      String?
+  meetingId      String?
+  isArchived     Boolean                @default(false)
+  version        Int                    @default(1)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  createdBy      User                   @relation("DocumentCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  organization   Organization?          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  team           Team?                  @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  project        Project?               @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  meeting        Meeting?               @relation("MeetingOriginDocuments", fields: [meetingId], references: [id], onDelete: SetNull)
+  collaborators  DocumentCollaborator[]
+  meetings       DocumentMeeting[]
+  whiteboards    DocumentWhiteboard[]
+
+  @@index([organizationId])
+  @@index([createdById])
+  @@index([teamId])
+  @@index([projectId])
+  @@index([meetingId])
+  @@index([scopeType])
+}
+
+model DocumentCollaborator {
+  id         String             @id @default(uuid())
+  documentId String
+  userId     String
+  permission DocumentPermission @default(EDIT)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  document   Document           @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user       User               @relation("DocumentCollaboratorUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, userId])
+  @@index([documentId])
+  @@index([userId])
+}
+
+model DocumentMeeting {
+  id         String   @id @default(uuid())
+  documentId String
+  meetingId  String
+  createdAt  DateTime @default(now())
+
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  meeting    Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, meetingId])
+  @@index([documentId])
+  @@index([meetingId])
+}
+
+model DocumentWhiteboard {
+  id           String     @id @default(uuid())
+  documentId   String
+  whiteboardId String
+  createdAt    DateTime   @default(now())
+
+  document     Document   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  whiteboard   Whiteboard @relation(fields: [whiteboardId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, whiteboardId])
+  @@index([documentId])
+  @@index([whiteboardId])
+}
