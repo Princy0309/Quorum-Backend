@@ -40,6 +40,34 @@ export const ensureChatSchema = async (): Promise<void> => {
   }
 
   const ddlStatements = [
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "type" TEXT DEFAULT 'direct';`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "directKey" TEXT;`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "teamId" TEXT;`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "projectId" TEXT;`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "name" TEXT;`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "avatar" TEXT;`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "ownerId" TEXT;`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "lastSeq" INTEGER NOT NULL DEFAULT 0;`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Conversation_directKey_key" ON "Conversation"("directKey");`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Conversation_teamId_key" ON "Conversation"("teamId");`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Conversation_projectId_key" ON "Conversation"("projectId");`,
+    `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "role" TEXT NOT NULL DEFAULT 'member';`,
+    `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "joinedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;`,
+    `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "lastReadMessageId" TEXT;`,
+    `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "lastReadSeq" INTEGER NOT NULL DEFAULT 0;`,
+    `CREATE INDEX IF NOT EXISTS "ConversationParticipant_userId_idx" ON "ConversationParticipant"("userId");`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "ConversationParticipant_conversationId_userId_key" ON "ConversationParticipant"("conversationId", "userId");`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "fileUrl" TEXT;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "fileType" TEXT;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "fileName" TEXT;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "fileSize" INTEGER;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "audioDuration" INTEGER;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "audioWaveform" DOUBLE PRECISION[] NOT NULL DEFAULT ARRAY[]::DOUBLE PRECISION[];`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "deletedForUserIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "isPinned" BOOLEAN NOT NULL DEFAULT false;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "clientMessageId" TEXT;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "seq" INTEGER NOT NULL DEFAULT 0;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "mentionedUserIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];`,
     `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "replyToId" TEXT;`,
     `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "isEdited" BOOLEAN NOT NULL DEFAULT false;`,
     `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "editedAt" TIMESTAMP(3);`,
@@ -47,10 +75,13 @@ export const ensureChatSchema = async (): Promise<void> => {
     `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "forwardCount" INTEGER NOT NULL DEFAULT 0;`,
     `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "isDeleted" BOOLEAN NOT NULL DEFAULT false;`,
     `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "deletedAt" TIMESTAMP(3);`,
-    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "audioDuration" INTEGER;`,
-    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "audioWaveform" DOUBLE PRECISION[] NOT NULL DEFAULT ARRAY[]::DOUBLE PRECISION[];`,
-    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "deletedForUserIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];`,
+    `UPDATE "Message" SET "deletedForUserIds" = ARRAY[]::TEXT[] WHERE "deletedForUserIds" IS NULL;`,
+    `UPDATE "Message" SET "audioWaveform" = ARRAY[]::DOUBLE PRECISION[] WHERE "audioWaveform" IS NULL;`,
+    `UPDATE "Message" SET "mentionedUserIds" = ARRAY[]::TEXT[] WHERE "mentionedUserIds" IS NULL;`,
+    `UPDATE "Conversation" SET "lastSeq" = 0 WHERE "lastSeq" IS NULL;`,
+    `UPDATE "ConversationParticipant" SET "lastReadSeq" = 0 WHERE "lastReadSeq" IS NULL;`,
     `CREATE INDEX IF NOT EXISTS "Message_replyToId_idx" ON "Message"("replyToId");`,
+    `CREATE INDEX IF NOT EXISTS "Message_conversationId_seq_idx" ON "Message"("conversationId", "seq");`,
     `DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Message_replyToId_fkey') THEN
             ALTER TABLE "Message" ADD CONSTRAINT "Message_replyToId_fkey" FOREIGN KEY ("replyToId") REFERENCES "Message"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -134,6 +165,7 @@ export const ensureChatSchema = async (): Promise<void> => {
 
   isChatSchemaEnsured = true;
 };
+
 
 export const getOrCreateDirectConversation = async (userId: string, targetUserId: string) => {
   await ensureChatSchema();
@@ -805,20 +837,51 @@ export const getConversationMessages = async (
     cursorSeq = cursorMsg.seq;
   }
 
-  const messages = await prisma.message.findMany({
-    where: {
-      conversationId: targetConversationId,
-      NOT: {
-        deletedForUserIds: {
-          has: userId
-        }
+  let messages: any[] = [];
+  try {
+    messages = await prisma.message.findMany({
+      where: {
+        conversationId: targetConversationId,
+        NOT: {
+          deletedForUserIds: {
+            has: userId
+          }
+        },
+        ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
       },
-      ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
-    },
-    take: queryLimit + 1,
-    orderBy: [{ seq: 'desc' }, { id: 'desc' }],
-    include: messageInclude
-  });
+      take: queryLimit + 1,
+      orderBy: [{ seq: 'desc' }, { id: 'desc' }],
+      include: messageInclude
+    });
+  } catch (msgErr: any) {
+    logger.error(`[ChatService] Primary message query failed: ${msgErr.message}`);
+    try {
+      messages = await prisma.message.findMany({
+        where: {
+          conversationId: targetConversationId,
+          ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
+        },
+        take: queryLimit + 1,
+        orderBy: [{ id: 'desc' }],
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true
+            }
+          }
+        }
+      });
+    } catch (fallbackMsgErr: any) {
+      logger.error(`[ChatService] Fallback message query failed: ${fallbackMsgErr.message}`);
+      return {
+        messages: [],
+        nextCursor: null,
+        hasNextPage: false
+      };
+    }
+  }
 
   let hasNextPage = false;
   let nextCursor: string | null = null;
@@ -907,50 +970,92 @@ export const getUserConversations = async (userId: string, query?: string) => {
     ];
   }
 
-  const conversations = await prisma.conversation.findMany({
-    where: whereClause,
-    orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-    include: {
-      participants: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              avatar: true
-            }
-          }
-        }
-      },
-      messages: {
-        where: {
-          NOT: {
-            deletedForUserIds: {
-              has: userId
+  let conversations: any[] = [];
+  try {
+    conversations = await prisma.conversation.findMany({
+      where: whereClause,
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                avatar: true
+              }
             }
           }
         },
-        take: 1,
-        orderBy: [{ seq: 'desc' }, { id: 'desc' }],
-        include: {
-          sender: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true
+        messages: {
+          where: {
+            NOT: {
+              deletedForUserIds: {
+                has: userId
+              }
             }
           },
-          poll: {
-            select: {
-              id: true,
-              question: true
+          take: 1,
+          orderBy: [{ seq: 'desc' }, { id: 'desc' }],
+          include: {
+            sender: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true
+              }
+            },
+            poll: {
+              select: {
+                id: true,
+                question: true
+              }
             }
           }
         }
       }
+    });
+  } catch (findErr: any) {
+    logger.error(`[ChatService] Primary conversations findMany failed: ${findErr.message}`);
+    try {
+      conversations = await prisma.conversation.findMany({
+        where: whereClause,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        include: {
+          participants: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  avatar: true
+                }
+              }
+            }
+          },
+          messages: {
+            take: 1,
+            orderBy: [{ id: 'desc' }],
+            include: {
+              sender: {
+                select: {
+                  id: true,
+                  name: true,
+                  avatar: true
+                }
+              }
+            }
+          }
+        }
+      });
+    } catch (fallbackErr: any) {
+      logger.error(`[ChatService] Fallback conversations findMany failed: ${fallbackErr.message}`);
+      return [];
     }
-  });
+  }
+
 
   if (conversations.length === 0) {
     return [];
