@@ -20,6 +20,7 @@ import githubRoutes from './githubRoutes.js';
 import savedItemRoutes from './savedItemRoutes.js';
 import whiteboardRoutes from './whiteboardRoutes.js';
 import projectRoutes from './projectRoutes.js';
+import documentRoutes from './documentRoutes.js';
 
 const router = Router();
 
@@ -106,5 +107,7 @@ router.use('/v1/webhooks', webhookRoutes);
 
 router.use('/projects', projectRoutes);
 router.use('/v1/projects', projectRoutes);
+router.use('/documents', documentRoutes);
+router.use('/v1/documents', documentRoutes);
 
 export default router;

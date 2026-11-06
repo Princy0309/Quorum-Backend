@@ -8406,9 +8406,487 @@ export const swaggerDocument = {
           }
         }
       }
+    },
+    "/api/documents": {
+      "post": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Create collaborative document",
+        "description": "Creates a new document scoped to a personal user, team, organization, project, or meeting.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Quarterly Strategy & Brainstorming"
+                  },
+                  "content": {
+                    "type": "object"
+                  },
+                  "scopeType": {
+                    "type": "string",
+                    "enum": [
+                      "PERSONAL",
+                      "TEAM",
+                      "ORGANIZATION",
+                      "PROJECT",
+                      "MEETING"
+                    ],
+                    "default": "PERSONAL"
+                  },
+                  "organizationId": {
+                    "type": "string"
+                  },
+                  "teamId": {
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": "string"
+                  },
+                  "originMeetingId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Document created successfully"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "List documents",
+        "description": "Lists documents accessible to the authenticated user.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "meetingId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of accessible documents"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}": {
+      "get": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Get document details",
+        "description": "Retrieves document content, collaborators, linked meetings, and embedded whiteboards.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document details"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Update document",
+        "description": "Updates document title, content, or archive status.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "object"
+                  },
+                  "isArchived": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Delete document",
+        "description": "Deletes a document (owner/admin only).",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document deleted"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/collaborators": {
+      "post": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Add collaborator",
+        "description": "Shares document with a user with READ or WRITE permissions.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userId",
+                  "permission"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  },
+                  "permission": {
+                    "type": "string",
+                    "enum": [
+                      "READ",
+                      "WRITE"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Collaborator added"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/collaborators/{userId}": {
+      "delete": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Remove collaborator",
+        "description": "Removes a collaborator from the document.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Collaborator removed"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/meeting": {
+      "post": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Open or link document in video call meeting",
+        "description": "Links document to an active meeting for live split-screen note taking and broadcasts to call participants.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "meetingCodeOrId"
+                ],
+                "properties": {
+                  "meetingCodeOrId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document linked to meeting"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/whiteboards": {
+      "post": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Embed whiteboard inside document",
+        "description": "Embeds an interactive or synced whiteboard viewport inside the document canvas.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "whiteboardId"
+                ],
+                "properties": {
+                  "whiteboardId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "viewport": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Whiteboard embedded"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/ai": {
+      "post": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "In-document AI copilot",
+        "description": "Runs Gemini AI in-document actions: summarize, extract action items, rewrite, expand, grammar fix, or custom instruction.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "action"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "summarize",
+                      "action_items",
+                      "rewrite",
+                      "expand",
+                      "fix_grammar",
+                      "custom"
+                    ]
+                  },
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "selectedText": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "AI completion generated"
+          }
+        }
+      }
     }
   },
   "tags": [
+    {
+      "name": "Collaborative Documents",
+      "description": "Live collaborative rich-text docs with whiteboard embeds, meeting notes, and AI copilot."
+    },
     {
       "name": "Projects & Freelancer Collaboration",
       "description": "Cross-organization and freelancer collaboration workspace with task assignment, deliverable review, and sandboxed access."

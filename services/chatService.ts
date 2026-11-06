@@ -32,7 +32,111 @@ const notifyConversationUpdate = (userIds: string[], conversationData: any) => {
   }
 };
 
+let isChatSchemaEnsured = false;
+
+export const ensureChatSchema = async (): Promise<void> => {
+  if (isChatSchemaEnsured) {
+    return;
+  }
+
+  const ddlStatements = [
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "replyToId" TEXT;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "isEdited" BOOLEAN NOT NULL DEFAULT false;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "editedAt" TIMESTAMP(3);`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "isForwarded" BOOLEAN NOT NULL DEFAULT false;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "forwardCount" INTEGER NOT NULL DEFAULT 0;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "isDeleted" BOOLEAN NOT NULL DEFAULT false;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "deletedAt" TIMESTAMP(3);`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "audioDuration" INTEGER;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "audioWaveform" DOUBLE PRECISION[] NOT NULL DEFAULT ARRAY[]::DOUBLE PRECISION[];`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "deletedForUserIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];`,
+    `CREATE INDEX IF NOT EXISTS "Message_replyToId_idx" ON "Message"("replyToId");`,
+    `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Message_replyToId_fkey') THEN
+            ALTER TABLE "Message" ADD CONSTRAINT "Message_replyToId_fkey" FOREIGN KEY ("replyToId") REFERENCES "Message"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+    `CREATE TABLE IF NOT EXISTS "MessageReaction" (
+        "id" TEXT NOT NULL,
+        "messageId" TEXT NOT NULL,
+        "userId" TEXT NOT NULL,
+        "emoji" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "MessageReaction_pkey" PRIMARY KEY ("id")
+    );`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "MessageReaction_messageId_userId_emoji_key" ON "MessageReaction"("messageId", "userId", "emoji");`,
+    `CREATE INDEX IF NOT EXISTS "MessageReaction_messageId_idx" ON "MessageReaction"("messageId");`,
+    `CREATE INDEX IF NOT EXISTS "MessageReaction_userId_idx" ON "MessageReaction"("userId");`,
+    `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'MessageReaction_messageId_fkey') THEN
+            ALTER TABLE "MessageReaction" ADD CONSTRAINT "MessageReaction_messageId_fkey" FOREIGN KEY ("messageId") REFERENCES "Message"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'MessageReaction_userId_fkey') THEN
+            ALTER TABLE "MessageReaction" ADD CONSTRAINT "MessageReaction_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+    `CREATE TABLE IF NOT EXISTS "Poll" (
+        "id" TEXT NOT NULL,
+        "messageId" TEXT NOT NULL,
+        "question" TEXT NOT NULL,
+        "allowMultipleAnswers" BOOLEAN NOT NULL DEFAULT false,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Poll_pkey" PRIMARY KEY ("id")
+    );`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Poll_messageId_key" ON "Poll"("messageId");`,
+    `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Poll_messageId_fkey') THEN
+            ALTER TABLE "Poll" ADD CONSTRAINT "Poll_messageId_fkey" FOREIGN KEY ("messageId") REFERENCES "Message"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+    `CREATE TABLE IF NOT EXISTS "PollOption" (
+        "id" TEXT NOT NULL,
+        "pollId" TEXT NOT NULL,
+        "text" TEXT NOT NULL,
+        "order" INTEGER NOT NULL DEFAULT 0,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "PollOption_pkey" PRIMARY KEY ("id")
+    );`,
+    `CREATE INDEX IF NOT EXISTS "PollOption_pollId_idx" ON "PollOption"("pollId");`,
+    `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'PollOption_pollId_fkey') THEN
+            ALTER TABLE "PollOption" ADD CONSTRAINT "PollOption_pollId_fkey" FOREIGN KEY ("pollId") REFERENCES "Poll"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+    `CREATE TABLE IF NOT EXISTS "PollVote" (
+        "id" TEXT NOT NULL,
+        "pollOptionId" TEXT NOT NULL,
+        "userId" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "PollVote_pkey" PRIMARY KEY ("id")
+    );`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "PollVote_pollOptionId_userId_key" ON "PollVote"("pollOptionId", "userId");`,
+    `CREATE INDEX IF NOT EXISTS "PollVote_pollOptionId_idx" ON "PollVote"("pollOptionId");`,
+    `CREATE INDEX IF NOT EXISTS "PollVote_userId_idx" ON "PollVote"("userId");`,
+    `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'PollVote_pollOptionId_fkey') THEN
+            ALTER TABLE "PollVote" ADD CONSTRAINT "PollVote_pollOptionId_fkey" FOREIGN KEY ("pollOptionId") REFERENCES "PollOption"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'PollVote_userId_fkey') THEN
+            ALTER TABLE "PollVote" ADD CONSTRAINT "PollVote_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+    END $$;`
+  ];
+
+  for (const ddl of ddlStatements) {
+    try {
+      await prisma.$executeRawUnsafe(ddl);
+    } catch (err: any) {
+      logger.warn(`[ChatSchema] Statement failed: ${err.message}`);
+    }
+  }
+
+  isChatSchemaEnsured = true;
+};
+
 export const getOrCreateDirectConversation = async (userId: string, targetUserId: string) => {
+  await ensureChatSchema();
   if (userId === targetUserId) {
     throw new ApiError(400, 'Cannot start a direct message conversation with yourself');
   }
@@ -423,6 +527,7 @@ export const saveMessage = async (
     allowMultipleAnswers?: boolean;
   }
 ) => {
+  await ensureChatSchema();
   const hasText = Boolean(content && content.trim().length > 0);
   const hasMedia = Boolean(fileUrl && fileUrl.trim().length > 0);
   const hasPoll = Boolean(pollData && pollData.question && pollData.options && pollData.options.length >= 2);
@@ -675,6 +780,7 @@ export const getConversationMessages = async (
   cursor?: string,
   limit: number = 20
 ) => {
+  await ensureChatSchema();
   let targetConversationId = conversationId;
   const participantExists = await isParticipant(userId, targetConversationId);
   if (!participantExists) {
@@ -753,6 +859,7 @@ export const getConversationMessages = async (
 };
 
 export const getUserConversations = async (userId: string, query?: string) => {
+  await ensureChatSchema();
   const trimmed = typeof query === 'string' ? query.trim() : '';
 
   const whereClause: any = {
@@ -849,22 +956,26 @@ export const getUserConversations = async (userId: string, query?: string) => {
     return [];
   }
 
-  const unreadCounts = await prisma.$queryRaw<Array<{ conversationId: string; unreadCount: number }>>`
-    SELECT 
-      cp."conversationId",
-      COUNT(m.id)::int AS "unreadCount"
-    FROM "ConversationParticipant" cp
-    LEFT JOIN "Message" m ON m."conversationId" = cp."conversationId"
-      AND m."senderId" != cp."userId"
-      AND m."seq" > cp."lastReadSeq"
-      AND NOT (${userId} = ANY(m."deletedForUserIds"))
-    WHERE cp."userId" = ${userId}
-    GROUP BY cp."conversationId"
-  `;
-
   const unreadMap = new Map<string, number>();
-  for (const row of unreadCounts) {
-    unreadMap.set(row.conversationId, Number(row.unreadCount));
+  try {
+    const unreadCounts = await prisma.$queryRaw<Array<{ conversationId: string; unreadCount: number }>>`
+      SELECT 
+        cp."conversationId",
+        COUNT(m.id)::int AS "unreadCount"
+      FROM "ConversationParticipant" cp
+      LEFT JOIN "Message" m ON m."conversationId" = cp."conversationId"
+        AND m."senderId" != cp."userId"
+        AND m."seq" > cp."lastReadSeq"
+        AND NOT (${userId} = ANY(COALESCE(m."deletedForUserIds", ARRAY[]::TEXT[])))
+      WHERE cp."userId" = ${userId}
+      GROUP BY cp."conversationId"
+    `;
+
+    for (const row of unreadCounts) {
+      unreadMap.set(row.conversationId, Number(row.unreadCount));
+    }
+  } catch (rawErr: any) {
+    logger.warn('Failed to calculate unread counts with raw query:', rawErr);
   }
 
   return conversations.map((conv) => ({
