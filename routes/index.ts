@@ -19,6 +19,7 @@ import webhookRoutes from './webhookRoutes.js';
 import githubRoutes from './githubRoutes.js';
 import savedItemRoutes from './savedItemRoutes.js';
 import whiteboardRoutes from './whiteboardRoutes.js';
+import officeRoutes from './officeRoutes.js';
 
 const router = Router();
 
@@ -102,5 +103,11 @@ router.use('/v1/github', githubRoutes);
 
 router.use('/webhooks', webhookRoutes);
 router.use('/v1/webhooks', webhookRoutes);
+
+router.use('/office', officeRoutes);
+router.use('/v1/office', officeRoutes);
+router.use('/teams/:teamId/office', officeRoutes);
+router.use('/v1/teams/:teamId/office', officeRoutes);
+
 
 export default router;
