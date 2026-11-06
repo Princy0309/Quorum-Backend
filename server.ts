@@ -10,6 +10,7 @@ import { initSocketServer } from './sockets/socketServer.js';
 import { startAiHistoryCleanupTask } from './services/aiHistoryService.js';
 import { reminderWorker, reminderRedisConnection } from './queues/reminderQueue.js';
 import { ensureWhiteboardSchema } from './services/whiteboardService.js';
+import { ensureChatSchema } from './services/chatService.js';
 
 
 let server: any;
@@ -46,6 +47,12 @@ const startServer = async (): Promise<void> => {
     await ensureWhiteboardSchema();
   } catch (err) {
     console.warn('Whiteboard schema initialization warning:', err);
+  }
+
+  try {
+    await ensureChatSchema();
+  } catch (err) {
+    console.warn('Chat schema initialization warning:', err);
   }
 
   const httpServer = createServer(app);
