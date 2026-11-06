@@ -7,6 +7,8 @@ import {
   claimDeskController,
   changeOfficeZoneController,
   leaveOfficeController,
+  startWarRoomMeetingController,
+  endWarRoomMeetingController,
 } from '../controllers/officeController.js';
 
 const router = Router({ mergeParams: true });
@@ -19,5 +21,7 @@ router.post(['/:teamId/knock', '/knock'], knockOnDeskController);
 router.post(['/:teamId/desk/claim', '/desk/claim'], claimDeskController);
 router.post(['/:teamId/zone', '/zone'], changeOfficeZoneController);
 router.post(['/:teamId/leave', '/leave'], leaveOfficeController);
+router.post(['/:teamId/meeting/start', '/meeting/start'], startWarRoomMeetingController);
+router.post(['/:teamId/meeting/end', '/meeting/end'], endWarRoomMeetingController);
 
 export default router;

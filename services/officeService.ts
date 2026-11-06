@@ -388,3 +388,36 @@ export async function leaveOffice(teamId: string, userId: string): Promise<void>
     await redis.hdel(membersKey, userId).catch(() => { });
     logger.info(`User ${userId} left virtual office for team ${teamId}`);
 }
+
+
+// 6 Start an active video meeting in the War Room
+export async function startWarRoomMeeting(
+  teamId: string,
+  meetingCode: string,
+  startedBy: { id: string; name: string }
+): Promise<{ teamId: string; meetingCode: string; startedById: string; startedByName: string; startedAt: string }> {
+  const meetingKey = getOfficeMeetingKey(teamId);
+  const cleanCode = meetingCode.trim().toLowerCase();
+
+  await redis.set(meetingKey, cleanCode, 'EX', 86400);
+
+  logger.info(`War Room meeting started for team ${teamId} with code ${cleanCode} by ${startedBy.name}`);
+
+  return {
+    teamId,
+    meetingCode: cleanCode,
+    startedById: startedBy.id,
+    startedByName: startedBy.name,
+    startedAt: new Date().toISOString(),
+  };
+}
+
+//end active video meeting in war room
+export async function endWarRoomMeeting(teamId: string): Promise<{ teamId: string }> {
+  const meetingKey = getOfficeMeetingKey(teamId);
+  await redis.del(meetingKey);
+
+  logger.info(`War Room meeting ended for team ${teamId}`);
+
+  return { teamId };
+}

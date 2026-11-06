@@ -12,6 +12,8 @@ import {
   changeOfficeZone,
   leaveOffice,
   joinOffice,
+  startWarRoomMeeting,
+  endWarRoomMeeting,
 } from '../services/officeService.js';
 import { OfficeZoneId } from '../types/office.js';
 import { getUserPresence } from '../services/presenceService.js';
@@ -25,6 +27,10 @@ const knockSchema = z.object({
 const changeZoneSchema = z.object({
   zoneId: z.enum(['WAR_ROOM', 'OPEN_WORKSPACE', 'COFFEE_LOUNGE', 'FOCUS_POD']),
   deskId: z.string().optional().nullable(),
+});
+
+const startMeetingSchema = z.object({
+  meetingCode: z.string().min(1, 'meetingCode is required'),
 });
 
 const claimDeskSchema = z.object({
@@ -211,4 +217,63 @@ export const leaveOfficeController = asyncHandler(async (req: Request, res: Resp
   }
 
   return sendSuccess(res, 200, 'Left virtual office floor successfully');
+});
+
+export const startWarRoomMeetingController = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
+  const teamId = (req.params.teamId || req.params.id) as string;
+  if (!teamId) {
+    throw new ApiError(400, 'Team ID is required');
+  }
+
+  const parsed = startMeetingSchema.safeParse(req.body);
+  if (!parsed.success) {
+    const errorMsg = parsed.error.issues.map((i) => i.message).join(', ');
+    throw new ApiError(400, errorMsg);
+  }
+
+  const result = await startWarRoomMeeting(teamId, parsed.data.meetingCode, {
+    id: userId,
+    name: req.user?.name || 'Teammate',
+  });
+
+  // Broadcast to the whole team floor that the War Room meeting is live!
+  try {
+    const io = getIO();
+    io.to(`office:team:${teamId}`).emit(OFFICE_EVENTS.MEETING_STARTED, result);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn(`[OfficeController] Failed to broadcast meeting started: ${message}`);
+  }
+
+  return sendSuccess(res, 200, 'War Room meeting started successfully', result);
+});
+
+export const endWarRoomMeetingController = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
+  const teamId = (req.params.teamId || req.params.id) as string;
+  if (!teamId) {
+    throw new ApiError(400, 'Team ID is required');
+  }
+
+  const result = await endWarRoomMeeting(teamId);
+
+  // Broadcast that the War Room meeting has concluded
+  try {
+    const io = getIO();
+    io.to(`office:team:${teamId}`).emit(OFFICE_EVENTS.MEETING_ENDED, result);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn(`[OfficeController] Failed to broadcast meeting ended: ${message}`);
+  }
+
+  return sendSuccess(res, 200, 'War Room meeting ended successfully', result);
 });

@@ -58,5 +58,8 @@ export const OFFICE_EVENTS = {
   USER_JOINED: 'office:user-joined',
   USER_LEFT: 'office:user-left',
   STATE_UPDATED: 'office:state-updated',
+  MEETING_STARTED: 'office:meeting-started',
+  MEETING_ENDED: 'office:meeting-ended',
+
 } as const;
 
