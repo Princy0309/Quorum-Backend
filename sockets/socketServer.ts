@@ -243,7 +243,7 @@ export const initSocketServer = (httpServer: any) => {
     socket.on('meeting:join', (data, ack) => {
       handleJoinMeeting(io, socket, data?.meetingCode, ack);
       if (socket.data.user?.id) {
-        setMeetingPresence(socket.data.user.id, true).then((updated) => {
+        setMeetingPresence(socket.data.user.id, true, data?.meetingCode).then((updated) => {
           broadcastUserPresenceUpdate(io, socket.data.user.id, updated).catch(() => { });
         }).catch(() => { });
       }

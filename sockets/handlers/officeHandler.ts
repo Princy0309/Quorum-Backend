@@ -110,6 +110,7 @@ export function registerOfficeHandler(io: Server, socket: Socket) {
       }
 
       try {
+        
         const knockedEvent = await knockOnDesk(
           { teamId, targetUserId, message },
           {
