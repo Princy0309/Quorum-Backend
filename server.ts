@@ -11,6 +11,7 @@ import { startAiHistoryCleanupTask } from './services/aiHistoryService.js';
 import { reminderWorker, reminderRedisConnection } from './queues/reminderQueue.js';
 import { ensureWhiteboardSchema } from './services/whiteboardService.js';
 import { ensureChatSchema } from './services/chatService.js';
+import { ensureRecordingSchema, startRecordingCleanupTask } from './services/recordingService.js';
 
 
 let server: any;
@@ -55,12 +56,19 @@ const startServer = async (): Promise<void> => {
     console.warn('Chat schema initialization warning:', err);
   }
 
+  try {
+    await ensureRecordingSchema();
+  } catch (err) {
+    console.warn('Recording schema initialization warning:', err);
+  }
+
   const httpServer = createServer(app);
   initSocketServer(httpServer);
 
   server = httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Quorum server running on port ${PORT}`);
     startAiHistoryCleanupTask();
+    startRecordingCleanupTask();
   });
 
 };
