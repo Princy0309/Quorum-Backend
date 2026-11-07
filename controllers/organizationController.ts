@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { OrgRole } from '@prisma/client';
 import { ApiError } from '../utils/ApiError.js';
 import {
   createOrganization,
@@ -130,7 +131,10 @@ export const getOrganizationMembersController = asyncHandler(
       return next(new ApiError(400, 'Valid Organization ID is required'));
     }
 
-    const members = await getOrganizationMembers(orgId);
+    const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+    const role = typeof req.query.role === 'string' ? (req.query.role as OrgRole) : undefined;
+
+    const members = await getOrganizationMembers(orgId, { search, role });
 
     return res.status(200).json({
       success: true,
@@ -138,6 +142,7 @@ export const getOrganizationMembersController = asyncHandler(
     });
   }
 );
+
 
 export const updateMemberRoleController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {

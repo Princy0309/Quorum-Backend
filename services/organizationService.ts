@@ -3,15 +3,15 @@ import { ApiError } from "../utils/ApiError.js";
 import { OrgRole } from '@prisma/client';
 import crypto from 'crypto';
 import type { CreateOrgInput, UpdateOrgInput, CreateInviteInput } from '../types/organization.js';
-import {queueNotification} from '../queues/notificationQueue.js';
+import { queueNotification } from '../queues/notificationQueue.js';
 import logger from "../utils/logger.js";
 import { addOrgInviteEmailToQueue } from '../queues/emailQueue.js';
 import env from '../config/env.js';
 
 
 
-function slugify(text: string): string{
-    return text
+function slugify(text: string): string {
+  return text
     .toLowerCase()
     .trim()
     .replace(/[^\w\s-]/g, '')
@@ -182,8 +182,10 @@ export const deleteOrganization = async (orgId: string, userId: string) => {
 };
 
 
-export const getOrganizationMembers = async (orgId: string) => {
-  
+export const getOrganizationMembers = async (
+  orgId: string,
+  options?: { search?: string; role?: OrgRole }
+) => {
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
     select: { id: true },
@@ -193,9 +195,26 @@ export const getOrganizationMembers = async (orgId: string) => {
     throw new ApiError(404, 'Organization not found');
   }
 
-  
+  const whereClause: any = {
+    organizationId: orgId,
+  };
+
+  if (options?.role && Object.values(OrgRole).includes(options.role)) {
+    whereClause.role = options.role;
+  }
+
+  if (options?.search && options.search.trim().length > 0) {
+    const term = options.search.trim();
+    whereClause.user = {
+      OR: [
+        { name: { contains: term, mode: 'insensitive' } },
+        { email: { contains: term, mode: 'insensitive' } },
+      ],
+    };
+  }
+
   const members = await prisma.organizationMember.findMany({
-    where: { organizationId: orgId },
+    where: whereClause,
     include: {
       user: {
         select: {
@@ -324,7 +343,7 @@ export const removeMember = async (
     throw new ApiError(404, 'Member not found in this organization');
   }
 
- 
+
   await prisma.organizationMember.delete({
     where: { id: membership.id },
   });
@@ -343,7 +362,7 @@ export const leaveOrganization = async (orgId: string, userId: string) => {
     throw new ApiError(404, 'Organization not found');
   }
 
- 
+
   if (org.ownerId === userId) {
     throw new ApiError(
       400,
@@ -429,7 +448,7 @@ export const createOrganizationInvite = async (
       select: { id: true },
     });
 
-        if (existingUser) {
+    if (existingUser) {
       const existingMember = await prisma.organizationMember.findUnique({
         where: {
           organizationId_userId: {
@@ -531,8 +550,8 @@ export const createOrganizationInvite = async (
       try {
         const notifBody = targetTeam
           ? (targetTeamRole === 'LEAD'
-              ? `${invite.inviter.name} invited you to lead ${targetTeam.name} at ${invite.organization.name}`
-              : `${invite.inviter.name} invited you to join ${targetTeam.name} at ${invite.organization.name}`)
+            ? `${invite.inviter.name} invited you to lead ${targetTeam.name} at ${invite.organization.name}`
+            : `${invite.inviter.name} invited you to join ${targetTeam.name} at ${invite.organization.name}`)
           : `${invite.inviter.name} invited you to join ${invite.organization.name}`;
 
         await queueNotification({
