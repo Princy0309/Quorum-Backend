@@ -29,3 +29,19 @@ export const uuidParamSchema = z
   .uuid('Invalid UUID format');
 
 export type CreateScopedMeetingInput = z.infer<typeof createScopedMeetingSchema>;
+
+export const createMeetingPollSchema = z.object({
+  question: z.string().trim().min(1, 'Poll question is required').max(500, 'Poll question cannot exceed 500 characters'),
+  options: z.array(z.string().trim().min(1, 'Option text cannot be empty').max(200, 'Option cannot exceed 200 characters'))
+    .min(2, 'A poll must have at least 2 options')
+    .max(12, 'A poll cannot have more than 12 options'),
+  allowMultipleAnswers: z.boolean().optional().default(false),
+  isAnonymous: z.boolean().optional().default(false),
+});
+
+export const voteMeetingPollSchema = z.object({
+  optionIds: z.array(z.string().trim().min(1, 'Option ID cannot be empty')).min(1, 'At least one option ID must be selected'),
+});
+
+export type CreateMeetingPollInput = z.infer<typeof createMeetingPollSchema>;
+export type VoteMeetingPollInput = z.infer<typeof voteMeetingPollSchema>;

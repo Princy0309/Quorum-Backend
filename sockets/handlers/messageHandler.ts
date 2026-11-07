@@ -8,6 +8,7 @@ import {
   editMessage,
   deleteMessage,
   toggleMessageReaction,
+  getMessageReactions,
   forwardMessages,
   votePoll
 } from '../../services/chatService.js';
@@ -467,6 +468,42 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
             callback(formatErrorResponse(code, err.message));
           } else {
             callback(formatErrorResponse('SERVER_ERROR', 'Failed to update reaction'));
+          }
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.MESSAGE_GET_REACTIONS,
+    async (
+      payload: { conversationId: string; messageId: string; emoji?: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId || !socket.data.user?.isAuthenticated) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
+          return;
+        }
+
+        if (!payload?.conversationId || !payload?.messageId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId and messageId are required'));
+          return;
+        }
+
+        const data = await getMessageReactions(userId, payload.conversationId, payload.messageId, payload.emoji);
+        if (callback) {
+          callback({ success: true, data });
+        }
+      } catch (err: any) {
+        logger.error('Error fetching message reactions via socket', { error: err.message });
+        if (callback) {
+          if (err instanceof ApiError) {
+            const code = err.statusCode === 403 ? 'FORBIDDEN' : err.statusCode === 404 ? 'NOT_FOUND' : 'INVALID_PAYLOAD';
+            callback(formatErrorResponse(code, err.message));
+          } else {
+            callback(formatErrorResponse('SERVER_ERROR', 'Failed to fetch reactions'));
           }
         }
       }

@@ -32,7 +32,143 @@ const notifyConversationUpdate = (userIds: string[], conversationData: any) => {
   }
 };
 
+let isChatSchemaEnsured = false;
+
+export const ensureChatSchema = async (): Promise<void> => {
+  if (isChatSchemaEnsured) {
+    return;
+  }
+
+  const ddlStatements = [
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "type" TEXT DEFAULT 'direct';`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "directKey" TEXT;`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "teamId" TEXT;`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "projectId" TEXT;`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "name" TEXT;`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "avatar" TEXT;`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "ownerId" TEXT;`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "lastSeq" INTEGER NOT NULL DEFAULT 0;`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Conversation_directKey_key" ON "Conversation"("directKey");`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Conversation_teamId_key" ON "Conversation"("teamId");`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Conversation_projectId_key" ON "Conversation"("projectId");`,
+    `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "role" TEXT NOT NULL DEFAULT 'member';`,
+    `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "joinedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;`,
+    `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "lastReadMessageId" TEXT;`,
+    `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "lastReadSeq" INTEGER NOT NULL DEFAULT 0;`,
+    `CREATE INDEX IF NOT EXISTS "ConversationParticipant_userId_idx" ON "ConversationParticipant"("userId");`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "ConversationParticipant_conversationId_userId_key" ON "ConversationParticipant"("conversationId", "userId");`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "fileUrl" TEXT;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "fileType" TEXT;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "fileName" TEXT;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "fileSize" INTEGER;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "audioDuration" INTEGER;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "audioWaveform" DOUBLE PRECISION[] NOT NULL DEFAULT ARRAY[]::DOUBLE PRECISION[];`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "deletedForUserIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "isPinned" BOOLEAN NOT NULL DEFAULT false;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "clientMessageId" TEXT;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "seq" INTEGER NOT NULL DEFAULT 0;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "mentionedUserIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "replyToId" TEXT;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "isEdited" BOOLEAN NOT NULL DEFAULT false;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "editedAt" TIMESTAMP(3);`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "isForwarded" BOOLEAN NOT NULL DEFAULT false;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "forwardCount" INTEGER NOT NULL DEFAULT 0;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "isDeleted" BOOLEAN NOT NULL DEFAULT false;`,
+    `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "deletedAt" TIMESTAMP(3);`,
+    `UPDATE "Message" SET "deletedForUserIds" = ARRAY[]::TEXT[] WHERE "deletedForUserIds" IS NULL;`,
+    `UPDATE "Message" SET "audioWaveform" = ARRAY[]::DOUBLE PRECISION[] WHERE "audioWaveform" IS NULL;`,
+    `UPDATE "Message" SET "mentionedUserIds" = ARRAY[]::TEXT[] WHERE "mentionedUserIds" IS NULL;`,
+    `UPDATE "Conversation" SET "lastSeq" = 0 WHERE "lastSeq" IS NULL;`,
+    `UPDATE "ConversationParticipant" SET "lastReadSeq" = 0 WHERE "lastReadSeq" IS NULL;`,
+    `CREATE INDEX IF NOT EXISTS "Message_replyToId_idx" ON "Message"("replyToId");`,
+    `CREATE INDEX IF NOT EXISTS "Message_conversationId_seq_idx" ON "Message"("conversationId", "seq");`,
+    `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Message_replyToId_fkey') THEN
+            ALTER TABLE "Message" ADD CONSTRAINT "Message_replyToId_fkey" FOREIGN KEY ("replyToId") REFERENCES "Message"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+    `CREATE TABLE IF NOT EXISTS "MessageReaction" (
+        "id" TEXT NOT NULL,
+        "messageId" TEXT NOT NULL,
+        "userId" TEXT NOT NULL,
+        "emoji" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "MessageReaction_pkey" PRIMARY KEY ("id")
+    );`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "MessageReaction_messageId_userId_emoji_key" ON "MessageReaction"("messageId", "userId", "emoji");`,
+    `CREATE INDEX IF NOT EXISTS "MessageReaction_messageId_idx" ON "MessageReaction"("messageId");`,
+    `CREATE INDEX IF NOT EXISTS "MessageReaction_userId_idx" ON "MessageReaction"("userId");`,
+    `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'MessageReaction_messageId_fkey') THEN
+            ALTER TABLE "MessageReaction" ADD CONSTRAINT "MessageReaction_messageId_fkey" FOREIGN KEY ("messageId") REFERENCES "Message"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'MessageReaction_userId_fkey') THEN
+            ALTER TABLE "MessageReaction" ADD CONSTRAINT "MessageReaction_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+    `CREATE TABLE IF NOT EXISTS "Poll" (
+        "id" TEXT NOT NULL,
+        "messageId" TEXT NOT NULL,
+        "question" TEXT NOT NULL,
+        "allowMultipleAnswers" BOOLEAN NOT NULL DEFAULT false,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Poll_pkey" PRIMARY KEY ("id")
+    );`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Poll_messageId_key" ON "Poll"("messageId");`,
+    `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Poll_messageId_fkey') THEN
+            ALTER TABLE "Poll" ADD CONSTRAINT "Poll_messageId_fkey" FOREIGN KEY ("messageId") REFERENCES "Message"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+    `CREATE TABLE IF NOT EXISTS "PollOption" (
+        "id" TEXT NOT NULL,
+        "pollId" TEXT NOT NULL,
+        "text" TEXT NOT NULL,
+        "order" INTEGER NOT NULL DEFAULT 0,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "PollOption_pkey" PRIMARY KEY ("id")
+    );`,
+    `CREATE INDEX IF NOT EXISTS "PollOption_pollId_idx" ON "PollOption"("pollId");`,
+    `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'PollOption_pollId_fkey') THEN
+            ALTER TABLE "PollOption" ADD CONSTRAINT "PollOption_pollId_fkey" FOREIGN KEY ("pollId") REFERENCES "Poll"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+    END $$;`,
+    `CREATE TABLE IF NOT EXISTS "PollVote" (
+        "id" TEXT NOT NULL,
+        "pollOptionId" TEXT NOT NULL,
+        "userId" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "PollVote_pkey" PRIMARY KEY ("id")
+    );`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "PollVote_pollOptionId_userId_key" ON "PollVote"("pollOptionId", "userId");`,
+    `CREATE INDEX IF NOT EXISTS "PollVote_pollOptionId_idx" ON "PollVote"("pollOptionId");`,
+    `CREATE INDEX IF NOT EXISTS "PollVote_userId_idx" ON "PollVote"("userId");`,
+    `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'PollVote_pollOptionId_fkey') THEN
+            ALTER TABLE "PollVote" ADD CONSTRAINT "PollVote_pollOptionId_fkey" FOREIGN KEY ("pollOptionId") REFERENCES "PollOption"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'PollVote_userId_fkey') THEN
+            ALTER TABLE "PollVote" ADD CONSTRAINT "PollVote_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        END IF;
+    END $$;`
+  ];
+
+  for (const ddl of ddlStatements) {
+    try {
+      await prisma.$executeRawUnsafe(ddl);
+    } catch (err: any) {
+      logger.warn(`[ChatSchema] Statement failed: ${err.message}`);
+    }
+  }
+
+  isChatSchemaEnsured = true;
+};
+
+
 export const getOrCreateDirectConversation = async (userId: string, targetUserId: string) => {
+  await ensureChatSchema();
   if (userId === targetUserId) {
     throw new ApiError(400, 'Cannot start a direct message conversation with yourself');
   }
@@ -258,16 +394,30 @@ export const deriveFileTypeFromUrl = (fileUrl?: string): string | undefined => {
   }
 };
 
-export const formatReactions = (reactions: { emoji: string; userId: string }[]) => {
-  const map = new Map<string, string[]>();
+export const formatReactions = (reactions: any[], currentUserId?: string) => {
+  if (!Array.isArray(reactions) || reactions.length === 0) return [];
+  const map = new Map<string, { userIds: string[]; users: { id: string; name: string; avatar: string | null }[] }>();
   for (const r of reactions) {
-    if (!map.has(r.emoji)) map.set(r.emoji, []);
-    map.get(r.emoji)!.push(r.userId);
+    if (!r?.emoji) continue;
+    if (!map.has(r.emoji)) {
+      map.set(r.emoji, { userIds: [], users: [] });
+    }
+    const group = map.get(r.emoji)!;
+    if (r.userId) {
+      group.userIds.push(r.userId);
+      group.users.push({
+        id: r.user?.id || r.userId,
+        name: r.user?.name || 'User',
+        avatar: r.user?.avatar || null
+      });
+    }
   }
-  return Array.from(map.entries()).map(([emoji, userIds]) => ({
+  return Array.from(map.entries()).map(([emoji, data]) => ({
     emoji,
-    count: userIds.length,
-    userIds
+    count: data.userIds.length,
+    hasReacted: Boolean(currentUserId && data.userIds.includes(currentUserId)),
+    userIds: data.userIds,
+    users: data.users
   }));
 };
 
@@ -357,7 +507,15 @@ export const messageInclude = {
     select: {
       id: true,
       emoji: true,
-      userId: true
+      userId: true,
+      createdAt: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      }
     }
   },
   poll: {
@@ -401,6 +559,7 @@ export const saveMessage = async (
     allowMultipleAnswers?: boolean;
   }
 ) => {
+  await ensureChatSchema();
   const hasText = Boolean(content && content.trim().length > 0);
   const hasMedia = Boolean(fileUrl && fileUrl.trim().length > 0);
   const hasPoll = Boolean(pollData && pollData.question && pollData.options && pollData.options.length >= 2);
@@ -542,7 +701,7 @@ export const saveMessage = async (
         return {
           message: {
             ...existingMessage,
-            reactions: formatReactions((existingMessage as any).reactions || []),
+            reactions: formatReactions((existingMessage as any).reactions || [], senderId),
             poll: formatPoll((existingMessage as any).poll, senderId),
             mentionedUsers: existingMentionedUsers
           },
@@ -616,7 +775,7 @@ export const saveMessage = async (
           return {
             message: {
               ...existingMessage,
-              reactions: formatReactions((existingMessage as any).reactions || []),
+              reactions: formatReactions((existingMessage as any).reactions || [], senderId),
               poll: formatPoll((existingMessage as any).poll, senderId),
               mentionedUsers: existingMentionedUsers
             },
@@ -636,7 +795,7 @@ export const saveMessage = async (
     return {
       message: {
         ...message,
-        reactions: formatReactions((message as any).reactions || []),
+        reactions: formatReactions((message as any).reactions || [], senderId),
         poll: formatPoll((message as any).poll, senderId),
         mentionedUsers
       },
@@ -653,6 +812,7 @@ export const getConversationMessages = async (
   cursor?: string,
   limit: number = 20
 ) => {
+  await ensureChatSchema();
   let targetConversationId = conversationId;
   const participantExists = await isParticipant(userId, targetConversationId);
   if (!participantExists) {
@@ -677,20 +837,51 @@ export const getConversationMessages = async (
     cursorSeq = cursorMsg.seq;
   }
 
-  const messages = await prisma.message.findMany({
-    where: {
-      conversationId: targetConversationId,
-      NOT: {
-        deletedForUserIds: {
-          has: userId
-        }
+  let messages: any[] = [];
+  try {
+    messages = await prisma.message.findMany({
+      where: {
+        conversationId: targetConversationId,
+        NOT: {
+          deletedForUserIds: {
+            has: userId
+          }
+        },
+        ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
       },
-      ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
-    },
-    take: queryLimit + 1,
-    orderBy: [{ seq: 'desc' }, { id: 'desc' }],
-    include: messageInclude
-  });
+      take: queryLimit + 1,
+      orderBy: [{ seq: 'desc' }, { id: 'desc' }],
+      include: messageInclude
+    });
+  } catch (msgErr: any) {
+    logger.error(`[ChatService] Primary message query failed: ${msgErr.message}`);
+    try {
+      messages = await prisma.message.findMany({
+        where: {
+          conversationId: targetConversationId,
+          ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
+        },
+        take: queryLimit + 1,
+        orderBy: [{ id: 'desc' }],
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true
+            }
+          }
+        }
+      });
+    } catch (fallbackMsgErr: any) {
+      logger.error(`[ChatService] Fallback message query failed: ${fallbackMsgErr.message}`);
+      return {
+        messages: [],
+        nextCursor: null,
+        hasNextPage: false
+      };
+    }
+  }
 
   let hasNextPage = false;
   let nextCursor: string | null = null;
@@ -716,7 +907,7 @@ export const getConversationMessages = async (
 
   const enrichedMessages = messages.map((msg: any) => ({
     ...msg,
-    reactions: formatReactions(msg.reactions || []),
+    reactions: formatReactions(msg.reactions || [], userId),
     poll: formatPoll(msg.poll, userId),
     mentionedUsers: (msg.mentionedUserIds || [])
       .map((mId: string) => mentionedUserMap.get(mId))
@@ -731,6 +922,7 @@ export const getConversationMessages = async (
 };
 
 export const getUserConversations = async (userId: string, query?: string) => {
+  await ensureChatSchema();
   const trimmed = typeof query === 'string' ? query.trim() : '';
 
   const whereClause: any = {
@@ -778,71 +970,117 @@ export const getUserConversations = async (userId: string, query?: string) => {
     ];
   }
 
-  const conversations = await prisma.conversation.findMany({
-    where: whereClause,
-    orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-    include: {
-      participants: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              avatar: true
-            }
-          }
-        }
-      },
-      messages: {
-        where: {
-          NOT: {
-            deletedForUserIds: {
-              has: userId
+  let conversations: any[] = [];
+  try {
+    conversations = await prisma.conversation.findMany({
+      where: whereClause,
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                avatar: true
+              }
             }
           }
         },
-        take: 1,
-        orderBy: [{ seq: 'desc' }, { id: 'desc' }],
-        include: {
-          sender: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true
+        messages: {
+          where: {
+            NOT: {
+              deletedForUserIds: {
+                has: userId
+              }
             }
           },
-          poll: {
-            select: {
-              id: true,
-              question: true
+          take: 1,
+          orderBy: [{ seq: 'desc' }, { id: 'desc' }],
+          include: {
+            sender: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true
+              }
+            },
+            poll: {
+              select: {
+                id: true,
+                question: true
+              }
             }
           }
         }
       }
+    });
+  } catch (findErr: any) {
+    logger.error(`[ChatService] Primary conversations findMany failed: ${findErr.message}`);
+    try {
+      conversations = await prisma.conversation.findMany({
+        where: whereClause,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        include: {
+          participants: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  avatar: true
+                }
+              }
+            }
+          },
+          messages: {
+            take: 1,
+            orderBy: [{ id: 'desc' }],
+            include: {
+              sender: {
+                select: {
+                  id: true,
+                  name: true,
+                  avatar: true
+                }
+              }
+            }
+          }
+        }
+      });
+    } catch (fallbackErr: any) {
+      logger.error(`[ChatService] Fallback conversations findMany failed: ${fallbackErr.message}`);
+      return [];
     }
-  });
+  }
+
 
   if (conversations.length === 0) {
     return [];
   }
 
-  const unreadCounts = await prisma.$queryRaw<Array<{ conversationId: string; unreadCount: number }>>`
-    SELECT 
-      cp."conversationId",
-      COUNT(m.id)::int AS "unreadCount"
-    FROM "ConversationParticipant" cp
-    LEFT JOIN "Message" m ON m."conversationId" = cp."conversationId"
-      AND m."senderId" != cp."userId"
-      AND m."seq" > cp."lastReadSeq"
-      AND NOT (${userId} = ANY(m."deletedForUserIds"))
-    WHERE cp."userId" = ${userId}
-    GROUP BY cp."conversationId"
-  `;
-
   const unreadMap = new Map<string, number>();
-  for (const row of unreadCounts) {
-    unreadMap.set(row.conversationId, Number(row.unreadCount));
+  try {
+    const unreadCounts = await prisma.$queryRaw<Array<{ conversationId: string; unreadCount: number }>>`
+      SELECT 
+        cp."conversationId",
+        COUNT(m.id)::int AS "unreadCount"
+      FROM "ConversationParticipant" cp
+      LEFT JOIN "Message" m ON m."conversationId" = cp."conversationId"
+        AND m."senderId" != cp."userId"
+        AND m."seq" > cp."lastReadSeq"
+        AND NOT (${userId} = ANY(COALESCE(m."deletedForUserIds", ARRAY[]::TEXT[])))
+      WHERE cp."userId" = ${userId}
+      GROUP BY cp."conversationId"
+    `;
+
+    for (const row of unreadCounts) {
+      unreadMap.set(row.conversationId, Number(row.unreadCount));
+    }
+  } catch (rawErr: any) {
+    logger.warn('Failed to calculate unread counts with raw query:', rawErr);
   }
 
   return conversations.map((conv) => ({
@@ -1043,7 +1281,7 @@ export const searchConversationMessages = async (
 
   const enrichedMessages = messages.map((msg: any) => ({
     ...msg,
-    reactions: formatReactions((msg as any).reactions || []),
+    reactions: formatReactions((msg as any).reactions || [], userId),
     poll: formatPoll((msg as any).poll, userId)
   }));
 
@@ -1616,7 +1854,7 @@ export const editMessage = async (
 
   const enrichedMessage = {
     ...updatedMessage,
-    reactions: formatReactions((updatedMessage as any).reactions || []),
+    reactions: formatReactions((updatedMessage as any).reactions || [], userId),
     poll: formatPoll((updatedMessage as any).poll, userId),
     mentionedUsers
   };
@@ -1891,10 +2129,22 @@ export const toggleMessageReaction = async (
 
   const allReactions = await prisma.messageReaction.findMany({
     where: { messageId },
-    select: { emoji: true, userId: true }
+    select: {
+      id: true,
+      emoji: true,
+      userId: true,
+      createdAt: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      }
+    }
   });
 
-  const formatted = formatReactions(allReactions);
+  const formatted = formatReactions(allReactions, userId);
 
   try {
     const io = getIO();
@@ -1922,6 +2172,86 @@ export const toggleMessageReaction = async (
     userId,
     action,
     reactions: formatted
+  };
+};
+
+export const getMessageReactions = async (
+  userId: string,
+  conversationIdOrTarget: string,
+  messageId: string,
+  emojiFilter?: string
+) => {
+  const resolvedConversationId = await resolveConversationId(userId, conversationIdOrTarget);
+  if (!resolvedConversationId) {
+    throw new ApiError(404, 'Conversation not found or you are not a participant');
+  }
+
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: { id: true, conversationId: true, isDeleted: true }
+  });
+
+  if (!message || message.conversationId !== resolvedConversationId) {
+    throw new ApiError(404, 'Message not found in this conversation');
+  }
+
+  if (message.isDeleted) {
+    throw new ApiError(400, 'Cannot view reactions for a deleted message');
+  }
+
+  const allReactions = await prisma.messageReaction.findMany({
+    where: {
+      messageId,
+      ...(emojiFilter && { emoji: emojiFilter.trim() })
+    },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      emoji: true,
+      userId: true,
+      createdAt: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      }
+    }
+  });
+
+  const allReactionsForSummary = emojiFilter
+    ? await prisma.messageReaction.findMany({
+        where: { messageId },
+        select: {
+          emoji: true,
+          userId: true
+        }
+      })
+    : allReactions;
+
+  const summary = formatReactions(allReactionsForSummary, userId);
+  const totalCount = allReactionsForSummary.length;
+
+  const reactionList = allReactions.map((r) => ({
+    id: r.id,
+    emoji: r.emoji,
+    userId: r.userId,
+    createdAt: r.createdAt,
+    isMe: r.userId === userId,
+    user: {
+      id: r.user?.id || r.userId,
+      name: r.user?.name || 'User',
+      avatar: r.user?.avatar || null
+    }
+  }));
+
+  return {
+    messageId,
+    conversationId: resolvedConversationId,
+    totalCount,
+    summary,
+    reactions: reactionList
   };
 };
 

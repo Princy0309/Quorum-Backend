@@ -2,7 +2,7 @@ import { Queue, Worker, Job } from 'bullmq';
 import { Redis as IORedis } from 'ioredis';
 import { OrgInviteEmailJobData } from '../types/organization.js';
 
-import { sendOTPEmail, sendOrgInviteEmail, sendMeetingInviteEmail, sendScopedMeetingInviteEmail } from '../services/emailService.js';
+import { sendOTPEmail, sendOrgInviteEmail, sendMeetingInviteEmail, sendScopedMeetingInviteEmail, sendProjectInviteEmail } from '../services/emailService.js';
 
 export const queueRedisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
   maxRetriesPerRequest: null,
@@ -95,6 +95,31 @@ export const addScopedMeetingInviteEmailToQueue = async (data: {
   );
 };
 
+export const addProjectInviteEmailToQueue = async (data: {
+  email: string;
+  inviterName: string;
+  projectName: string;
+  orgName: string;
+  role: string;
+  inviteLink: string;
+  expiresInDays?: number;
+  companyName?: string;
+}) => {
+  return await emailQueue.add(
+    'sendProjectInviteEmail',
+    data,
+    {
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 2000,
+      },
+      removeOnComplete: true,
+      removeOnFail: 100,
+    }
+  );
+};
+
 
 
 export const emailWorker = new Worker(
@@ -123,6 +148,14 @@ export const emailWorker = new Worker(
       console.log(`[EmailWorker] Processing job #${job.id}: Sending scoped meeting invite to ${email}`);
       await sendScopedMeetingInviteEmail(email, inviterName, meetingTitle, scopeName, scopeType, formattedDate, meetingLink);
       console.log(`[EmailWorker] Job #${job.id} completed: Scoped meeting invite sent to ${email}`);
+      return;
+    }
+
+    if (job.name === 'sendProjectInviteEmail') {
+      const { email, inviterName, projectName, orgName, role, inviteLink, expiresInDays, companyName } = job.data;
+      console.log(`[EmailWorker] Processing job #${job.id}: Sending project invite to ${email}`);
+      await sendProjectInviteEmail(email, inviterName, projectName, orgName, role, inviteLink, expiresInDays, companyName);
+      console.log(`[EmailWorker] Job #${job.id} completed: Project invite sent to ${email}`);
       return;
     }
 

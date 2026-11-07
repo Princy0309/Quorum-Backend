@@ -12,9 +12,17 @@ import {
   getUserUpcomingMeetings,
 } from '../services/meetingService.js';
 import {
+  createMeetingPoll,
+  voteMeetingPoll,
+  closeMeetingPoll,
+  getMeetingPolls,
+} from '../services/meetingPollService.js';
+import {
   createScopedMeetingSchema,
   meetingCodeParamSchema,
   uuidParamSchema,
+  createMeetingPollSchema,
+  voteMeetingPollSchema,
 } from '../validators/meetingValidators.js';
 
 
@@ -178,6 +186,92 @@ export const getUserUpcomingMeetingsController = asyncHandler(
     return res.status(200).json({
       success: true,
       data: meetings,
+    });
+  }
+);
+
+export const createMeetingPollController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id) {
+      return next(new ApiError(401, 'Unauthorized, login required'));
+    }
+
+    const parsed = createMeetingPollSchema.safeParse(req.body);
+    if (!parsed.success) {
+      const errorMessage = parsed.error.issues.map((e) => e.message).join(', ');
+      return next(new ApiError(400, errorMessage));
+    }
+
+    const code = Array.isArray(req.params.code) ? req.params.code[0] : req.params.code;
+    const poll = await createMeetingPoll(req.user.id, code, parsed.data);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Poll created successfully',
+      data: poll,
+    });
+  }
+);
+
+export const voteMeetingPollController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id) {
+      return next(new ApiError(401, 'Unauthorized, login required'));
+    }
+
+    const parsed = voteMeetingPollSchema.safeParse(req.body);
+    if (!parsed.success) {
+      const errorMessage = parsed.error.issues.map((e) => e.message).join(', ');
+      return next(new ApiError(400, errorMessage));
+    }
+
+    const code = Array.isArray(req.params.code) ? req.params.code[0] : req.params.code;
+    const pollId = Array.isArray(req.params.pollId) ? req.params.pollId[0] : req.params.pollId;
+    const poll = await voteMeetingPoll(
+      req.user.id,
+      code,
+      pollId,
+      parsed.data.optionIds
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Vote recorded successfully',
+      data: poll,
+    });
+  }
+);
+
+export const closeMeetingPollController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id) {
+      return next(new ApiError(401, 'Unauthorized, login required'));
+    }
+
+    const code = Array.isArray(req.params.code) ? req.params.code[0] : req.params.code;
+    const pollId = Array.isArray(req.params.pollId) ? req.params.pollId[0] : req.params.pollId;
+    const poll = await closeMeetingPoll(req.user.id, code, pollId);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Poll closed successfully',
+      data: poll,
+    });
+  }
+);
+
+export const getMeetingPollsController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id) {
+      return next(new ApiError(401, 'Unauthorized, login required'));
+    }
+
+    const code = Array.isArray(req.params.code) ? req.params.code[0] : req.params.code;
+    const polls = await getMeetingPolls(req.user.id, code);
+
+    return res.status(200).json({
+      success: true,
+      data: polls,
     });
   }
 );

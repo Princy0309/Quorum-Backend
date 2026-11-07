@@ -56,6 +56,16 @@ model User {
   linkedGithubRepos        GithubRepoLink[]          @relation("GithubRepoLinker")
   messageReactions         MessageReaction[]
   pollVotes                PollVote[]
+  createdProjects          Project[]                 @relation("ProjectCreator")
+  projectMemberships       ProjectMember[]
+  projectInvitesSent       ProjectInvite[]           @relation("ProjectInviter")
+  assignedProjectTasks     ProjectTask[]             @relation("ProjectTaskAssignee")
+  createdProjectTasks      ProjectTask[]             @relation("ProjectTaskCreator")
+  uploadedProjectResources ProjectResource[]         @relation("ProjectResourceUploader")
+  createdMeetingPolls      MeetingPoll[]             @relation("MeetingPollCreator")
+  meetingPollVotes         MeetingPollVote[]         @relation("MeetingPollVoter")
+  createdDocuments         Document[]                @relation("DocumentCreator")
+  documentCollaborations   DocumentCollaborator[]    @relation("DocumentCollaboratorUser")
 }
 
 model RefreshToken {

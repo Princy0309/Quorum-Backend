@@ -8,6 +8,10 @@ import {
   getOrganizationMeetingsController,
   getTeamMeetingsController,
   getUserUpcomingMeetingsController,
+  getMeetingPollsController,
+  createMeetingPollController,
+  voteMeetingPollController,
+  closeMeetingPollController,
 } from '../controllers/meetingController.js';
 import {
   getMeetingWhiteboardsController,
@@ -33,5 +37,9 @@ router.post(
   authMiddleware,
   openWhiteboardInMeetingController
 );
+router.get('/:code/polls', authMiddleware, getMeetingPollsController);
+router.post('/:code/polls', authMiddleware, createMeetingPollController);
+router.post('/:code/polls/:pollId/vote', authMiddleware, voteMeetingPollController);
+router.patch('/:code/polls/:pollId/close', authMiddleware, closeMeetingPollController);
 
 export default router;

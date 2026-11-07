@@ -17,6 +17,7 @@ export const CHAT_EVENTS = {
   MESSAGE_DELETED: 'message:deleted',
   MESSAGE_REACT: 'message:react',
   MESSAGE_REACTION_UPDATED: 'message:reaction_updated',
+  MESSAGE_GET_REACTIONS: 'message:get-reactions',
   MESSAGE_FORWARD: 'message:forward',
   MESSAGE_FORWARDED: 'message:forwarded',
   POLL_VOTE: 'poll:vote',
@@ -60,6 +61,20 @@ export const OFFICE_EVENTS = {
   STATE_UPDATED: 'office:state-updated',
   MEETING_STARTED: 'office:meeting-started',
   MEETING_ENDED: 'office:meeting-ended',
-
 } as const;
 
+export const DOCUMENT_EVENTS = {
+  DOCUMENT_JOIN: 'document:join',
+  DOCUMENT_LEAVE: 'document:leave',
+  DOCUMENT_USER_JOINED: 'document:user_joined',
+  DOCUMENT_USER_LEFT: 'document:user_left',
+  DOCUMENT_USERS_LIST: 'document:users_list',
+  DOCUMENT_UPDATE: 'document:update',
+  DOCUMENT_UPDATED: 'document:updated',
+  DOCUMENT_CURSOR: 'document:cursor',
+  DOCUMENT_CURSOR_MOVED: 'document:cursor_moved',
+  DOCUMENT_SAVED: 'document:saved',
+  WHITEBOARD_EMBEDDED: 'document:whiteboard_embedded',
+  MEETING_DOCUMENT_OPENED: 'meeting:document_opened',
+  MEETING_DOCUMENT_CLOSED: 'meeting:document_closed'
+} as const;

@@ -1176,6 +1176,128 @@ export const swaggerDocument = {
         }
       }
     },
+    "/api/conversations/{id}/messages/{messageId}/reactions": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Toggle reaction on message",
+        "description": "Toggles an emoji reaction on a message. If the user already reacted with this emoji, it is removed; otherwise, it is added. Broadcasts message:reaction_updated event.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Conversation ID or recipient user ID"
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Message ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "emoji"
+                ],
+                "properties": {
+                  "emoji": {
+                    "type": "string",
+                    "example": "👍"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reaction toggled successfully"
+          },
+          "400": {
+            "description": "Bad Request - invalid emoji or message is deleted"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Conversation or message not found"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Get reaction details and users breakdown for message (WhatsApp style)",
+        "description": "Retrieves reaction summaries grouped by emoji with counts, requesting user reaction state, and user details (id, name, avatar) of who gave what reaction. Supports optional ?emoji filter.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Conversation ID or recipient user ID"
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Message ID"
+          },
+          {
+            "name": "emoji",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter reactions by specific emoji (e.g. 👍 or ❤️)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reaction details fetched successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Conversation or message not found"
+          }
+        }
+      }
+    },
     "/api/conversations/{id}/search": {
       "get": {
         "tags": [
@@ -3800,6 +3922,239 @@ export const swaggerDocument = {
           },
           "403": {
             "description": "Only host can end meeting"
+          }
+        }
+      }
+    },
+    "/api/meetings/{code}/polls": {
+      "get": {
+        "tags": [
+          "Meetings & Video Calls"
+        ],
+        "summary": "Get live meeting polls",
+        "description": "Retrieves all active and closed polls in the meeting room with real-time vote tallies and option voters.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting code"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meeting polls fetched successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Meeting not found"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Meetings & Video Calls"
+        ],
+        "summary": "Create live meeting poll",
+        "description": "Creates and broadcasts a new live poll in an active video meeting room. Broadcasts meeting:poll-created event.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting code"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "question",
+                  "options"
+                ],
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "example": "Should we extend the sprint deadline?"
+                  },
+                  "options": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "Yes, extend",
+                      "No, keep deadline"
+                    ]
+                  },
+                  "allowMultipleAnswers": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Meeting poll created successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Meeting not found"
+          }
+        }
+      }
+    },
+    "/api/meetings/{code}/polls/{pollId}/vote": {
+      "post": {
+        "tags": [
+          "Meetings & Video Calls"
+        ],
+        "summary": "Vote on live meeting poll",
+        "description": "Casts or toggles a vote on a meeting poll. Broadcasts meeting:poll-updated event with updated tallies to all participants in the meeting room.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting code"
+          },
+          {
+            "name": "pollId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting poll ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "optionIds"
+                ],
+                "properties": {
+                  "optionIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "opt-uuid-1"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Vote recorded successfully"
+          },
+          "400": {
+            "description": "Poll is closed or invalid options"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Meeting or poll not found"
+          }
+        }
+      }
+    },
+    "/api/meetings/{code}/polls/{pollId}/close": {
+      "patch": {
+        "tags": [
+          "Meetings & Video Calls"
+        ],
+        "summary": "Close live meeting poll",
+        "description": "Closes an active meeting poll to prevent further voting. Broadcasts meeting:poll-closed event. Only the meeting host or poll creator can close the poll.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting code"
+          },
+          {
+            "name": "pollId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Meeting poll ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meeting poll closed successfully"
+          },
+          "403": {
+            "description": "Only meeting host or poll creator can close the poll"
+          },
+          "404": {
+            "description": "Meeting or poll not found"
           }
         }
       }
@@ -7513,9 +7868,1029 @@ export const swaggerDocument = {
           }
         }
       }
+    },
+    "/api/projects": {
+      "get": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Get user projects",
+        "description": "Retrieves all projects where the authenticated user is an internal member or external freelancer.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of user projects"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/projects/organization/{organizationId}": {
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Create a new project",
+        "description": "Creates a new project scoped to an organization with a dedicated group conversation channel.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Mobile App Redesign"
+                  },
+                  "description": {
+                    "type": "string",
+                    "example": "Cross-company collaboration project for mobile redesign"
+                  },
+                  "budget": {
+                    "type": "number",
+                    "example": 5000
+                  },
+                  "dueDate": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Project created successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Forbidden - requires ORG_ADMIN or TEAM_HEAD"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "List organization projects",
+        "description": "Returns all projects under an organization.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization projects retrieved"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}": {
+      "get": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Get project details",
+        "description": "Retrieves project metadata, members, and task counts.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project details"
+          },
+          "403": {
+            "description": "Forbidden - not a member of project"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Update project details",
+        "description": "Updates project name, description, budget, or status. (Project Manager / Org Admin only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project updated successfully"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Delete project",
+        "description": "Deletes project and cascades members and tasks. (Project Manager / Org Admin only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project deleted successfully"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/invites": {
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Invite collaborator to project",
+        "description": "Invites an external freelancer, client, or internal member with custom role and hourly rate.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "freelancer@example.com"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "PROJECT_MANAGER",
+                      "INTERNAL_MEMBER",
+                      "FREELANCER",
+                      "CLIENT"
+                    ],
+                    "default": "FREELANCER"
+                  },
+                  "hourlyRate": {
+                    "type": "number",
+                    "example": 50
+                  },
+                  "companyName": {
+                    "type": "string",
+                    "example": "Acme Freelance Studio"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Invite created successfully"
+          }
+        }
+      }
+    },
+    "/api/projects/accept-invite": {
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Accept project invite",
+        "description": "Validates invite token and adds the user as a project member and conversation participant.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Invite accepted and member enrolled"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/tasks": {
+      "get": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "List project tasks",
+        "description": "Retrieves all tasks in project with assignee and deliverable metadata.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "TODO",
+                "IN_PROGRESS",
+                "IN_REVIEW",
+                "COMPLETED",
+                "CANCELLED"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of tasks"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Create project task",
+        "description": "Assigns a new task to an internal member or external freelancer.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Implement Authentication UI"
+                  },
+                  "description": {
+                    "type": "string",
+                    "example": "Deliverable should match Figma specs"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "LOW",
+                      "MEDIUM",
+                      "HIGH",
+                      "URGENT"
+                    ],
+                    "default": "MEDIUM"
+                  },
+                  "assigneeId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "dueDate": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Task created successfully"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/tasks/{taskId}/deliverable": {
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Submit task deliverable",
+        "description": "Freelancer submits S3 deliverable file URL and notes for review, advancing task to IN_REVIEW.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "deliverableUrl"
+                ],
+                "properties": {
+                  "deliverableUrl": {
+                    "type": "string",
+                    "example": "https://s3.amazonaws.com/quorum/deliverable.zip"
+                  },
+                  "deliverableNote": {
+                    "type": "string",
+                    "example": "Finished Figma designs with assets export."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deliverable submitted for review"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/tasks/{taskId}/review": {
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Approve or reject deliverable",
+        "description": "Project Manager approves deliverable (completes task) or requests changes with feedback.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "approved"
+                ],
+                "properties": {
+                  "approved": {
+                    "type": "boolean",
+                    "example": true
+                  },
+                  "feedback": {
+                    "type": "string",
+                    "example": "Great work! Approved."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Review processed"
+          }
+        }
+      }
+    },
+    "/api/documents": {
+      "post": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Create collaborative document",
+        "description": "Creates a new document scoped to a personal user, team, organization, project, or meeting.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Quarterly Strategy & Brainstorming"
+                  },
+                  "content": {
+                    "type": "object"
+                  },
+                  "scopeType": {
+                    "type": "string",
+                    "enum": [
+                      "PERSONAL",
+                      "TEAM",
+                      "ORGANIZATION",
+                      "PROJECT",
+                      "MEETING"
+                    ],
+                    "default": "PERSONAL"
+                  },
+                  "organizationId": {
+                    "type": "string"
+                  },
+                  "teamId": {
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": "string"
+                  },
+                  "originMeetingId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Document created successfully"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "List documents",
+        "description": "Lists documents accessible to the authenticated user.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "meetingId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of accessible documents"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}": {
+      "get": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Get document details",
+        "description": "Retrieves document content, collaborators, linked meetings, and embedded whiteboards.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document details"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Update document",
+        "description": "Updates document title, content, or archive status.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "object"
+                  },
+                  "isArchived": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Delete document",
+        "description": "Deletes a document (owner/admin only).",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document deleted"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/collaborators": {
+      "post": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Add collaborator",
+        "description": "Shares document with a user with READ or WRITE permissions.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userId",
+                  "permission"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  },
+                  "permission": {
+                    "type": "string",
+                    "enum": [
+                      "READ",
+                      "WRITE"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Collaborator added"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/collaborators/{userId}": {
+      "delete": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Remove collaborator",
+        "description": "Removes a collaborator from the document.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Collaborator removed"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/meeting": {
+      "post": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Open or link document in video call meeting",
+        "description": "Links document to an active meeting for live split-screen note taking and broadcasts to call participants.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "meetingCodeOrId"
+                ],
+                "properties": {
+                  "meetingCodeOrId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document linked to meeting"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/whiteboards": {
+      "post": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Embed whiteboard inside document",
+        "description": "Embeds an interactive or synced whiteboard viewport inside the document canvas.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "whiteboardId"
+                ],
+                "properties": {
+                  "whiteboardId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "viewport": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Whiteboard embedded"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/ai": {
+      "post": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "In-document AI copilot",
+        "description": "Runs Gemini AI in-document actions: summarize, extract action items, rewrite, expand, grammar fix, or custom instruction.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "action"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "summarize",
+                      "action_items",
+                      "rewrite",
+                      "expand",
+                      "fix_grammar",
+                      "custom"
+                    ]
+                  },
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "selectedText": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "AI completion generated"
+          }
+        }
+      }
     }
   },
   "tags": [
+    {
+      "name": "Collaborative Documents",
+      "description": "Live collaborative rich-text docs with whiteboard embeds, meeting notes, and AI copilot."
+    },
+    {
+      "name": "Projects & Freelancer Collaboration",
+      "description": "Cross-organization and freelancer collaboration workspace with task assignment, deliverable review, and sandboxed access."
+    },
     {
       "name": "System & Health",
       "description": "System health checks, database status, Redis readiness, and CSRF token endpoints."

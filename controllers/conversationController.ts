@@ -13,6 +13,7 @@ import {
   editMessage,
   deleteMessage,
   toggleMessageReaction,
+  getMessageReactions,
   forwardMessages,
   saveMessage,
   votePoll
@@ -445,6 +446,39 @@ export const toggleMessageReactionController = async (req: Request, res: Respons
     res.status(200).json({
       success: true,
       message: 'Reaction updated successfully',
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getMessageReactionsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const rawMsgId = req.params.messageId;
+    const messageId = Array.isArray(rawMsgId) ? rawMsgId[0] : rawMsgId;
+    if (!messageId) {
+      throw new ApiError(400, 'messageId is required');
+    }
+
+    const rawEmoji = req.query.emoji;
+    const emoji = typeof rawEmoji === 'string' && rawEmoji.trim() ? rawEmoji.trim() : undefined;
+
+    const result = await getMessageReactions(userId, conversationId, messageId, emoji);
+
+    res.status(200).json({
+      success: true,
       data: result
     });
   } catch (err) {
