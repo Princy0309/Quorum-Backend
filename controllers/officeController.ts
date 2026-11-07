@@ -27,6 +27,7 @@ const knockSchema = z.object({
 const changeZoneSchema = z.object({
   zoneId: z.enum(['WAR_ROOM', 'OPEN_WORKSPACE', 'COFFEE_LOUNGE', 'FOCUS_POD']),
   deskId: z.string().optional().nullable(),
+  durationMinutes : z.number().int().min(5).max(480).optional().nullable(),
 });
 
 const startMeetingSchema = z.object({
@@ -175,7 +176,8 @@ export const changeOfficeZoneController = asyncHandler(async (req: Request, res:
     teamId,
     userId,
     parsed.data.zoneId as OfficeZoneId,
-    parsed.data.deskId
+    parsed.data.deskId,
+    parsed.data.durationMinutes
   );
 
   try {

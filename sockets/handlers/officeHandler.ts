@@ -61,7 +61,7 @@ export function registerOfficeHandler(io: Server, socket: Socket) {
   socket.on(
     OFFICE_EVENTS.CHANGE_ZONE,
     async (
-      data: { teamId: string; newZoneId: OfficeZoneId; targetDeskId?: string },
+      data: { teamId: string; newZoneId: OfficeZoneId; targetDeskId?: string; durationMinutes?: number },
       ack?: (res: any) => void
     ) => {
       const userId = socket.data.user?.id;
@@ -69,13 +69,13 @@ export function registerOfficeHandler(io: Server, socket: Socket) {
         return ack?.({ success: false, message: 'Unauthorized' });
       }
 
-      const { teamId, newZoneId, targetDeskId } = data || {};
+      const { teamId, newZoneId, targetDeskId, durationMinutes } = data || {};
       if (!teamId || !newZoneId) {
         return ack?.({ success: false, message: 'teamId and newZoneId are required' });
       }
 
       try {
-        const changeEvent = await changeOfficeZone(teamId, userId, newZoneId, targetDeskId);
+        const changeEvent = await changeOfficeZone(teamId, userId, newZoneId, targetDeskId, durationMinutes);
 
         // Broadcast to everyone currently viewing the floor
         const roomName = `office:team:${teamId}`;
