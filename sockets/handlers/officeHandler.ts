@@ -32,6 +32,7 @@ export function registerOfficeHandler(io: Server, socket: Socket) {
       try {
         const roomName = `office:team:${teamId}`;
         socket.join(roomName);
+        socket.data.officeTeamId = teamId;
 
         const result = await joinOffice(teamId, {
           id: userId,
@@ -110,7 +111,7 @@ export function registerOfficeHandler(io: Server, socket: Socket) {
       }
 
       try {
-        
+
         const knockedEvent = await knockOnDesk(
           { teamId, targetUserId, message },
           {
@@ -144,6 +145,7 @@ export function registerOfficeHandler(io: Server, socket: Socket) {
       try {
         const roomName = `office:team:${teamId}`;
         socket.leave(roomName);
+        socket.data.officeTeamId = null;
         await leaveOffice(teamId, userId);
 
         socket.to(roomName).emit(OFFICE_EVENTS.USER_LEFT, {
@@ -158,4 +160,27 @@ export function registerOfficeHandler(io: Server, socket: Socket) {
       }
     }
   );
+
+  // 5. Auto-vacate desk when tab is closed or connection drops
+  socket.on('disconnect', async () => {
+    const teamId = socket.data.officeTeamId;
+    const userId = socket.data.user?.id;
+
+    if (teamId && userId) {
+      try {
+        await leaveOffice(teamId, userId);
+        socket.to(`office:team:${teamId}`).emit(OFFICE_EVENTS.USER_LEFT, {
+          teamId,
+          userId,
+        });
+        logger.info(`[OfficeSocket] Auto-vacated desk for disconnected user ${userId} in team ${teamId}`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn(`[OfficeSocket] Failed to auto-vacate on disconnect: ${message}`);
+      }
+    }
+  });
+
 }
+
+
