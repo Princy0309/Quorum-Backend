@@ -22,6 +22,9 @@ import {
   addGroupParticipantsController,
   removeGroupParticipantController,
   updateGroupConversationController,
+  getGroupProfilePictureController,
+  updateGroupProfilePictureController,
+  deleteGroupProfilePictureController,
   leaveGroupConversationController,
   getConversationDetailsController,
   makeGroupAdminController,
@@ -36,6 +39,7 @@ import {
   votePollController
 } from '../controllers/conversationController.js';
 import { createOrGetDMController } from '../controllers/dmController.js';
+import { uploadMiddleware } from '../controllers/uploadController.js';
 
 const router = Router();
 
@@ -57,8 +61,23 @@ router.patch('/:id/messages/:messageId', authMiddleware, validate(editMessageSch
 router.delete('/:id/messages/:messageId', authMiddleware, validate(deleteMessageSchema), deleteMessageController);
 router.post('/:id/messages/:messageId/reactions', authMiddleware, validate(toggleReactionSchema), toggleMessageReactionController);
 router.get('/:id/messages/:messageId/reactions', authMiddleware, getMessageReactionsController);
-router.get('/:id/search', authMiddleware, searchConversationMessagesController);
-router.patch('/:id', authMiddleware, validate(updateGroupSchema), updateGroupConversationController);
+router.patch('/:id', authMiddleware, uploadMiddleware, validate(updateGroupSchema), updateGroupConversationController);
+
+router.get('/:id/profile-picture', authMiddleware, getGroupProfilePictureController);
+router.post('/:id/profile-picture', authMiddleware, uploadMiddleware, updateGroupProfilePictureController);
+router.put('/:id/profile-picture', authMiddleware, uploadMiddleware, updateGroupProfilePictureController);
+router.delete('/:id/profile-picture', authMiddleware, deleteGroupProfilePictureController);
+
+router.get('/:id/avatar', authMiddleware, getGroupProfilePictureController);
+router.post('/:id/avatar', authMiddleware, uploadMiddleware, updateGroupProfilePictureController);
+router.put('/:id/avatar', authMiddleware, uploadMiddleware, updateGroupProfilePictureController);
+router.delete('/:id/avatar', authMiddleware, deleteGroupProfilePictureController);
+
+router.get('/:id/image', authMiddleware, getGroupProfilePictureController);
+router.post('/:id/image', authMiddleware, uploadMiddleware, updateGroupProfilePictureController);
+router.put('/:id/image', authMiddleware, uploadMiddleware, updateGroupProfilePictureController);
+router.delete('/:id/image', authMiddleware, deleteGroupProfilePictureController);
+
 router.post('/:id/participants', authMiddleware, validate(addParticipantsSchema), addGroupParticipantsController);
 router.post('/:id/members', authMiddleware, validate(addParticipantsSchema), addGroupParticipantsController);
 router.delete('/:id/leave', authMiddleware, leaveGroupConversationController);

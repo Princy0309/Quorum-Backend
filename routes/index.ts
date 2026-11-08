@@ -84,8 +84,10 @@ router.use('/dm', dmRoutes);
 router.use('/v1/dm', dmRoutes);
 router.use('/conversations', conversationRoutes);
 router.use('/chat/conversations', conversationRoutes);
+router.use('/groups', conversationRoutes);
 router.use('/v1/conversations', conversationRoutes);
 router.use('/v1/chat/conversations', conversationRoutes);
+router.use('/v1/groups', conversationRoutes);
 
 router.use('/uploads', uploadRoutes);
 router.use('/v1/uploads', uploadRoutes);

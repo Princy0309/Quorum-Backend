@@ -3,6 +3,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { CHAT_EVENTS } from '../utils/constants.js';
 import logger from '../utils/logger.js';
 import { getIO } from '../sockets/socketServer.js';
+import { deleteS3Object } from '../config/s3.js';
 
 export const safeEjectUserFromRoom = (conversationId: string, targetUserId: string, removedByUserId: string) => {
   try {
@@ -1570,7 +1571,7 @@ export const removeGroupParticipant = async (
 export const updateGroupConversation = async (
   userId: string,
   conversationId: string,
-  updates: { name?: string; avatar?: string | null }
+  updates: { name?: string; avatar?: string | null; profilePicture?: string | null }
 ) => {
   const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT id FROM "Conversation" WHERE id = ${conversationId} FOR UPDATE`;
@@ -1595,7 +1596,7 @@ export const updateGroupConversation = async (
       throw new ApiError(403, 'You are not a member of this conversation');
     }
 
-    if (userParticipant.role !== 'admin') {
+    if (userParticipant.role !== 'admin' && conversation.ownerId !== userId) {
       throw new ApiError(403, 'Only group admins can update group details');
     }
 
@@ -1603,8 +1604,12 @@ export const updateGroupConversation = async (
     if (updates.name !== undefined) {
       dataToUpdate.name = updates.name.trim();
     }
-    if (updates.avatar !== undefined) {
-      dataToUpdate.avatar = updates.avatar;
+    const resolvedAvatar = updates.avatar !== undefined ? updates.avatar : updates.profilePicture;
+    if (resolvedAvatar !== undefined) {
+      if (conversation.avatar && conversation.avatar !== resolvedAvatar) {
+        await deleteS3Object(conversation.avatar).catch(() => {});
+      }
+      dataToUpdate.avatar = resolvedAvatar;
     }
     dataToUpdate.updatedAt = new Date();
 
@@ -1637,6 +1642,75 @@ export const updateGroupConversation = async (
   notifyConversationUpdate(allParticipantIds, updated);
 
   return updated;
+};
+
+export const getGroupProfilePicture = async (userId: string, conversationId: string) => {
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    include: {
+      participants: true
+    }
+  });
+
+  if (!conversation) {
+    throw new ApiError(404, 'Conversation not found');
+  }
+
+  const isMember = conversation.participants.some((p: any) => p.userId === userId);
+  if (!isMember) {
+    throw new ApiError(403, 'You are not a member of this conversation');
+  }
+
+  return {
+    conversationId: conversation.id,
+    avatar: conversation.avatar || null,
+    profilePicture: conversation.avatar || null,
+  };
+};
+
+export const updateGroupProfilePicture = async (
+  userId: string,
+  conversationId: string,
+  input: { avatar?: string | null; profilePicture?: string | null; imageUrl?: string | null },
+  file?: { buffer: Buffer; originalname: string; mimetype: string }
+) => {
+  let finalAvatar: string | null = input.avatar !== undefined
+    ? input.avatar
+    : (input.profilePicture !== undefined
+      ? input.profilePicture
+      : (input.imageUrl !== undefined ? input.imageUrl : null));
+
+  if (file && file.buffer && file.buffer.length > 0) {
+    const { uploadBufferToS3 } = await import('./uploadService.js');
+    const uploadRes = await uploadBufferToS3(file.buffer, file.originalname, 'groups', file.mimetype);
+    finalAvatar = uploadRes.publicUrl;
+  }
+
+  const updated = await updateGroupConversation(userId, conversationId, {
+    avatar: finalAvatar,
+    profilePicture: finalAvatar
+  });
+
+  return {
+    conversationId: updated.id,
+    name: updated.name,
+    avatar: updated.avatar || null,
+    profilePicture: updated.avatar || null,
+  };
+};
+
+export const deleteGroupProfilePicture = async (userId: string, conversationId: string) => {
+  const updated = await updateGroupConversation(userId, conversationId, {
+    avatar: null,
+    profilePicture: null
+  });
+
+  return {
+    conversationId: updated.id,
+    name: updated.name,
+    avatar: null,
+    profilePicture: null,
+  };
 };
 
 export const makeGroupAdmin = async (
