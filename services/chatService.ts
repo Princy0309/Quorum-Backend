@@ -976,6 +976,13 @@ export const getUserConversations = async (userId: string, query?: string) => {
       where: whereClause,
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       include: {
+        _count: {
+          select: {
+            messages: {
+              where: { isPinned: true, isDeleted: false }
+            }
+          }
+        },
         participants: {
           include: {
             user: {
@@ -1086,8 +1093,10 @@ export const getUserConversations = async (userId: string, query?: string) => {
   return conversations.map((conv) => ({
     ...conv,
     lastMessage: conv.messages[0] || null,
-    unreadCount: unreadMap.get(conv.id) || 0
+    unreadCount: unreadMap.get(conv.id) || 0,
+    pinnedCount: conv._count?.messages || 0
   }));
+
 };
 
 export const markMessageAsRead = async (
@@ -1162,13 +1171,13 @@ export const markMessageAsRead = async (
     const currentParticipant = isUpdated
       ? { lastReadSeq: targetMessage.seq, lastReadMessageId: messageId }
       : (await tx.conversationParticipant.findUnique({
-          where: {
-            conversationId_userId: {
-              conversationId: targetConversationId,
-              userId
-            }
+        where: {
+          conversationId_userId: {
+            conversationId: targetConversationId,
+            userId
           }
-        })) || participant;
+        }
+      })) || participant;
 
     const participants = await tx.conversationParticipant.findMany({
       where: { conversationId: targetConversationId },
@@ -1941,6 +1950,7 @@ export const deleteMessage = async (
       where: { id: messageId },
       data: {
         isDeleted: true,
+        isPinned: false,
         deletedAt: new Date(),
         content: 'This message was deleted',
         fileUrl: null,
@@ -2222,12 +2232,12 @@ export const getMessageReactions = async (
 
   const allReactionsForSummary = emojiFilter
     ? await prisma.messageReaction.findMany({
-        where: { messageId },
-        select: {
-          emoji: true,
-          userId: true
-        }
-      })
+      where: { messageId },
+      select: {
+        emoji: true,
+        userId: true
+      }
+    })
     : allReactions;
 
   const summary = formatReactions(allReactionsForSummary, userId);
