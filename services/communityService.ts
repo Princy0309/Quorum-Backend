@@ -4,6 +4,8 @@ import env from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
 import { queueNotification } from '../queues/notificationQueue.js';
 import logger from '../utils/logger.js';
+import { uploadBufferToS3 } from './uploadService.js';
+import { deleteS3Object } from '../config/s3.js';
 
 export const CommunityRole = {
   OWNER: 'OWNER',
@@ -15,12 +17,28 @@ export type CommunityRole = (typeof CommunityRole)[keyof typeof CommunityRole];
 export interface CreateCommunityInput {
   name: string;
   description?: string;
+  avatar?: string | null;
+  profilePicture?: string | null;
 }
 
 export interface UpdateCommunityInput {
   name?: string;
   description?: string;
+  avatar?: string | null;
+  profilePicture?: string | null;
 }
+
+let communitySchemaInitialized = false;
+export const ensureCommunitySchema = async () => {
+  if (communitySchemaInitialized) return;
+  try {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Community" ADD COLUMN IF NOT EXISTS "avatar" TEXT;`);
+    communitySchemaInitialized = true;
+  } catch (err) {
+    logger.error('Failed to ensure community schema columns', err);
+  }
+};
+
 
 export const createCommunity = async (userId: string, data: CreateCommunityInput) => {
   const trimmedName = data.name.trim();
@@ -33,10 +51,13 @@ export const createCommunity = async (userId: string, data: CreateCommunityInput
   }
 
   return await prisma.$transaction(async (tx) => {
+    await ensureCommunitySchema();
+    const resolvedAvatar = data.avatar !== undefined ? data.avatar : data.profilePicture;
     const community = await tx.community.create({
       data: {
         name: data.name.trim(),
         description: data.description?.trim() || null,
+        avatar: resolvedAvatar?.trim() || null,
         ownerId: userId,
         members: {
           create: {
@@ -73,6 +94,8 @@ export const createCommunity = async (userId: string, data: CreateCommunityInput
       id: community.id,
       name: community.name,
       description: community.description,
+      avatar: community.avatar || null,
+      profilePicture: community.avatar || null,
       ownerId: community.ownerId,
       owner: community.owner,
       role: CommunityRole.OWNER,
@@ -114,6 +137,8 @@ export const getUserCommunities = async (userId: string) => {
     id: membership.community.id,
     name: membership.community.name,
     description: membership.community.description,
+    avatar: membership.community.avatar || null,
+    profilePicture: membership.community.avatar || null,
     ownerId: membership.community.ownerId,
     owner: membership.community.owner,
     role: membership.role,
@@ -182,6 +207,8 @@ export const getCommunityDetails = async (userId: string, communityId: string) =
     id: community.id,
     name: community.name,
     description: community.description,
+    avatar: community.avatar || null,
+    profilePicture: community.avatar || null,
     ownerId: community.ownerId,
     owner: community.owner,
     role: membership.role,
@@ -195,21 +222,29 @@ export const getCommunityDetails = async (userId: string, communityId: string) =
 
 export const updateCommunity = async (userId: string, communityId: string, data: UpdateCommunityInput) => {
   return await prisma.$transaction(async (tx) => {
+    await ensureCommunitySchema();
     await tx.$queryRaw`SELECT id FROM "Community" WHERE id = ${communityId} FOR UPDATE`;
 
     const community = await tx.community.findUnique({
-      where: { id: communityId }
+      where: { id: communityId },
+      include: {
+        members: {
+          where: { userId }
+        }
+      }
     });
 
     if (!community) {
       throw new ApiError(404, 'Community not found');
     }
 
-    if (community.ownerId !== userId) {
-      throw new ApiError(403, 'Only the community owner can update community settings');
+    const isOwner = community.ownerId === userId;
+    const isAdmin = community.members.some((m) => m.role === CommunityRole.ADMIN);
+    if (!isOwner && !isAdmin) {
+      throw new ApiError(403, 'Only the community owner or admins can update community settings');
     }
 
-    const updateData: { name?: string; description?: string | null } = {};
+    const updateData: { name?: string; description?: string | null; avatar?: string | null } = {};
     if (data.name !== undefined) {
       const trimmedName = data.name.trim();
       if (trimmedName.length < 2 || trimmedName.length > 100) {
@@ -222,6 +257,14 @@ export const updateCommunity = async (userId: string, communityId: string, data:
         throw new ApiError(400, 'Community description cannot exceed 1000 characters');
       }
       updateData.description = data.description?.trim() || null;
+    }
+
+    const resolvedAvatar = data.avatar !== undefined ? data.avatar : data.profilePicture;
+    if (resolvedAvatar !== undefined) {
+      if (community.avatar && community.avatar !== resolvedAvatar) {
+        await deleteS3Object(community.avatar).catch(() => {});
+      }
+      updateData.avatar = resolvedAvatar?.trim() || null;
     }
 
     const updatedCommunity = await tx.community.update({
@@ -247,6 +290,8 @@ export const updateCommunity = async (userId: string, communityId: string, data:
       id: updatedCommunity.id,
       name: updatedCommunity.name,
       description: updatedCommunity.description,
+      avatar: updatedCommunity.avatar || null,
+      profilePicture: updatedCommunity.avatar || null,
       ownerId: updatedCommunity.ownerId,
       owner: updatedCommunity.owner,
       memberCount: updatedCommunity._count.members,
@@ -255,6 +300,104 @@ export const updateCommunity = async (userId: string, communityId: string, data:
     };
   });
 };
+
+export const getCommunityProfilePicture = async (communityId: string) => {
+  await ensureCommunitySchema();
+  const community = await prisma.community.findUnique({
+    where: { id: communityId },
+    select: {
+      id: true,
+      name: true,
+      avatar: true,
+    }
+  });
+
+  if (!community) {
+    throw new ApiError(404, 'Community not found');
+  }
+
+  return {
+    communityId: community.id,
+    avatar: community.avatar || null,
+    profilePicture: community.avatar || null,
+    logo: community.avatar || null,
+  };
+};
+
+export const updateCommunityProfilePicture = async (
+  userId: string,
+  communityId: string,
+  input: { avatar?: string | null; profilePicture?: string | null; logo?: string | null },
+  file?: { buffer: Buffer; originalname: string; mimetype: string }
+) => {
+  await ensureCommunitySchema();
+
+  const community = await prisma.community.findUnique({
+    where: { id: communityId },
+    include: {
+      members: {
+        where: { userId }
+      }
+    }
+  });
+
+  if (!community) {
+    throw new ApiError(404, 'Community not found');
+  }
+
+  const isOwner = community.ownerId === userId;
+  const isAdmin = community.members.some((m) => m.role === CommunityRole.ADMIN || m.role === CommunityRole.OWNER);
+  if (!isOwner && !isAdmin) {
+    throw new ApiError(403, 'Only community owner or admin can update the profile picture');
+  }
+
+  let finalAvatar: string | null = input.avatar !== undefined
+    ? input.avatar
+    : (input.profilePicture !== undefined
+      ? input.profilePicture
+      : (input.logo !== undefined ? input.logo : community.avatar));
+
+  if (file && file.buffer && file.buffer.length > 0) {
+    const uploadRes = await uploadBufferToS3(file.buffer, file.originalname, 'communities', file.mimetype);
+    finalAvatar = uploadRes.publicUrl;
+  }
+
+  if (community.avatar && community.avatar !== finalAvatar) {
+    await deleteS3Object(community.avatar).catch(() => {});
+  }
+
+  const updatedCommunity = await prisma.community.update({
+    where: { id: communityId },
+    data: { avatar: finalAvatar },
+    include: {
+      owner: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      },
+      _count: {
+        select: {
+          members: true
+        }
+      }
+    }
+  });
+
+  return {
+    communityId: updatedCommunity.id,
+    name: updatedCommunity.name,
+    avatar: updatedCommunity.avatar || null,
+    profilePicture: updatedCommunity.avatar || null,
+    memberCount: updatedCommunity._count.members,
+  };
+};
+
+export const deleteCommunityProfilePicture = async (userId: string, communityId: string) => {
+  return await updateCommunityProfilePicture(userId, communityId, { avatar: null });
+};
+
 
 export const deleteCommunity = async (userId: string, communityId: string) => {
   return await prisma.$transaction(async (tx) => {

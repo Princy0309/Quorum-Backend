@@ -2,15 +2,25 @@ import { z } from 'zod';
 
 export const createCommunitySchema = z.object({
   name: z.string().trim().min(2, 'Community name must be between 2 and 100 characters').max(100, 'Community name must be between 2 and 100 characters'),
-  description: z.string().trim().max(300, 'Community description cannot exceed 300 characters').optional().nullable()
-});
+  description: z.string().trim().max(1000, 'Community description cannot exceed 1000 characters').optional().nullable(),
+  avatar: z.string().trim().optional().nullable(),
+  profilePicture: z.string().trim().optional().nullable(),
+}).passthrough();
 
 export const updateCommunitySchema = z.object({
   name: z.string().trim().min(2, 'Community name must be between 2 and 100 characters').max(100, 'Community name must be between 2 and 100 characters').optional(),
-  description: z.string().trim().max(300, 'Community description cannot exceed 300 characters').optional().nullable()
-}).refine((data) => data.name !== undefined || data.description !== undefined, {
-  message: 'At least one field (name or description) must be provided'
+  description: z.string().trim().max(1000, 'Community description cannot exceed 1000 characters').optional().nullable(),
+  avatar: z.string().trim().optional().nullable(),
+  profilePicture: z.string().trim().optional().nullable(),
+}).passthrough().refine((data) => data.name !== undefined || data.description !== undefined || data.avatar !== undefined || data.profilePicture !== undefined, {
+  message: 'At least one field must be provided'
 });
+
+export const updateCommunityProfilePictureSchema = z.object({
+  avatar: z.string().trim().optional().nullable(),
+  profilePicture: z.string().trim().optional().nullable(),
+  logo: z.string().trim().optional().nullable(),
+}).passthrough();
 
 export const createInviteSchema = z.object({
   expiresInDays: z.coerce.number().int().min(1).max(30).optional().default(7)
