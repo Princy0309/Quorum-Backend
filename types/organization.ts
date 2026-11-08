@@ -13,11 +13,12 @@ export interface CreateOrgInput {
 export interface UpdateOrgInput {
   name?: string;
   description?: string;
-  logo?: string;
+  logo?: string | null;
+  avatar?: string | null;
+  profilePicture?: string | null;
   email?: string;
   industry?: string;
   teamSize?: string;
-
 }
 
 export interface CreateInviteInput {

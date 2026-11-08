@@ -7,6 +7,8 @@ import {queueNotification} from '../queues/notificationQueue.js';
 import logger from "../utils/logger.js";
 import { addOrgInviteEmailToQueue } from '../queues/emailQueue.js';
 import env from '../config/env.js';
+import { uploadBufferToS3 } from './uploadService.js';
+import { deleteS3Object } from '../config/s3.js';
 
 
 
@@ -125,6 +127,8 @@ export const getOrganizationById = async (orgId: string) => {
 
   return {
     ...org,
+    avatar: org.logo,
+    profilePicture: org.logo,
     memberCount: org._count.members,
   };
 };
@@ -148,21 +152,103 @@ export const updateOrganization = async (orgId: string, data: UpdateOrgInput) =>
     }
   }
 
+  const resolvedLogo = data.logo !== undefined ? data.logo : (data.avatar !== undefined ? data.avatar : data.profilePicture);
+
+  if (resolvedLogo !== undefined && existingOrg.logo && existingOrg.logo !== resolvedLogo) {
+    await deleteS3Object(existingOrg.logo).catch(() => {});
+  }
+
   const updatedOrg = await prisma.organization.update({
     where: { id: orgId },
     data: {
       name: data.name !== undefined ? data.name.trim() : undefined,
       description: data.description !== undefined ? data.description.trim() : undefined,
-      logo: data.logo !== undefined ? data.logo : undefined,
+      logo: resolvedLogo !== undefined ? resolvedLogo : undefined,
       email: data.email !== undefined ? data.email?.trim().toLowerCase() || null : undefined,
       industry: data.industry !== undefined ? data.industry?.trim() || null : undefined,
       teamSize: data.teamSize !== undefined ? data.teamSize?.trim() || null : undefined,
-
     },
   });
 
-  return updatedOrg;
+  return {
+    ...updatedOrg,
+    avatar: updatedOrg.logo,
+    profilePicture: updatedOrg.logo,
+  };
 };
+
+export const updateOrganizationProfilePicture = async (
+  userId: string,
+  orgId: string,
+  input: { logo?: string | null; avatar?: string | null; profilePicture?: string | null },
+  file?: { buffer: Buffer; originalname: string; mimetype: string }
+) => {
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    include: {
+      members: {
+        where: { userId }
+      }
+    }
+  });
+
+  if (!org) {
+    throw new ApiError(404, 'Organization not found');
+  }
+
+  const isOwner = org.ownerId === userId;
+  const isAdmin = org.members.some((m) => m.role === OrgRole.ORG_ADMIN);
+  if (!isOwner && !isAdmin) {
+    throw new ApiError(403, 'Only organization admins can update the profile picture');
+  }
+
+  let finalLogo: string | null = input.logo !== undefined
+    ? input.logo
+    : (input.avatar !== undefined
+      ? input.avatar
+      : (input.profilePicture !== undefined ? input.profilePicture : org.logo));
+
+  if (file && file.buffer && file.buffer.length > 0) {
+    const uploadRes = await uploadBufferToS3(file.buffer, file.originalname, 'organizations', file.mimetype);
+    finalLogo = uploadRes.publicUrl;
+  }
+
+  if (org.logo && org.logo !== finalLogo) {
+    await deleteS3Object(org.logo).catch(() => {});
+  }
+
+  const updatedOrg = await prisma.organization.update({
+    where: { id: orgId },
+    data: { logo: finalLogo },
+    include: {
+      owner: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          avatar: true,
+        }
+      },
+      _count: {
+        select: {
+          members: true,
+        }
+      }
+    }
+  });
+
+  return {
+    ...updatedOrg,
+    avatar: updatedOrg.logo,
+    profilePicture: updatedOrg.logo,
+    memberCount: updatedOrg._count.members,
+  };
+};
+
+export const deleteOrganizationProfilePicture = async (userId: string, orgId: string) => {
+  return await updateOrganizationProfilePicture(userId, orgId, { logo: null });
+};
+
 
 export const deleteOrganization = async (orgId: string, userId: string) => {
   const org = await prisma.organization.findUnique({
