@@ -11,7 +11,9 @@ import {
   toggleReactionSchema,
   forwardMessagesSchema,
   createPollSchema,
-  votePollSchema
+  votePollSchema,
+  pinMessageParamsSchema,
+  pinnedListParamsSchema
 } from '../validators/chatValidators.js';
 import {
   getUserConversationsController,
@@ -33,7 +35,10 @@ import {
   getMessageReactionsController,
   forwardMessagesController,
   createPollController,
-  votePollController
+  votePollController,
+  pinMessageController,
+  unpinMessageController,
+  getPinnedMessagesController
 } from '../controllers/conversationController.js';
 import { createOrGetDMController } from '../controllers/dmController.js';
 
@@ -72,6 +77,11 @@ router.post('/:id/remove-admin', authMiddleware, dismissGroupAdminController);
 
 router.delete('/:id/participants/:userId', authMiddleware, removeGroupParticipantController);
 router.delete('/:id/members/:userId', authMiddleware, removeGroupParticipantController);
+
+router.post('/:id/messages/:messageId/pin', authMiddleware, pinMessageController);
+router.delete('/:id/messages/:messageId/pin', authMiddleware, unpinMessageController);
+router.get('/:id/pinned', authMiddleware, getPinnedMessagesController);
+
 
 export default router;
 

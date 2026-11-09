@@ -976,6 +976,13 @@ export const getUserConversations = async (userId: string, query?: string) => {
       where: whereClause,
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       include: {
+        _count: {
+          select: {
+            messages: {
+              where: { isPinned: true, isDeleted: false }
+            }
+          }
+        },
         participants: {
           include: {
             user: {
@@ -1086,8 +1093,10 @@ export const getUserConversations = async (userId: string, query?: string) => {
   return conversations.map((conv) => ({
     ...conv,
     lastMessage: conv.messages[0] || null,
-    unreadCount: unreadMap.get(conv.id) || 0
+    unreadCount: unreadMap.get(conv.id) || 0,
+    pinnedCount: conv._count?.messages || 0
   }));
+
 };
 
 export const markMessageAsRead = async (
@@ -1162,13 +1171,13 @@ export const markMessageAsRead = async (
     const currentParticipant = isUpdated
       ? { lastReadSeq: targetMessage.seq, lastReadMessageId: messageId }
       : (await tx.conversationParticipant.findUnique({
-          where: {
-            conversationId_userId: {
-              conversationId: targetConversationId,
-              userId
-            }
+        where: {
+          conversationId_userId: {
+            conversationId: targetConversationId,
+            userId
           }
-        })) || participant;
+        }
+      })) || participant;
 
     const participants = await tx.conversationParticipant.findMany({
       where: { conversationId: targetConversationId },
@@ -1941,6 +1950,7 @@ export const deleteMessage = async (
       where: { id: messageId },
       data: {
         isDeleted: true,
+        isPinned: false,
         deletedAt: new Date(),
         content: 'This message was deleted',
         fileUrl: null,
@@ -2222,12 +2232,12 @@ export const getMessageReactions = async (
 
   const allReactionsForSummary = emojiFilter
     ? await prisma.messageReaction.findMany({
-        where: { messageId },
-        select: {
-          emoji: true,
-          userId: true
-        }
-      })
+      where: { messageId },
+      select: {
+        emoji: true,
+        userId: true
+      }
+    })
     : allReactions;
 
   const summary = formatReactions(allReactionsForSummary, userId);
@@ -2551,6 +2561,120 @@ export const votePoll = async (
     messageId: poll.message.id,
     pollId: poll.id,
     poll: formattedForRequester
+  };
+};
+
+
+const MAX_PINNED_PER_CONVERSATION = 15;
+
+const assertPinParticipant = async (userId: string, conversationId: string) => {
+  const participant = await prisma.conversationParticipant.findFirst({
+    where: { userId, conversationId },
+    select: { id: true },
+  });
+  if (!participant) {
+    throw new ApiError(403, 'You are not a member of this conversation');
+  }
+};
+
+export const pinMessage = async (userId: string, conversationId: string, messageId: string) => {
+  await assertPinParticipant(userId, conversationId);
+
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: {
+      id: true,
+      conversationId: true,
+      isPinned: true,
+      deletedAt: true,
+    },
+  });
+
+  if (!message) {
+    throw new ApiError(404, 'Message not found');
+  }
+
+  if (message.conversationId !== conversationId) {
+    throw new ApiError(400, 'Message does not belong to this conversation');
+  }
+
+  if (message.deletedAt) {
+    throw new ApiError(400, 'Cannot pin a deleted message');
+  }
+
+  if (message.isPinned) {
+    return { alreadyPinned: true, messageId };
+  }
+
+  const pinnedCount = await prisma.message.count({
+    where: { conversationId, isPinned: true },
+  });
+
+  if (pinnedCount >= MAX_PINNED_PER_CONVERSATION) {
+    throw new ApiError(
+      400,
+      `Maximum ${MAX_PINNED_PER_CONVERSATION} pinned messages reached. Unpin one to pin another.`
+    );
+  }
+
+  const updated = await prisma.message.update({
+    where: { id: messageId },
+    data: { isPinned: true },
+    include: {
+      sender: { select: { id: true, name: true, avatar: true } },
+    },
+  });
+
+  return { pinned: true, message: updated };
+};
+
+export const unpinMessage = async (userId: string, conversationId: string, messageId: string) => {
+  await assertPinParticipant(userId, conversationId);
+
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: { id: true, conversationId: true, isPinned: true },
+  });
+
+  if (!message) {
+    throw new ApiError(404, 'Message not found');
+  }
+
+  if (message.conversationId !== conversationId) {
+    throw new ApiError(400, 'Message does not belong to this conversation');
+  }
+
+  if (!message.isPinned) {
+    return { alreadyUnpinned: true, messageId };
+  }
+
+  await prisma.message.update({
+    where: { id: messageId },
+    data: { isPinned: false },
+  });
+
+  return { unpinned: true, messageId };
+};
+
+export const getPinnedMessages = async (userId: string, conversationId: string) => {
+  await assertPinParticipant(userId, conversationId);
+
+  const messages = await prisma.message.findMany({
+    where: {
+      conversationId,
+      isPinned: true,
+      deletedAt: null,
+    },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      sender: { select: { id: true, name: true, avatar: true } },
+    },
+  });
+
+  return {
+    count: messages.length,
+    limit: MAX_PINNED_PER_CONVERSATION,
+    messages,
   };
 };
 
