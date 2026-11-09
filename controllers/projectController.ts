@@ -79,6 +79,21 @@ export const getUserProjectsController = asyncHandler(
     const userId = req.user?.id;
     if (!userId) throw new ApiError(401, 'Unauthorized');
 
+    const organizationId =
+      getParamString(req.query.organizationId) ||
+      getParamString(req.query.orgId);
+
+    if (organizationId) {
+      const projects = await getOrganizationProjects(userId, organizationId);
+      return res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Organization projects retrieved successfully',
+        data: projects,
+        projects,
+      });
+    }
+
     const projects = await getUserProjects(userId);
     return res.status(200).json({
       success: true,
