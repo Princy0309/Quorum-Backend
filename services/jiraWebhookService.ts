@@ -112,6 +112,29 @@ export async function processJiraWebhook(
     return { error: 'Invalid HMAC signature' };
   }
 
+  if (webhookEvent === 'jira:issue_deleted' && issue?.key) {
+    const cleanKey = issue.key.toUpperCase();
+    const existingTicket = await prisma.jiraTicketLink.findFirst({
+      where: { jiraKey: cleanKey },
+    });
+
+    if (existingTicket) {
+      await prisma.jiraTicketLink.delete({
+        where: { id: existingTicket.id },
+      });
+      logger.info(`Removed Quorum ticket link ${cleanKey} after Jira deletion`);
+    }
+
+    await prisma.jiraWebhookEvent.update({
+      where: { id: loggedEvent.id },
+      data: { processed: true, processedAt: new Date() },
+    });
+
+    return { success: true, eventId, deleted: true };
+  }
+
+
+
   if (issue && issue.key) {
     const cleanKey = issue.key.toUpperCase();
     const newStatus = issue.fields?.status?.name;
