@@ -79,12 +79,98 @@ export const createOrganization = async (userId: string, data: CreateOrgInput) =
   return result;
 };
 
-export const getUserOrganizations = async (userId: string) => {
+export interface SearchOrganizationsOptions {
+  query?: string;
+  scope?: 'my' | 'all' | 'global';
+  limit?: number;
+}
+
+export const searchOrganizations = async (
+  userId: string,
+  options: SearchOrganizationsOptions = {}
+) => {
+  const { query, scope = 'my', limit = 20 } = options;
+  const trimmedQuery = query?.trim();
+  const safeLimit = Math.min(Math.max(1, limit), 50);
+
+  if (scope === 'all' || scope === 'global') {
+    const whereClause: any = trimmedQuery
+      ? {
+          OR: [
+            { name: { contains: trimmedQuery, mode: 'insensitive' } },
+            { slug: { contains: trimmedQuery, mode: 'insensitive' } },
+            { description: { contains: trimmedQuery, mode: 'insensitive' } },
+          ],
+        }
+      : {};
+
+    const organizations = await prisma.organization.findMany({
+      where: whereClause,
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        logo: true,
+        industry: true,
+        teamSize: true,
+        createdAt: true,
+        _count: {
+          select: { members: true },
+        },
+        members: {
+          where: { userId },
+          select: { role: true },
+        },
+      },
+      take: safeLimit,
+      orderBy: { name: 'asc' },
+    });
+
+    return organizations.map((org) => {
+      const myMembership = org.members[0];
+      return {
+        id: org.id,
+        name: org.name,
+        slug: org.slug,
+        description: org.description,
+        logo: org.logo,
+        industry: org.industry,
+        teamSize: org.teamSize,
+        memberCount: org._count.members,
+        createdAt: org.createdAt,
+        isMember: !!myMembership,
+        myRole: myMembership?.role || null,
+        role: myMembership?.role || null,
+      };
+    });
+  }
+
+  const whereClause: any = {
+    userId,
+    ...(trimmedQuery && {
+      organization: {
+        OR: [
+          { name: { contains: trimmedQuery, mode: 'insensitive' } },
+          { slug: { contains: trimmedQuery, mode: 'insensitive' } },
+          { description: { contains: trimmedQuery, mode: 'insensitive' } },
+        ],
+      },
+    }),
+  };
+
   const memberships = await prisma.organizationMember.findMany({
-    where: { userId },
+    where: whereClause,
     include: {
-      organization: true,
+      organization: {
+        include: {
+          _count: {
+            select: { members: true },
+          },
+        },
+      },
     },
+    take: safeLimit,
     orderBy: {
       joinedAt: 'desc',
     },
@@ -96,9 +182,18 @@ export const getUserOrganizations = async (userId: string) => {
     slug: m.organization.slug,
     description: m.organization.description,
     logo: m.organization.logo,
+    industry: m.organization.industry,
+    teamSize: m.organization.teamSize,
+    memberCount: m.organization._count?.members || 1,
     role: m.role,
+    myRole: m.role,
+    isMember: true,
     joinedAt: m.joinedAt,
   }));
+};
+
+export const getUserOrganizations = async (userId: string, query?: string) => {
+  return await searchOrganizations(userId, { query, scope: 'my' });
 };
 
 export const getOrganizationById = async (orgId: string) => {

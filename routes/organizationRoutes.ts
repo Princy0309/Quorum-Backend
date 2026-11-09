@@ -78,6 +78,7 @@ router.post('/join/:token', authMiddleware, acceptInviteController);
 
 router.post('/', authMiddleware, validate(createOrganizationSchema), createOrganizationController);
 router.get('/', authMiddleware, getUserOrganizationsController);
+router.get('/search', authMiddleware, getUserOrganizationsController);
 
 router.get('/:id', authMiddleware, requireOrgMember(), getOrganizationController);
 router.patch(

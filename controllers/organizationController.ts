@@ -4,6 +4,7 @@ import { ApiError } from '../utils/ApiError.js';
 import {
   createOrganization,
   getUserOrganizations,
+  searchOrganizations,
   getOrganizationById,
   updateOrganization,
   updateOrganizationProfilePicture,
@@ -50,11 +51,23 @@ export const getUserOrganizationsController = asyncHandler(
       return next(new ApiError(401, 'Unauthorized, login required'));
     }
 
-    const organizations = await getUserOrganizations(req.user.id);
+    const rawQuery = req.query.search ?? req.query.q ?? req.query.query;
+    const query = typeof rawQuery === 'string' ? rawQuery.trim() : undefined;
+    const rawScope = req.query.scope;
+    const isGlobal = req.query.global === 'true' || rawScope === 'all' || rawScope === 'global';
+    const scope = isGlobal ? 'all' : 'my';
+
+    const rawLimit = req.query.limit;
+    const limit = typeof rawLimit === 'string' && /^\d+$/.test(rawLimit) ? parseInt(rawLimit, 10) : 20;
+
+    const organizations = await searchOrganizations(req.user.id, { query, scope, limit });
 
     return res.status(200).json({
       success: true,
+      statusCode: 200,
+      scope,
       data: organizations,
+      organizations,
     });
   }
 );
