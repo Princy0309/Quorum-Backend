@@ -16,6 +16,7 @@ model Document {
   title          String
   content        Json                   @default("{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\"}]}")
   scopeType      DocumentScopeType      @default(PERSONAL)
+  defaultPermission DocumentPermission  @default(EDIT)
   createdById    String
   organizationId String?
   teamId         String?

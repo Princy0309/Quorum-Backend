@@ -110,6 +110,22 @@ export const registerDocumentHandler = (io: Server, socket: Socket) => {
 
       const room = `document:${documentId}`;
 
+      if (user?.id) {
+        const doc = await prisma.document.findUnique({
+          where: { id: documentId },
+          select: { createdById: true, defaultPermission: true, collaborators: { where: { userId: user.id } } }
+        });
+        if (doc) {
+          const isCreator = doc.createdById === user.id;
+          const directCollab = doc.collaborators[0];
+          const perm = isCreator ? 'EDIT' : (directCollab ? directCollab.permission : doc.defaultPermission);
+          if (perm !== 'EDIT') {
+            ack?.({ success: false, message: 'You only have view permissions for this document' });
+            return;
+          }
+        }
+      }
+
       socket.to(room).emit(DOCUMENT_EVENTS.DOCUMENT_UPDATED, {
         documentId,
         content,
