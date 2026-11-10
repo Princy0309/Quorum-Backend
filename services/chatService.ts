@@ -976,6 +976,13 @@ export const getUserConversations = async (userId: string, query?: string) => {
       where: whereClause,
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       include: {
+        _count: {
+          select: {
+            messages: {
+              where: { isPinned: true, isDeleted: false }
+            }
+          }
+        },
         participants: {
           include: {
             user: {
@@ -1023,6 +1030,13 @@ export const getUserConversations = async (userId: string, query?: string) => {
         where: whereClause,
         orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         include: {
+          _count: {
+            select: {
+              messages: {
+                where: { isPinned: true, isDeleted: false }
+              }
+            }
+          },
           participants: {
             include: {
               user: {
@@ -1086,7 +1100,8 @@ export const getUserConversations = async (userId: string, query?: string) => {
   return conversations.map((conv) => ({
     ...conv,
     lastMessage: conv.messages[0] || null,
-    unreadCount: unreadMap.get(conv.id) || 0
+    unreadCount: unreadMap.get(conv.id) || 0,
+    pinnedCount: conv._count?.messages || 0
   }));
 };
 
@@ -1941,6 +1956,7 @@ export const deleteMessage = async (
       where: { id: messageId },
       data: {
         isDeleted: true,
+        isPinned: false,
         deletedAt: new Date(),
         content: 'This message was deleted',
         fileUrl: null,
@@ -1991,6 +2007,14 @@ export const deleteMessage = async (
       const rooms = [`conversation:${resolvedConversationId}`];
       if (conversationIdOrTarget !== resolvedConversationId) {
         rooms.push(`conversation:${conversationIdOrTarget}`);
+      }
+      if (message.isPinned) {
+        io.to(rooms).emit(CHAT_EVENTS.MESSAGE_UNPINNED, {
+          conversationId: resolvedConversationId,
+          messageId,
+          unpinnedBy: userId,
+          unpinnedAt: new Date().toISOString()
+        });
       }
       io.to(rooms).emit(CHAT_EVENTS.MESSAGE_DELETED, {
         conversationId: resolvedConversationId,
@@ -2554,11 +2578,191 @@ export const votePoll = async (
   };
 };
 
+const MAX_PINNED_PER_CONVERSATION = 15;
 
+export const pinMessage = async (
+  userId: string,
+  conversationIdOrTarget: string,
+  messageId: string
+) => {
+  const resolvedConversationId = await resolveConversationId(userId, conversationIdOrTarget);
+  if (!resolvedConversationId) {
+    throw new ApiError(403, 'You are not a member of this conversation');
+  }
 
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: {
+      id: true,
+      conversationId: true,
+      isPinned: true,
+      isDeleted: true,
+      deletedAt: true
+    }
+  });
 
+  if (!message) {
+    throw new ApiError(404, 'Message not found');
+  }
 
+  if (message.conversationId !== resolvedConversationId) {
+    throw new ApiError(400, 'Message does not belong to this conversation');
+  }
 
+  if (message.isDeleted || message.deletedAt) {
+    throw new ApiError(400, 'Cannot pin a deleted message');
+  }
 
+  if (message.isPinned) {
+    return {
+      alreadyPinned: true,
+      messageId,
+      conversationId: resolvedConversationId
+    };
+  }
 
+  const pinnedCount = await prisma.message.count({
+    where: {
+      conversationId: resolvedConversationId,
+      isPinned: true,
+      isDeleted: false
+    }
+  });
 
+  if (pinnedCount >= MAX_PINNED_PER_CONVERSATION) {
+    throw new ApiError(
+      400,
+      `Maximum ${MAX_PINNED_PER_CONVERSATION} pinned messages reached. Unpin one to pin another.`
+    );
+  }
+
+  const updated = await prisma.message.update({
+    where: { id: messageId },
+    data: { isPinned: true },
+    include: messageInclude
+  });
+
+  const allMentionedIds = (updated.mentionedUserIds || []) as string[];
+  let mentionedUsers: any[] = [];
+  if (allMentionedIds.length > 0) {
+    mentionedUsers = await prisma.user.findMany({
+      where: { id: { in: allMentionedIds } },
+      select: { id: true, name: true, avatar: true }
+    });
+  }
+
+  const enrichedMessage = {
+    ...updated,
+    reactions: formatReactions((updated as any).reactions || [], userId),
+    poll: formatPoll((updated as any).poll, userId),
+    mentionedUsers
+  };
+
+  return {
+    pinned: true,
+    conversationId: resolvedConversationId,
+    message: enrichedMessage
+  };
+};
+
+export const unpinMessage = async (
+  userId: string,
+  conversationIdOrTarget: string,
+  messageId: string
+) => {
+  const resolvedConversationId = await resolveConversationId(userId, conversationIdOrTarget);
+  if (!resolvedConversationId) {
+    throw new ApiError(403, 'You are not a member of this conversation');
+  }
+
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: {
+      id: true,
+      conversationId: true,
+      isPinned: true
+    }
+  });
+
+  if (!message) {
+    throw new ApiError(404, 'Message not found');
+  }
+
+  if (message.conversationId !== resolvedConversationId) {
+    throw new ApiError(400, 'Message does not belong to this conversation');
+  }
+
+  if (!message.isPinned) {
+    return {
+      alreadyUnpinned: true,
+      messageId,
+      conversationId: resolvedConversationId
+    };
+  }
+
+  await prisma.message.update({
+    where: { id: messageId },
+    data: { isPinned: false }
+  });
+
+  return {
+    unpinned: true,
+    messageId,
+    conversationId: resolvedConversationId
+  };
+};
+
+export const getPinnedMessages = async (
+  userId: string,
+  conversationIdOrTarget: string
+) => {
+  const resolvedConversationId = await resolveConversationId(userId, conversationIdOrTarget);
+  if (!resolvedConversationId) {
+    throw new ApiError(403, 'You are not a member of this conversation');
+  }
+
+  const messages = await prisma.message.findMany({
+    where: {
+      conversationId: resolvedConversationId,
+      isPinned: true,
+      isDeleted: false,
+      deletedAt: null,
+      NOT: {
+        deletedForUserIds: {
+          has: userId
+        }
+      }
+    },
+    orderBy: [{ seq: 'desc' }, { id: 'desc' }],
+    include: messageInclude
+  });
+
+  const allMentionedIds = Array.from(
+    new Set(messages.flatMap((m: any) => m.mentionedUserIds || []))
+  );
+
+  let mentionedUserMap = new Map<string, { id: string; name: string | null; avatar: string | null }>();
+  if (allMentionedIds.length > 0) {
+    const mentionedUsersList = await prisma.user.findMany({
+      where: { id: { in: allMentionedIds } },
+      select: { id: true, name: true, avatar: true }
+    });
+    mentionedUserMap = new Map(mentionedUsersList.map((u) => [u.id, u]));
+  }
+
+  const enrichedMessages = messages.map((msg: any) => ({
+    ...msg,
+    reactions: formatReactions(msg.reactions || [], userId),
+    poll: formatPoll(msg.poll, userId),
+    mentionedUsers: (msg.mentionedUserIds || [])
+      .map((mId: string) => mentionedUserMap.get(mId))
+      .filter(Boolean)
+  }));
+
+  return {
+    conversationId: resolvedConversationId,
+    count: enrichedMessages.length,
+    limit: MAX_PINNED_PER_CONVERSATION,
+    messages: enrichedMessages
+  };
+};
