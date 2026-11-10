@@ -172,10 +172,14 @@ const getUserAccessibleDocuments = async (userId: string, organizationId?: strin
 export const generateWorkflowPlan = async (
   userId: string,
   rawPrompt: string,
+  organizationId?: string,
   autoExecute: boolean = false
 ) => {
   const sanitizedPrompt = sanitizeAiInput(rawPrompt);
-  const orgContext = await getUserOrganizationContext(userId);
+  const orgContext = await getUserOrganizationContext(userId, organizationId);
+  if (organizationId && !orgContext) {
+    throw new ApiError(403, 'You do not have access to the specified organization');
+  }
   const accessibleDocs = await getUserAccessibleDocuments(userId, orgContext?.organizationId);
 
   const contextData = {
@@ -329,12 +333,23 @@ const resolveVariables = (value: any, variables: Map<string, string>): any => {
 };
 
 export const executeWorkflowPlan = async (userId: string, planId: string) => {
+  const plan = await getPlan(planId);
+  if (!plan) {
+    throw new ApiError(404, 'Workflow plan not found or has expired');
+  }
+
+  if (plan.userId !== userId) {
+    throw new ApiError(403, 'Not authorized to execute this workflow plan');
+  }
+
   const lockKey = `workflow:lock:${planId}`;
+  let lockAcquiredInRedis = false;
   try {
     const lockAcquired = await redis.set(lockKey, 'locked', 'EX', 120, 'NX');
     if (!lockAcquired) {
       throw new ApiError(409, 'Workflow plan is currently executing or has already been executed');
     }
+    lockAcquiredInRedis = true;
   } catch (err) {
     if (err instanceof ApiError) throw err;
   }
@@ -345,15 +360,6 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
   inMemoryExecutingPlans.add(planId);
 
   try {
-    const plan = await getPlan(planId);
-    if (!plan) {
-      throw new ApiError(404, 'Workflow plan not found or has expired');
-    }
-
-    if (plan.userId !== userId) {
-      throw new ApiError(403, 'Not authorized to execute this workflow plan');
-    }
-
     try {
       await redis.del(`workflow:plan:${planId}`);
     } catch {}
@@ -474,15 +480,39 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
 
           const { doc } = await checkDocumentAccess(userId, documentId, 'EDIT');
 
-          const targetTeamId = resolvedParams.teamId ? String(resolvedParams.teamId) : undefined;
+          const targetTeamId = resolvedParams.teamId ? String(resolvedParams.teamId).trim() : undefined;
           if (targetTeamId) {
+            const team = await prisma.team.findUnique({
+              where: { id: targetTeamId },
+              select: { id: true, organizationId: true },
+            });
+
+            if (!team) {
+              throw new ApiError(404, 'Target team not found');
+            }
+
+            if (orgId && team.organizationId !== orgId) {
+              throw new ApiError(403, 'Target team does not belong to the active organization');
+            }
+
+            if (doc.organizationId && doc.organizationId !== team.organizationId) {
+              throw new ApiError(403, 'Document does not belong to the target team organization');
+            }
+
             await prisma.document.update({
               where: { id: doc.id },
-              data: { teamId: targetTeamId },
+              data: {
+                teamId: targetTeamId,
+                organizationId: team.organizationId,
+                scopeType: 'TEAM',
+              },
             });
           }
 
           const memberIds = Array.isArray(resolvedParams.memberIds) ? resolvedParams.memberIds : [];
+          let addedCollaboratorCount = 0;
+          const failedCollaboratorIds: string[] = [];
+
           for (const targetId of memberIds) {
             if (targetId && targetId !== userId) {
               try {
@@ -490,10 +520,17 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
                   userId: targetId,
                   permission: 'VIEW',
                 });
+                addedCollaboratorCount++;
               } catch (collabErr) {
+                failedCollaboratorIds.push(targetId);
                 logger.warn(`Could not add collaborator ${targetId} to doc ${doc.id}:`, collabErr);
               }
             }
+          }
+
+          const requestedMembers = memberIds.filter((id: string) => id && id !== userId);
+          if (requestedMembers.length > 0 && addedCollaboratorCount === 0 && !targetTeamId) {
+            throw new ApiError(400, 'Failed to add any of the requested collaborators to the document');
           }
 
           variables.set(`$step${step.step}.documentId`, doc.id);
@@ -507,6 +544,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               documentId: doc.id,
               title: doc.title,
               sharedWithTeam: !!targetTeamId,
+              collaboratorCount: addedCollaboratorCount,
+              ...(failedCollaboratorIds.length > 0 ? { failedCollaborators: failedCollaboratorIds } : {}),
             },
           });
         } else if (step.action === 'NOTIFY_MEMBERS') {
@@ -598,5 +637,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
     };
   } finally {
     inMemoryExecutingPlans.delete(planId);
+    if (lockAcquiredInRedis) {
+      try {
+        await redis.del(lockKey);
+      } catch {}
+    }
   }
 };

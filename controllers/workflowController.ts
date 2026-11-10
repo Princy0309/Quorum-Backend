@@ -17,7 +17,7 @@ export const planWorkflowController = async (req: Request, res: Response, next: 
     }
 
     const parsed = workflowPlanSchema.parse(req.body);
-    const result = await generateWorkflowPlan(userId, parsed.prompt, parsed.autoExecute);
+    const result = await generateWorkflowPlan(userId, parsed.prompt, parsed.organizationId, parsed.autoExecute);
 
     res.status(200).json({
       success: true,
