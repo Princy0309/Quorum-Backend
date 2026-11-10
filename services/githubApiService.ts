@@ -32,11 +32,21 @@ async function callGithubApi<T>(
     throw new ApiError(504, 'GitHub API request timed out');
   });
 
-  if (response.status === 403 || response.status === 429) {
+    if (
+    response.status === 429 ||
+    (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')
+  ) {
     const resetHeader = response.headers.get('x-ratelimit-reset');
     const resetTime = resetHeader ? new Date(parseInt(resetHeader, 10) * 1000).toLocaleTimeString() : 'shortly';
     throw new ApiError(429, `GitHub rate limit reached. Please try again after ${resetTime}.`);
   }
+
+  if (response.status === 403) {
+    const errorBody = await response.text().catch(() => '');
+    logger.warn(`GitHub 403 Forbidden (${endpoint}): ${errorBody}`);
+    throw new ApiError(403, 'GitHub denied the request. Check your repository permissions or OAuth scopes.');
+  }
+
 
   if (response.status === 404) {
     throw new ApiError(404, 'Requested GitHub resource not found or access denied');
