@@ -33,7 +33,10 @@ import {
   getMessageReactionsController,
   forwardMessagesController,
   createPollController,
-  votePollController
+  votePollController,
+  pinMessageController,
+  unpinMessageController,
+  getPinnedMessagesController
 } from '../controllers/conversationController.js';
 import { createOrGetDMController } from '../controllers/dmController.js';
 
@@ -55,6 +58,12 @@ router.get('/:id', authMiddleware, getConversationDetailsController);
 router.get('/:id/messages', authMiddleware, getConversationMessagesController);
 router.patch('/:id/messages/:messageId', authMiddleware, validate(editMessageSchema), editMessageController);
 router.delete('/:id/messages/:messageId', authMiddleware, validate(deleteMessageSchema), deleteMessageController);
+router.post('/:id/messages/:messageId/pin', authMiddleware, pinMessageController);
+router.delete('/:id/messages/:messageId/pin', authMiddleware, unpinMessageController);
+router.post('/:id/pin/:messageId', authMiddleware, pinMessageController);
+router.delete('/:id/pin/:messageId', authMiddleware, unpinMessageController);
+router.get('/:id/pinned', authMiddleware, getPinnedMessagesController);
+router.get('/:id/messages/pinned', authMiddleware, getPinnedMessagesController);
 router.post('/:id/messages/:messageId/reactions', authMiddleware, validate(toggleReactionSchema), toggleMessageReactionController);
 router.get('/:id/messages/:messageId/reactions', authMiddleware, getMessageReactionsController);
 router.get('/:id/search', authMiddleware, searchConversationMessagesController);
