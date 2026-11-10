@@ -5,6 +5,9 @@ import {
   getUserOrganizationsController,
   getOrganizationController,
   updateOrganizationController,
+  getOrganizationProfilePictureController,
+  updateOrganizationProfilePictureController,
+  deleteOrganizationProfilePictureController,
   getOrganizationMembersController,
   updateMemberRoleController,
   removeMemberController,
@@ -75,14 +78,82 @@ router.post('/join/:token', authMiddleware, acceptInviteController);
 
 router.post('/', authMiddleware, validate(createOrganizationSchema), createOrganizationController);
 router.get('/', authMiddleware, getUserOrganizationsController);
+router.get('/search', authMiddleware, getUserOrganizationsController);
 
 router.get('/:id', authMiddleware, requireOrgMember(), getOrganizationController);
 router.patch(
   '/:id',
   authMiddleware,
   requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
   validate(updateOrganizationSchema),
   updateOrganizationController
+);
+
+router.get('/:id/profile-picture', authMiddleware, requireOrgMember(), getOrganizationProfilePictureController);
+router.post(
+  '/:id/profile-picture',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
+  updateOrganizationProfilePictureController
+);
+router.put(
+  '/:id/profile-picture',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
+  updateOrganizationProfilePictureController
+);
+router.delete(
+  '/:id/profile-picture',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  deleteOrganizationProfilePictureController
+);
+
+router.get('/:id/avatar', authMiddleware, requireOrgMember(), getOrganizationProfilePictureController);
+router.post(
+  '/:id/avatar',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
+  updateOrganizationProfilePictureController
+);
+router.put(
+  '/:id/avatar',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
+  updateOrganizationProfilePictureController
+);
+router.delete(
+  '/:id/avatar',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  deleteOrganizationProfilePictureController
+);
+
+router.get('/:id/logo', authMiddleware, requireOrgMember(), getOrganizationProfilePictureController);
+router.post(
+  '/:id/logo',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
+  updateOrganizationProfilePictureController
+);
+router.put(
+  '/:id/logo',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
+  updateOrganizationProfilePictureController
+);
+router.delete(
+  '/:id/logo',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  deleteOrganizationProfilePictureController
 );
 
 router.delete(

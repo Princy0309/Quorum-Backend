@@ -9,9 +9,13 @@ export type CommunityRole = (typeof CommunityRole)[keyof typeof CommunityRole];
 export interface CreateCommunityInput {
   name: string;
   description?: string;
+  avatar?: string | null;
+  profilePicture?: string | null;
 }
 
 export interface UpdateCommunityInput {
   name?: string;
   description?: string;
+  avatar?: string | null;
+  profilePicture?: string | null;
 }

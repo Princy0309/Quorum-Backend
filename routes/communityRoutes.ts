@@ -50,8 +50,12 @@ import {
   cancelJoinRequestController,
   getCommunityJoinRequestsController,
   acceptJoinRequestController,
-  rejectJoinRequestController
+  rejectJoinRequestController,
+  getCommunityProfilePictureController,
+  updateCommunityProfilePictureController,
+  deleteCommunityProfilePictureController
 } from '../controllers/communityController.js';
+import { uploadMiddleware } from '../controllers/uploadController.js';
 import {
   createPostController,
   getCommunityPostsController,
@@ -60,7 +64,7 @@ import {
 
 const router = Router();
 
-router.post('/', authMiddleware, validate(createCommunitySchema), createCommunityController);
+router.post('/', authMiddleware, uploadMiddleware, validate(createCommunitySchema), createCommunityController);
 router.get('/', authMiddleware, getUserCommunitiesController);
 router.get('/feed', authMiddleware, getCommunityFeedController);
 router.get('/search', authMiddleware, validateQuery(searchCommunityQuerySchema), discoverCommunitiesController);
@@ -123,7 +127,23 @@ router.get('/:id/posts', authMiddleware, getCommunityPostsController);
 router.get('/:id/feed', authMiddleware, getCommunityPostsController);
 
 router.get('/:id', authMiddleware, getCommunityDetailsController);
-router.patch('/:id', authMiddleware, validate(updateCommunitySchema), updateCommunityController);
+router.patch('/:id', authMiddleware, uploadMiddleware, validate(updateCommunitySchema), updateCommunityController);
+
+router.get('/:id/profile-picture', authMiddleware, getCommunityProfilePictureController);
+router.post('/:id/profile-picture', authMiddleware, uploadMiddleware, updateCommunityProfilePictureController);
+router.put('/:id/profile-picture', authMiddleware, uploadMiddleware, updateCommunityProfilePictureController);
+router.delete('/:id/profile-picture', authMiddleware, deleteCommunityProfilePictureController);
+
+router.get('/:id/avatar', authMiddleware, getCommunityProfilePictureController);
+router.post('/:id/avatar', authMiddleware, uploadMiddleware, updateCommunityProfilePictureController);
+router.put('/:id/avatar', authMiddleware, uploadMiddleware, updateCommunityProfilePictureController);
+router.delete('/:id/avatar', authMiddleware, deleteCommunityProfilePictureController);
+
+router.get('/:id/logo', authMiddleware, getCommunityProfilePictureController);
+router.post('/:id/logo', authMiddleware, uploadMiddleware, updateCommunityProfilePictureController);
+router.put('/:id/logo', authMiddleware, uploadMiddleware, updateCommunityProfilePictureController);
+router.delete('/:id/logo', authMiddleware, deleteCommunityProfilePictureController);
+
 router.delete('/:id', authMiddleware, deleteCommunityController);
 
 export default router;
