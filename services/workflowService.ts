@@ -7,9 +7,9 @@ import { getIO } from '../sockets/socketServer.js';
 import { generateRawCompletion, sanitizeAiInput } from './aiService.js';
 import { createTeam, addTeamMember } from './teamService.js';
 import { createScopedMeeting } from './meetingService.js';
-import { addCollaborator } from './documentService.js';
+import { addCollaborator, checkDocumentAccess } from './documentService.js';
 import { MeetingScopeType, NotificationType, OrgRole } from '@prisma/client';
-import { WorkflowStep } from '../validators/workflowValidators.js';
+import { WorkflowStep, workflowStepSchema } from '../validators/workflowValidators.js';
 
 interface StoredWorkflowPlan {
   planId: string;
@@ -21,6 +21,7 @@ interface StoredWorkflowPlan {
 }
 
 const inMemoryPlans = new Map<string, { data: StoredWorkflowPlan; expiresAt: number }>();
+const inMemoryExecutingPlans = new Set<string>();
 
 const savePlan = async (plan: StoredWorkflowPlan): Promise<void> => {
   const serialized = JSON.stringify(plan);
@@ -52,9 +53,14 @@ const getPlan = async (planId: string): Promise<StoredWorkflowPlan | null> => {
   return null;
 };
 
-const getUserOrganizationContext = async (userId: string) => {
+const getUserOrganizationContext = async (userId: string, targetOrgId?: string) => {
+  const whereClause: any = { userId };
+  if (targetOrgId) {
+    whereClause.organizationId = targetOrgId;
+  }
+
   const membership = await prisma.organizationMember.findFirst({
-    where: { userId },
+    where: whereClause,
     include: {
       organization: {
         select: {
@@ -96,8 +102,13 @@ const getUserOrganizationContext = async (userId: string) => {
     };
   }
 
+  const orgWhere: any = { ownerId: userId };
+  if (targetOrgId) {
+    orgWhere.id = targetOrgId;
+  }
+
   const ownedOrg = await prisma.organization.findFirst({
-    where: { ownerId: userId },
+    where: orgWhere,
     select: {
       id: true,
       name: true,
@@ -243,24 +254,32 @@ Generate the JSON execution plan:`;
     throw new ApiError(400, 'Could not determine actionable workflow steps from the instruction');
   }
 
-  const validActions = new Set(['CREATE_TEAM', 'SCHEDULE_MEETING', 'SHARE_DOCUMENT', 'NOTIFY_MEMBERS']);
   const sanitizedSteps: WorkflowStep[] = [];
 
   for (let i = 0; i < parsedPlan.steps.length; i++) {
-    const s = parsedPlan.steps[i];
-    if (!validActions.has(s.action)) {
+    const rawStep = parsedPlan.steps[i];
+    if (!rawStep || typeof rawStep !== 'object') {
       continue;
     }
-    sanitizedSteps.push({
-      step: i + 1,
-      action: s.action,
-      description: s.description || s.action.replace('_', ' ').toLowerCase(),
-      params: s.params || {},
+
+    const parseResult = workflowStepSchema.safeParse({
+      step: typeof (rawStep as any).step === 'number' ? (rawStep as any).step : i + 1,
+      action: (rawStep as any).action,
+      params: (rawStep as any).params && typeof (rawStep as any).params === 'object' ? (rawStep as any).params : {},
+      description: typeof (rawStep as any).description === 'string' ? (rawStep as any).description : undefined,
     });
+
+    if (parseResult.success) {
+      sanitizedSteps.push({
+        ...parseResult.data,
+        step: sanitizedSteps.length + 1,
+        description: parseResult.data.description || parseResult.data.action.replace('_', ' ').toLowerCase(),
+      });
+    }
   }
 
   if (sanitizedSteps.length === 0) {
-    throw new ApiError(400, 'No supported workflow actions found in the prompt');
+    throw new ApiError(400, 'No supported or valid workflow actions found in the prompt');
   }
 
   const planId = 'wf_plan_' + crypto.randomBytes(6).toString('hex');
@@ -310,230 +329,274 @@ const resolveVariables = (value: any, variables: Map<string, string>): any => {
 };
 
 export const executeWorkflowPlan = async (userId: string, planId: string) => {
-  const plan = await getPlan(planId);
-  if (!plan) {
-    throw new ApiError(404, 'Workflow plan not found or has expired');
+  const lockKey = `workflow:lock:${planId}`;
+  try {
+    const lockAcquired = await redis.set(lockKey, 'locked', 'EX', 120, 'NX');
+    if (!lockAcquired) {
+      throw new ApiError(409, 'Workflow plan is currently executing or has already been executed');
+    }
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
   }
 
-  if (plan.userId !== userId) {
-    throw new ApiError(403, 'Not authorized to execute this workflow plan');
+  if (inMemoryExecutingPlans.has(planId)) {
+    throw new ApiError(409, 'Workflow plan is currently executing or has already been executed');
   }
+  inMemoryExecutingPlans.add(planId);
 
-  const variables = new Map<string, string>();
-  const results: Array<{
-    step: number;
-    action: string;
-    description?: string;
-    success: boolean;
-    resource?: any;
-    error?: string;
-  }> = [];
+  try {
+    const plan = await getPlan(planId);
+    if (!plan) {
+      throw new ApiError(404, 'Workflow plan not found or has expired');
+    }
 
-  let orgId = plan.organizationId;
-  if (!orgId) {
-    const userOrg = await getUserOrganizationContext(userId);
-    orgId = userOrg?.organizationId;
-  }
-
-  for (const step of plan.steps) {
-    const resolvedParams = resolveVariables(step.params, variables);
+    if (plan.userId !== userId) {
+      throw new ApiError(403, 'Not authorized to execute this workflow plan');
+    }
 
     try {
-      if (step.action === 'CREATE_TEAM') {
-        if (!orgId) {
-          throw new ApiError(400, 'An active organization is required to create a team');
-        }
+      await redis.del(`workflow:plan:${planId}`);
+    } catch {}
+    inMemoryPlans.delete(planId);
 
-        const teamName = String(resolvedParams.name || 'New Team').trim();
-        const teamDesc = resolvedParams.description ? String(resolvedParams.description).trim() : undefined;
+    const variables = new Map<string, string>();
+    const results: Array<{
+      step: number;
+      action: string;
+      description?: string;
+      success: boolean;
+      resource?: any;
+      error?: string;
+    }> = [];
 
-        const team = await createTeam(orgId, userId, {
-          name: teamName,
-          description: teamDesc,
-        });
+    let orgId = plan.organizationId;
+    if (!orgId) {
+      const userOrg = await getUserOrganizationContext(userId);
+      orgId = userOrg?.organizationId;
+    }
 
-        variables.set(`$step${step.step}.teamId`, team.id);
-        variables.set(`$step${step.step}.id`, team.id);
-        variables.set(`$step${step.step}.name`, team.name);
+    for (const step of plan.steps) {
+      const resolvedParams = resolveVariables(step.params, variables);
 
-        const memberIds = Array.isArray(resolvedParams.memberIds) ? resolvedParams.memberIds : [];
-        for (const targetId of memberIds) {
-          if (targetId && targetId !== userId) {
-            try {
-              await addTeamMember(orgId, team.id, userId, OrgRole.ORG_ADMIN, targetId, 'member');
-            } catch (memberErr) {
-              logger.warn(`Could not add member ${targetId} to team ${team.id}:`, memberErr);
-            }
+      try {
+        if (step.action === 'CREATE_TEAM') {
+          if (!orgId) {
+            throw new ApiError(400, 'An active organization is required to create a team');
           }
-        }
 
-        results.push({
-          step: step.step,
-          action: step.action,
-          description: step.description,
-          success: true,
-          resource: {
-            teamId: team.id,
-            name: team.name,
-            memberCount: memberIds.length + 1,
-          },
-        });
-      } else if (step.action === 'SCHEDULE_MEETING') {
-        let startTime = resolvedParams.startTime ? new Date(resolvedParams.startTime) : null;
-        if (!startTime || isNaN(startTime.getTime()) || startTime.getTime() <= Date.now()) {
-          startTime = new Date(Date.now() + 24 * 60 * 60 * 1000);
-        }
+          const callerOrg = await getUserOrganizationContext(userId, orgId);
+          if (!callerOrg) {
+            throw new ApiError(403, 'You are not a member of this organization');
+          }
 
-        const meetingTitle = String(resolvedParams.title || 'Team Meeting').trim();
-        const targetTeamId = resolvedParams.teamId ? String(resolvedParams.teamId) : undefined;
+          const callerRole = callerOrg.userRole;
+          const canCreateTeam = callerOrg.isOwner || callerRole === OrgRole.ORG_ADMIN || callerRole === OrgRole.TEAM_HEAD;
+          if (!canCreateTeam) {
+            throw new ApiError(403, 'Only organization owners, admins, or team heads can create teams');
+          }
 
-        const meeting = await createScopedMeeting(userId, {
-          title: meetingTitle,
-          scopeType: targetTeamId ? MeetingScopeType.TEAM : (orgId ? MeetingScopeType.ORGANIZATION : MeetingScopeType.PERSONAL),
-          organizationId: orgId,
-          teamId: targetTeamId,
-          scheduledStartTime: startTime,
-        });
+          const teamName = String(resolvedParams.name || 'New Team').trim();
+          const teamDesc = resolvedParams.description ? String(resolvedParams.description).trim() : undefined;
 
-        variables.set(`$step${step.step}.meetingCode`, meeting.code);
-        variables.set(`$step${step.step}.id`, meeting.code);
-
-        results.push({
-          step: step.step,
-          action: step.action,
-          description: step.description,
-          success: true,
-          resource: {
-            meetingCode: meeting.code,
-            title: meeting.title,
-            scheduledStartTime: meeting.scheduledStartTime,
-            link: meeting.link,
-          },
-        });
-      } else if (step.action === 'SHARE_DOCUMENT') {
-        const documentId = String(resolvedParams.documentId || '').trim();
-        if (!documentId) {
-          throw new ApiError(400, 'Document ID is required to share document');
-        }
-
-        const doc = await prisma.document.findUnique({
-          where: { id: documentId },
-          select: { id: true, title: true, createdById: true },
-        });
-
-        if (!doc) {
-          throw new ApiError(404, 'Document to share was not found');
-        }
-
-        const targetTeamId = resolvedParams.teamId ? String(resolvedParams.teamId) : undefined;
-        if (targetTeamId) {
-          await prisma.document.update({
-            where: { id: doc.id },
-            data: { teamId: targetTeamId },
+          const team = await createTeam(orgId, userId, {
+            name: teamName,
+            description: teamDesc,
           });
-        }
 
-        const memberIds = Array.isArray(resolvedParams.memberIds) ? resolvedParams.memberIds : [];
-        for (const targetId of memberIds) {
-          if (targetId && targetId !== userId) {
-            try {
-              await addCollaborator(userId, doc.id, {
-                userId: targetId,
-                permission: 'VIEW',
-              });
-            } catch (collabErr) {
-              logger.warn(`Could not add collaborator ${targetId} to doc ${doc.id}:`, collabErr);
+          variables.set(`$step${step.step}.teamId`, team.id);
+          variables.set(`$step${step.step}.id`, team.id);
+          variables.set(`$step${step.step}.name`, team.name);
+
+          const memberIds = Array.isArray(resolvedParams.memberIds) ? resolvedParams.memberIds : [];
+          let addedCount = 1;
+          const failedMemberIds: string[] = [];
+          for (const targetId of memberIds) {
+            if (targetId && targetId !== userId) {
+              try {
+                await addTeamMember(orgId, team.id, userId, callerRole, targetId, 'member');
+                addedCount++;
+              } catch (memberErr) {
+                failedMemberIds.push(targetId);
+                logger.warn(`Could not add member ${targetId} to team ${team.id}:`, memberErr);
+              }
             }
           }
-        }
 
-        variables.set(`$step${step.step}.documentId`, doc.id);
-
-        results.push({
-          step: step.step,
-          action: step.action,
-          description: step.description,
-          success: true,
-          resource: {
-            documentId: doc.id,
-            title: doc.title,
-            sharedWithTeam: !!targetTeamId,
-          },
-        });
-      } else if (step.action === 'NOTIFY_MEMBERS') {
-        const userIds = Array.isArray(resolvedParams.userIds) ? resolvedParams.userIds : [];
-        const notifTitle = String(resolvedParams.title || 'Workflow Update').trim();
-        const notifMessage = String(resolvedParams.message || 'A new workflow action was completed.').trim();
-
-        const validUsers = await prisma.user.findMany({
-          where: { id: { in: userIds } },
-          select: { id: true },
-        });
-
-        for (const u of validUsers) {
-          await prisma.notification.create({
-            data: {
-              recipientId: u.id,
-              actorId: userId,
-              type: NotificationType.SYSTEM,
-              title: notifTitle,
-              body: notifMessage,
-              data: { planId },
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              teamId: team.id,
+              name: team.name,
+              memberCount: addedCount,
+              ...(failedMemberIds.length > 0 ? { failedMemberIds } : {}),
             },
           });
-
-          try {
-            getIO().to(u.id).emit('notification:new', {
-              title: notifTitle,
-              body: notifMessage,
-            });
-          } catch (socketErr) {
-            logger.warn('Failed to emit live notification to user ' + u.id, socketErr);
+        } else if (step.action === 'SCHEDULE_MEETING') {
+          let startTime = resolvedParams.startTime ? new Date(resolvedParams.startTime) : null;
+          if (!startTime || isNaN(startTime.getTime()) || startTime.getTime() <= Date.now()) {
+            startTime = new Date(Date.now() + 24 * 60 * 60 * 1000);
           }
-        }
 
+          const meetingTitle = String(resolvedParams.title || 'Team Meeting').trim();
+          const targetTeamId = resolvedParams.teamId ? String(resolvedParams.teamId) : undefined;
+
+          const meeting = await createScopedMeeting(userId, {
+            title: meetingTitle,
+            scopeType: targetTeamId ? MeetingScopeType.TEAM : (orgId ? MeetingScopeType.ORGANIZATION : MeetingScopeType.PERSONAL),
+            organizationId: orgId,
+            teamId: targetTeamId,
+            scheduledStartTime: startTime,
+          });
+
+          variables.set(`$step${step.step}.meetingCode`, meeting.code);
+          variables.set(`$step${step.step}.id`, meeting.code);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              meetingCode: meeting.code,
+              title: meeting.title,
+              scheduledStartTime: meeting.scheduledStartTime,
+              link: meeting.link,
+            },
+          });
+        } else if (step.action === 'SHARE_DOCUMENT') {
+          const documentId = String(resolvedParams.documentId || '').trim();
+          if (!documentId) {
+            throw new ApiError(400, 'Document ID is required to share document');
+          }
+
+          const { doc } = await checkDocumentAccess(userId, documentId, 'EDIT');
+
+          const targetTeamId = resolvedParams.teamId ? String(resolvedParams.teamId) : undefined;
+          if (targetTeamId) {
+            await prisma.document.update({
+              where: { id: doc.id },
+              data: { teamId: targetTeamId },
+            });
+          }
+
+          const memberIds = Array.isArray(resolvedParams.memberIds) ? resolvedParams.memberIds : [];
+          for (const targetId of memberIds) {
+            if (targetId && targetId !== userId) {
+              try {
+                await addCollaborator(userId, doc.id, {
+                  userId: targetId,
+                  permission: 'VIEW',
+                });
+              } catch (collabErr) {
+                logger.warn(`Could not add collaborator ${targetId} to doc ${doc.id}:`, collabErr);
+              }
+            }
+          }
+
+          variables.set(`$step${step.step}.documentId`, doc.id);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              documentId: doc.id,
+              title: doc.title,
+              sharedWithTeam: !!targetTeamId,
+            },
+          });
+        } else if (step.action === 'NOTIFY_MEMBERS') {
+          const userIds = Array.isArray(resolvedParams.userIds) ? resolvedParams.userIds : [];
+          const notifTitle = String(resolvedParams.title || 'Workflow Update').trim();
+          const notifMessage = String(resolvedParams.message || 'A new workflow action was completed.').trim();
+
+          let validRecipients: { id: string }[] = [];
+          if (orgId) {
+            const orgMembers = await prisma.organizationMember.findMany({
+              where: {
+                organizationId: orgId,
+                userId: { in: userIds },
+              },
+              select: { userId: true },
+            });
+            validRecipients = orgMembers.map((m) => ({ id: m.userId }));
+          } else {
+            validRecipients = await prisma.user.findMany({
+              where: { id: { in: userIds } },
+              select: { id: true },
+            });
+          }
+
+          for (const u of validRecipients) {
+            await prisma.notification.create({
+              data: {
+                recipientId: u.id,
+                actorId: userId,
+                type: NotificationType.SYSTEM,
+                title: notifTitle,
+                body: notifMessage,
+                data: { planId },
+              },
+            });
+
+            try {
+              getIO().to(u.id).emit('notification:new', {
+                title: notifTitle,
+                body: notifMessage,
+              });
+            } catch (socketErr) {
+              logger.warn('Failed to emit live notification to user ' + u.id, socketErr);
+            }
+          }
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              recipientsCount: validRecipients.length,
+            },
+          });
+        }
+      } catch (err: any) {
+        logger.error(`Error executing workflow step ${step.step} (${step.action})`, err);
         results.push({
           step: step.step,
           action: step.action,
           description: step.description,
-          success: true,
-          resource: {
-            recipientsCount: validUsers.length,
-          },
+          success: false,
+          error: err?.message || 'Action failed during execution',
         });
       }
-    } catch (err: any) {
-      logger.error(`Error executing workflow step ${step.step} (${step.action})`, err);
-      results.push({
-        step: step.step,
-        action: step.action,
-        description: step.description,
-        success: false,
-        error: err?.message || 'Action failed during execution',
-      });
     }
-  }
 
-  try {
-    getIO().to(userId).emit('workflow:completed', {
+    const hasFailures = results.some((r) => !r.success);
+    const allFailed = results.length > 0 && results.every((r) => !r.success);
+    const finalStatus = allFailed ? 'FAILED' : hasFailures ? 'PARTIALLY_COMPLETED' : 'COMPLETED';
+
+    try {
+      getIO().to(userId).emit('workflow:completed', {
+        planId,
+        status: finalStatus,
+        results,
+      });
+    } catch (ioErr) {
+      logger.warn('Failed to emit workflow:completed socket event', ioErr);
+    }
+
+    return {
       planId,
-      status: 'COMPLETED',
+      summary: plan.summary,
+      status: finalStatus,
+      executedAt: new Date(),
       results,
-    });
-  } catch (ioErr) {
-    logger.warn('Failed to emit workflow:completed socket event', ioErr);
+    };
+  } finally {
+    inMemoryExecutingPlans.delete(planId);
   }
-
-  try {
-    await redis.del(`workflow:plan:${planId}`);
-  } catch {}
-  inMemoryPlans.delete(planId);
-
-  return {
-    planId,
-    summary: plan.summary,
-    status: 'COMPLETED',
-    executedAt: new Date(),
-    results,
-  };
 };
