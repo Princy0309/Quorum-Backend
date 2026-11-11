@@ -254,7 +254,7 @@ export async function getFreshGithubAccessToken(userId: string): Promise<string>
     });
 
     if (response.status === 400 || response.status === 401) {
-      await prisma.userGithubLink.delete({ where: { userId } }).catch(() => {});
+      await prisma.userGithubLink.delete({ where: { userId } }).catch(() => { });
       throw new ApiError(401, 'GitHub access token expired, please reconnect your account');
     }
 
@@ -290,7 +290,7 @@ export async function getFreshGithubAccessToken(userId: string): Promise<string>
     logger.info(`Successfully rotated GitHub tokens for user ${userId}`);
     return newTokens.access_token;
   } finally {
-    await redis.del(lockKey).catch(() => {});
+    await redis.del(lockKey).catch(() => { });
   }
 }
 
@@ -319,6 +319,7 @@ export async function getUserConnectionStatus(userId: string) {
       githubEmail: true,
       createdAt: true,
       tokenExpiresAt: true,
+      encryptedRefreshToken: true,
     },
   });
 
@@ -326,8 +327,23 @@ export async function getUserConnectionStatus(userId: string) {
     return { connected: false };
   }
 
+  const now = Date.now();
+  const expiresAtMs = link.tokenExpiresAt ? link.tokenExpiresAt.getTime() : null;
+  const isExpired = expiresAtMs !== null && expiresAtMs <= now;
+  const canRefresh = !!link.encryptedRefreshToken;
+
+  let status: 'active' | 'refreshable' | 'expired';
+  if (!isExpired) {
+    status = 'active';
+  } else if (canRefresh) {
+    status = 'refreshable';
+  } else {
+    status = 'expired';
+  }
+
   return {
     connected: true,
+    status,
     githubUsername: link.githubUsername,
     githubEmail: link.githubEmail,
     connectedAt: link.createdAt,
