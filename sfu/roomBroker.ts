@@ -77,10 +77,40 @@ export class RoomBroker extends EventEmitter {
     return peer;
   }
 
+  public acquireScreenShareLock(roomCode: string, peerId: string): boolean {
+    const room = this.getOrCreateRoom(roomCode);
+    if (room.activeScreenSharer && room.activeScreenSharer.peerId !== peerId) {
+      return false;
+    }
+    room.activeScreenSharer = {
+      peerId,
+      trackId: room.activeScreenSharer?.trackId,
+      startedAt: room.activeScreenSharer?.startedAt || Date.now(),
+    };
+    return true;
+  }
+
+  public releaseScreenShareLock(roomCode: string, peerId?: string): boolean {
+    const room = this.rooms.get(roomCode);
+    if (!room || !room.activeScreenSharer) {
+      return false;
+    }
+    if (peerId && room.activeScreenSharer.peerId !== peerId) {
+      return false;
+    }
+    room.activeScreenSharer = null;
+    return true;
+  }
+
+  public getActiveScreenSharer(roomCode: string): SfuRoom['activeScreenSharer'] {
+    return this.rooms.get(roomCode)?.activeScreenSharer || null;
+  }
+
   public publishTrack(
     roomCode: string,
     peerId: string,
-    track: MediaStreamTrack
+    track: MediaStreamTrack,
+    source?: 'camera' | 'screen'
   ): PublishedTrack {
     const room = this.getOrCreateRoom(roomCode);
     const peer = room.peers.get(peerId);
@@ -93,6 +123,9 @@ export class RoomBroker extends EventEmitter {
 
     const existingPublishedTrack = peer.publishedTracks.get(trackId);
     if (existingPublishedTrack) {
+      if (source && existingPublishedTrack.source !== source) {
+        existingPublishedTrack.source = source;
+      }
       logger.info(
         `[SFU Broker] Track ${trackId} already published by peer ${peerId} in room ${roomCode}`
       );
@@ -105,9 +138,16 @@ export class RoomBroker extends EventEmitter {
       throw new Error(`Track ${trackId} already registered by peer ${existingPublisher.peerId} in room ${roomCode}`);
     }
 
+    const resolvedSource: 'camera' | 'screen' = source || (room.activeScreenSharer?.peerId === peerId && track.kind === 'video' ? 'screen' : 'camera');
+
+    if (resolvedSource === 'screen' && room.activeScreenSharer && room.activeScreenSharer.peerId === peerId) {
+      room.activeScreenSharer.trackId = trackId;
+    }
+
     const publishedTrack: PublishedTrack = {
       trackId,
       kind: track.kind as 'audio' | 'video',
+      source: resolvedSource,
       peerId,
       mediaStreamTrack: track,
     };
@@ -541,6 +581,14 @@ export class RoomBroker extends EventEmitter {
       return false;
     }
 
+    if (
+      room.activeScreenSharer &&
+      (room.activeScreenSharer.trackId === trackId ||
+        (room.activeScreenSharer.peerId === peerId && published.source === 'screen'))
+    ) {
+      room.activeScreenSharer = null;
+    }
+
     try {
       published.rtpSubscription?.unSubscribe();
     } catch (err) {
@@ -576,6 +624,10 @@ export class RoomBroker extends EventEmitter {
       }
     }
     if (!peer) return;
+
+    if (room.activeScreenSharer && room.activeScreenSharer.peerId === resolvedPeerId) {
+      room.activeScreenSharer = null;
+    }
 
     const router = this.routers.get(roomCode);
     if (router) {

@@ -767,11 +767,12 @@ export const votePollController = async (req: Request, res: Response, next: Next
   }
 };
 
-
 export const pinMessageController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.id;
-    if (!userId) throw new ApiError(401, 'Unauthorized');
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
 
     const rawId = req.params.id;
     const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
@@ -786,12 +787,17 @@ export const pinMessageController = async (req: Request, res: Response, next: Ne
 
     try {
       const io = getIO();
-      io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_PINNED, {
-        conversationId,
+      const targetRoom = result.conversationId || conversationId;
+      const rooms = [`conversation:${targetRoom}`];
+      if (conversationId !== targetRoom) {
+        rooms.push(`conversation:${conversationId}`);
+      }
+      io.to(rooms).emit(CHAT_EVENTS.MESSAGE_PINNED, {
+        conversationId: targetRoom,
         messageId,
         pinnedBy: userId,
         message: (result as any).message ?? null,
-        pinnedAt: new Date().toISOString(),
+        pinnedAt: new Date().toISOString()
       });
     } catch (sockErr: any) {
       logger.warn(`[PinMessage] Socket emit failed: ${sockErr?.message}`);
@@ -800,7 +806,7 @@ export const pinMessageController = async (req: Request, res: Response, next: Ne
     res.status(200).json({
       success: true,
       message: 'Message pinned successfully',
-      data: result,
+      data: result
     });
   } catch (err) {
     next(err);
@@ -810,14 +816,16 @@ export const pinMessageController = async (req: Request, res: Response, next: Ne
 export const unpinMessageController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.id;
-    if (!userId) throw new ApiError(401, 'Unauthorized');
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
 
     const rawId = req.params.id;
     const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
     const rawMessageId = req.params.messageId;
     const messageId = Array.isArray(rawMessageId) ? rawMessageId[0] : rawMessageId;
-    if (!conversationId || !messageId) {
 
+    if (!conversationId || !messageId) {
       throw new ApiError(400, 'conversationId and messageId are required');
     }
 
@@ -825,11 +833,16 @@ export const unpinMessageController = async (req: Request, res: Response, next: 
 
     try {
       const io = getIO();
-      io.to(`conversation:${conversationId}`).emit(CHAT_EVENTS.MESSAGE_UNPINNED, {
-        conversationId,
+      const targetRoom = result.conversationId || conversationId;
+      const rooms = [`conversation:${targetRoom}`];
+      if (conversationId !== targetRoom) {
+        rooms.push(`conversation:${conversationId}`);
+      }
+      io.to(rooms).emit(CHAT_EVENTS.MESSAGE_UNPINNED, {
+        conversationId: targetRoom,
         messageId,
         unpinnedBy: userId,
-        unpinnedAt: new Date().toISOString(),
+        unpinnedAt: new Date().toISOString()
       });
     } catch (sockErr: any) {
       logger.warn(`[UnpinMessage] Socket emit failed: ${sockErr?.message}`);
@@ -838,7 +851,7 @@ export const unpinMessageController = async (req: Request, res: Response, next: 
     res.status(200).json({
       success: true,
       message: 'Message unpinned successfully',
-      data: result,
+      data: result
     });
   } catch (err) {
     next(err);
@@ -848,21 +861,25 @@ export const unpinMessageController = async (req: Request, res: Response, next: 
 export const getPinnedMessagesController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.id;
-    if (!userId) throw new ApiError(401, 'Unauthorized');
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
 
     const rawId = req.params.id;
     const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
-    if (!conversationId) throw new ApiError(400, 'conversationId is required');
-
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
 
     const result = await getPinnedMessages(userId, conversationId);
 
     res.status(200).json({
       success: true,
       message: 'Pinned messages retrieved successfully',
-      data: result,
+      data: result
     });
   } catch (err) {
     next(err);
   }
 };
+

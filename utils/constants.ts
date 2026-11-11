@@ -23,7 +23,10 @@ export const CHAT_EVENTS = {
   POLL_VOTE: 'poll:vote',
   POLL_UPDATED: 'poll:updated',
   MESSAGE_PINNED: 'message:pinned',
-  MESSAGE_UNPINNED: 'message:unpinned'
+  MESSAGE_UNPINNED: 'message:unpinned',
+  MESSAGE_PIN: 'message:pin',
+  MESSAGE_UNPIN: 'message:unpin',
+  MESSAGE_GET_PINNED: 'message:get-pinned'
 } as const;
 
 export const COMMUNITY_EVENTS = {

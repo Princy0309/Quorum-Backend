@@ -185,13 +185,12 @@ export const signUploadSchema = z.object({
   folder: z.string().trim().max(100).optional()
 }).passthrough();
 
-
 export const pinMessageParamsSchema = z.object({
   conversationId: z.string().trim().min(1, 'conversationId is required').max(100),
-  messageId: z.string().trim().min(1, 'messageId is required').max(100),
+  messageId: z.string().trim().min(1, 'messageId is required').max(100)
 }).passthrough();
 
 export const pinnedListParamsSchema = z.object({
-  conversationId: z.string().trim().min(1, 'conversationId is required').max(100),
+  conversationId: z.string().trim().min(1, 'conversationId is required').max(100)
 }).passthrough();
 
