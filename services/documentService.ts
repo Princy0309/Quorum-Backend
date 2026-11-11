@@ -152,7 +152,38 @@ export const checkDocumentAccess = async (
     }
   }
 
-  if (doc.organizationId) {
+  if (doc.teamId || doc.scopeType === 'TEAM') {
+    if (doc.teamId) {
+      const isTeamMember = await prisma.teamMember.findFirst({
+        where: { teamId: doc.teamId, userId }
+      });
+      if (isTeamMember) {
+        return { doc, permission: 'EDIT' as const, isCreator: false };
+      }
+    }
+
+    if (doc.organizationId) {
+      const org = await prisma.organization.findUnique({
+        where: { id: doc.organizationId },
+        select: { ownerId: true }
+      });
+      if (org?.ownerId === userId) {
+        return { doc, permission: 'EDIT' as const, isCreator: false };
+      }
+
+      const orgMembership = await prisma.organizationMember.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId: doc.organizationId,
+            userId
+          }
+        }
+      });
+      if (orgMembership && orgMembership.role === 'ORG_ADMIN') {
+        return { doc, permission: 'EDIT' as const, isCreator: false };
+      }
+    }
+  } else if (doc.organizationId) {
     const orgMembership = await prisma.organizationMember.findUnique({
       where: {
         organizationId_userId: {

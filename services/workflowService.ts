@@ -54,13 +54,34 @@ const getPlan = async (planId: string): Promise<StoredWorkflowPlan | null> => {
 };
 
 const getUserOrganizationContext = async (userId: string, targetOrgId?: string) => {
-  const whereClause: any = { userId };
-  if (targetOrgId) {
-    whereClause.organizationId = targetOrgId;
+  if (!targetOrgId) {
+    const memberships = await prisma.organizationMember.findMany({
+      where: { userId },
+      select: { organizationId: true },
+      take: 2,
+    });
+    const ownedOrgs = await prisma.organization.findMany({
+      where: { ownerId: userId },
+      select: { id: true },
+      take: 2,
+    });
+    const distinctOrgIds = new Set([
+      ...memberships.map((m) => m.organizationId),
+      ...ownedOrgs.map((o) => o.id),
+    ]);
+
+    if (distinctOrgIds.size > 1) {
+      return null;
+    }
+    if (distinctOrgIds.size === 1) {
+      targetOrgId = Array.from(distinctOrgIds)[0];
+    } else {
+      return null;
+    }
   }
 
   const membership = await prisma.organizationMember.findFirst({
-    where: whereClause,
+    where: { userId, organizationId: targetOrgId },
     include: {
       organization: {
         select: {
@@ -102,13 +123,8 @@ const getUserOrganizationContext = async (userId: string, targetOrgId?: string) 
     };
   }
 
-  const orgWhere: any = { ownerId: userId };
-  if (targetOrgId) {
-    orgWhere.id = targetOrgId;
-  }
-
   const ownedOrg = await prisma.organization.findFirst({
-    where: orgWhere,
+    where: { id: targetOrgId, ownerId: userId },
     select: {
       id: true,
       name: true,
@@ -343,9 +359,11 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
   }
 
   const lockKey = `workflow:lock:${planId}`;
+  const lockToken = `${userId}:${planId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
   let lockAcquiredInRedis = false;
+  let lockRenewalTimer: NodeJS.Timeout | null = null;
   try {
-    const lockAcquired = await redis.set(lockKey, 'locked', 'EX', 120, 'NX');
+    const lockAcquired = await redis.set(lockKey, lockToken, 'EX', 120, 'NX');
     if (!lockAcquired) {
       throw new ApiError(409, 'Workflow plan is currently executing or has already been executed');
     }
@@ -358,6 +376,20 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
     throw new ApiError(409, 'Workflow plan is currently executing or has already been executed');
   }
   inMemoryExecutingPlans.add(planId);
+
+  if (lockAcquiredInRedis) {
+    lockRenewalTimer = setInterval(async () => {
+      try {
+        const current = await redis.get(lockKey);
+        if (current === lockToken) {
+          await redis.expire(lockKey, 120);
+        } else if (lockRenewalTimer) {
+          clearInterval(lockRenewalTimer);
+          lockRenewalTimer = null;
+        }
+      } catch {}
+    }, 30000);
+  }
 
   try {
     try {
@@ -484,7 +516,13 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           if (targetTeamId) {
             const team = await prisma.team.findUnique({
               where: { id: targetTeamId },
-              select: { id: true, organizationId: true },
+              select: {
+                id: true,
+                organizationId: true,
+                organization: {
+                  select: { ownerId: true },
+                },
+              },
             });
 
             if (!team) {
@@ -497,6 +535,32 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
 
             if (doc.organizationId && doc.organizationId !== team.organizationId) {
               throw new ApiError(403, 'Document does not belong to the target team organization');
+            }
+
+            const userOrgMembership = await prisma.organizationMember.findUnique({
+              where: {
+                organizationId_userId: {
+                  organizationId: team.organizationId,
+                  userId,
+                },
+              },
+            });
+
+            if (!userOrgMembership) {
+              throw new ApiError(403, 'You do not belong to the target team organization');
+            }
+
+            const isOrgAdminOrOwner =
+              userOrgMembership.role === OrgRole.ORG_ADMIN ||
+              team.organization?.ownerId === userId;
+
+            if (!isOrgAdminOrOwner) {
+              const teamMember = await prisma.teamMember.findFirst({
+                where: { teamId: targetTeamId, userId },
+              });
+              if (!teamMember) {
+                throw new ApiError(403, 'You are not a member of the target team');
+              }
             }
 
             await prisma.document.update({
@@ -636,10 +700,17 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
       results,
     };
   } finally {
+    if (lockRenewalTimer) {
+      clearInterval(lockRenewalTimer);
+      lockRenewalTimer = null;
+    }
     inMemoryExecutingPlans.delete(planId);
     if (lockAcquiredInRedis) {
       try {
-        await redis.del(lockKey);
+        const currentLock = await redis.get(lockKey);
+        if (currentLock === lockToken) {
+          await redis.del(lockKey);
+        }
       } catch {}
     }
   }
