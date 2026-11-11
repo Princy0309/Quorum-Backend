@@ -4,6 +4,7 @@ enum SavedItemType {
   CHAT
   DOCUMENT
   RESOURCE
+  ORG_POST
 }
 
 model SavedCollection {
