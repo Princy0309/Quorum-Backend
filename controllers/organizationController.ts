@@ -4,8 +4,11 @@ import { ApiError } from '../utils/ApiError.js';
 import {
   createOrganization,
   getUserOrganizations,
+  searchOrganizations,
   getOrganizationById,
   updateOrganization,
+  updateOrganizationProfilePicture,
+  deleteOrganizationProfilePicture,
   getOrganizationMembers,
   updateMemberRole,
   removeMember,
@@ -48,11 +51,23 @@ export const getUserOrganizationsController = asyncHandler(
       return next(new ApiError(401, 'Unauthorized, login required'));
     }
 
-    const organizations = await getUserOrganizations(req.user.id);
+    const rawQuery = req.query.search ?? req.query.q ?? req.query.query;
+    const query = typeof rawQuery === 'string' ? rawQuery.trim() : undefined;
+    const rawScope = req.query.scope;
+    const isGlobal = req.query.global === 'true' || rawScope === 'all' || rawScope === 'global';
+    const scope = isGlobal ? 'all' : 'my';
+
+    const rawLimit = req.query.limit;
+    const limit = typeof rawLimit === 'string' && /^\d+$/.test(rawLimit) ? parseInt(rawLimit, 10) : 20;
+
+    const organizations = await searchOrganizations(req.user.id, { query, scope, limit });
 
     return res.status(200).json({
       success: true,
+      statusCode: 200,
+      scope,
       data: organizations,
+      organizations,
     });
   }
 );
@@ -84,12 +99,29 @@ export const updateOrganizationController = asyncHandler(
       return next(new ApiError(400, 'Valid Organization ID is required'));
     }
 
-    const { name, description, logo, email, industry, teamSize } = req.body;
+    const { name, description, logo, avatar, profilePicture, email, industry, teamSize } = req.body;
+    const uploadedFile = (req.files && Array.isArray(req.files) && req.files.length > 0)
+      ? req.files[0]
+      : ((req as any).file || undefined);
+
+    if (uploadedFile) {
+      const isImage = (uploadedFile.mimetype && uploadedFile.mimetype.startsWith('image/')) ||
+        /\.(jpg|jpeg|png|gif|webp|svg|heic|avif)$/i.test(uploadedFile.originalname || '');
+      if (!isImage) {
+        return next(new ApiError(400, 'Profile picture must be an image file'));
+      }
+    }
+
+    let resolvedLogo = logo !== undefined ? logo : (avatar !== undefined ? avatar : profilePicture);
+    if (uploadedFile && req.user?.id) {
+      const orgWithPic = await updateOrganizationProfilePicture(req.user.id, orgId, {}, uploadedFile);
+      resolvedLogo = orgWithPic.logo;
+    }
 
     const updatedOrg = await updateOrganization(orgId, {
       name,
       description,
-      logo,
+      logo: resolvedLogo,
       email,
       industry,
       teamSize,
@@ -98,6 +130,110 @@ export const updateOrganizationController = asyncHandler(
     return res.status(200).json({
       success: true,
       data: updatedOrg,
+    });
+  }
+);
+
+export const getOrganizationProfilePictureController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const rawId = req.params.orgId || req.params.id;
+    const orgId = typeof rawId === 'string' ? rawId.trim() : undefined;
+
+    if (!orgId) {
+      return next(new ApiError(400, 'Valid Organization ID is required'));
+    }
+
+    const org = await getOrganizationById(orgId);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        organizationId: org.id,
+        logo: org.logo || null,
+        avatar: org.logo || null,
+        profilePicture: org.logo || null,
+      },
+    });
+  }
+);
+
+export const updateOrganizationProfilePictureController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id) {
+      return next(new ApiError(401, 'Unauthorized'));
+    }
+
+    const rawId = req.params.orgId || req.params.id;
+    const orgId = typeof rawId === 'string' ? rawId.trim() : undefined;
+
+    if (!orgId) {
+      return next(new ApiError(400, 'Valid Organization ID is required'));
+    }
+
+    const uploadedFile = (req.files && Array.isArray(req.files) && req.files.length > 0)
+      ? req.files[0]
+      : ((req as any).file || undefined);
+
+    if (uploadedFile) {
+      const isImage = (uploadedFile.mimetype && uploadedFile.mimetype.startsWith('image/')) ||
+        /\.(jpg|jpeg|png|gif|webp|svg|heic|avif)$/i.test(uploadedFile.originalname || '');
+      if (!isImage) {
+        return next(new ApiError(400, 'Profile picture must be an image file'));
+      }
+    }
+
+    const { logo, avatar, profilePicture, url, imageUrl } = req.body || {};
+    const inputLogo = logo !== undefined ? logo : (avatar !== undefined ? avatar : (profilePicture !== undefined ? profilePicture : (url !== undefined ? url : imageUrl)));
+
+    if (!uploadedFile && inputLogo === undefined) {
+      return next(new ApiError(400, 'Either an image file or a valid picture URL must be provided'));
+    }
+
+    const updatedOrg = await updateOrganizationProfilePicture(
+      req.user.id,
+      orgId,
+      { logo: inputLogo },
+      uploadedFile
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Organization profile picture updated successfully',
+      data: {
+        organizationId: updatedOrg.id,
+        name: updatedOrg.name,
+        logo: updatedOrg.logo,
+        avatar: updatedOrg.logo,
+        profilePicture: updatedOrg.logo,
+      },
+    });
+  }
+);
+
+export const deleteOrganizationProfilePictureController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id) {
+      return next(new ApiError(401, 'Unauthorized'));
+    }
+
+    const rawId = req.params.orgId || req.params.id;
+    const orgId = typeof rawId === 'string' ? rawId.trim() : undefined;
+
+    if (!orgId) {
+      return next(new ApiError(400, 'Valid Organization ID is required'));
+    }
+
+    const updatedOrg = await deleteOrganizationProfilePicture(req.user.id, orgId);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Organization profile picture removed successfully',
+      data: {
+        organizationId: updatedOrg.id,
+        logo: null,
+        avatar: null,
+        profilePicture: null,
+      },
     });
   }
 );

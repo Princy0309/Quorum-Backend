@@ -19,8 +19,11 @@ import webhookRoutes from './webhookRoutes.js';
 import githubRoutes from './githubRoutes.js';
 import savedItemRoutes from './savedItemRoutes.js';
 import whiteboardRoutes from './whiteboardRoutes.js';
+import officeRoutes from './officeRoutes.js';
 import projectRoutes from './projectRoutes.js';
 import documentRoutes from './documentRoutes.js';
+import recordingRoutes from './recordingRoutes.js';
+
 
 const router = Router();
 
@@ -81,8 +84,10 @@ router.use('/dm', dmRoutes);
 router.use('/v1/dm', dmRoutes);
 router.use('/conversations', conversationRoutes);
 router.use('/chat/conversations', conversationRoutes);
+router.use('/groups', conversationRoutes);
 router.use('/v1/conversations', conversationRoutes);
 router.use('/v1/chat/conversations', conversationRoutes);
+router.use('/v1/groups', conversationRoutes);
 
 router.use('/uploads', uploadRoutes);
 router.use('/v1/uploads', uploadRoutes);
@@ -105,9 +110,17 @@ router.use('/v1/github', githubRoutes);
 router.use('/webhooks', webhookRoutes);
 router.use('/v1/webhooks', webhookRoutes);
 
+router.use('/office', officeRoutes);
+router.use('/v1/office', officeRoutes);
+router.use('/teams/:teamId/office', officeRoutes);
+router.use('/v1/teams/:teamId/office', officeRoutes);
+
 router.use('/projects', projectRoutes);
 router.use('/v1/projects', projectRoutes);
 router.use('/documents', documentRoutes);
 router.use('/v1/documents', documentRoutes);
+router.use('/recordings', recordingRoutes);
+router.use('/v1/recordings', recordingRoutes);
+
 
 export default router;

@@ -15,6 +15,11 @@ import {
   handleCloseMeetingPoll,
   handleGetMeetingPolls
 } from './meetingPolls.js';
+import {
+  handleStartRecording,
+  handleStopRecording,
+  handleGetRecordingStatus
+} from './meetingRecording.js';
 import { handleAdmitParticipant, handleRejectParticipant } from './waitingRoom.js';
 import logger from '../utils/logger.js';
 import { verifyAccessToken, verifyRefreshToken } from '../services/tokenService.js';
@@ -27,7 +32,9 @@ import { registerTypingHandler } from './handlers/typingHandler.js';
 import { registerPresenceHandler } from './handlers/presenceHandler.js';
 import { registerCommunityHandler } from './handlers/communityHandler.js';
 import { registerWhiteboardHandler } from './handlers/whiteboardHandler.js';
+import { registerOfficeHandler } from './handlers/officeHandler.js';
 import { registerDocumentHandler } from './handlers/documentHandler.js';
+
 import { broadcastUserPresenceUpdate } from './handlers/presenceHandler.js';
 import { setMeetingPresence, setScreenSharePresence } from '../services/presenceService.js';
 
@@ -196,7 +203,9 @@ export const initSocketServer = (httpServer: any) => {
     registerPresenceHandler(io, socket as any);
     registerCommunityHandler(io, socket as any);
     registerWhiteboardHandler(io, socket as any);
+    registerOfficeHandler(io, socket as any);
     registerDocumentHandler(io, socket as any);
+
 
     const handleDynamicAuth = async (data: { token?: string }, ack?: (res: any) => void) => {
       try {
@@ -249,7 +258,7 @@ export const initSocketServer = (httpServer: any) => {
     socket.on('meeting:join', (data, ack) => {
       handleJoinMeeting(io, socket, data?.meetingCode, ack);
       if (socket.data.user?.id) {
-        setMeetingPresence(socket.data.user.id, true).then((updated) => {
+        setMeetingPresence(socket.data.user.id, true, data?.meetingCode).then((updated) => {
           broadcastUserPresenceUpdate(io, socket.data.user.id, updated).catch(() => { });
         }).catch(() => { });
       }
@@ -310,6 +319,13 @@ export const initSocketServer = (httpServer: any) => {
     socket.on('meeting:poll-close', (data, ack) => handleCloseMeetingPoll(io, socket, data, ack));
     socket.on('meeting:get-polls', (data, ack) => handleGetMeetingPolls(io, socket, data, ack));
     socket.on('meeting:polls-get', (data, ack) => handleGetMeetingPolls(io, socket, data, ack));
+
+    socket.on('meeting:start-recording', (data, ack) => handleStartRecording(io, socket, data, ack));
+    socket.on('meeting:recording-start', (data, ack) => handleStartRecording(io, socket, data, ack));
+    socket.on('meeting:stop-recording', (data, ack) => handleStopRecording(io, socket, data, ack));
+    socket.on('meeting:recording-stop', (data, ack) => handleStopRecording(io, socket, data, ack));
+    socket.on('meeting:get-recording-status', (data, ack) => handleGetRecordingStatus(io, socket, data, ack));
+    socket.on('meeting:recording-status-get', (data, ack) => handleGetRecordingStatus(io, socket, data, ack));
 
     socket.on('disconnect', () => {
       logger.info(`[Socket] Client disconnected: ${socket.id}`);

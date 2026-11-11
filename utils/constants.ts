@@ -54,6 +54,20 @@ export const PROJECT_EVENTS = {
   DELIVERABLE_REVIEWED: 'project:deliverable_reviewed',
 } as const;
 
+export const OFFICE_EVENTS = {
+  JOIN: 'office:join',
+  LEAVE: 'office:leave',
+  CHANGE_ZONE: 'office:change-zone',
+  ZONE_CHANGED: 'office:zone-changed',
+  KNOCK: 'office:knock',
+  KNOCKED: 'office:knocked',
+  USER_JOINED: 'office:user-joined',
+  USER_LEFT: 'office:user-left',
+  STATE_UPDATED: 'office:state-updated',
+  MEETING_STARTED: 'office:meeting-started',
+  MEETING_ENDED: 'office:meeting-ended',
+} as const;
+
 export const DOCUMENT_EVENTS = {
   DOCUMENT_JOIN: 'document:join',
   DOCUMENT_LEAVE: 'document:leave',
@@ -69,5 +83,3 @@ export const DOCUMENT_EVENTS = {
   MEETING_DOCUMENT_OPENED: 'meeting:document_opened',
   MEETING_DOCUMENT_CLOSED: 'meeting:document_closed'
 } as const;
-
-

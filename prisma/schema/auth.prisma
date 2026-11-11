@@ -66,6 +66,7 @@ model User {
   meetingPollVotes         MeetingPollVote[]         @relation("MeetingPollVoter")
   createdDocuments         Document[]                @relation("DocumentCreator")
   documentCollaborations   DocumentCollaborator[]    @relation("DocumentCollaboratorUser")
+  recordings               MeetingRecording[]        @relation("UserRecordings")
 }
 
 model RefreshToken {

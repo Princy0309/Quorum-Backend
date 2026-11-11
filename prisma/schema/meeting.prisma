@@ -34,6 +34,7 @@ model Meeting {
   polls               MeetingPoll[]
   documents           DocumentMeeting[]
   originDocuments     Document[]       @relation("MeetingOriginDocuments")
+  recordings          MeetingRecording[]
 
   @@index([organizationId])
   @@index([organizationId, scheduledStartTime])

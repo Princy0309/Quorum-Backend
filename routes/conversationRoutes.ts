@@ -11,7 +11,9 @@ import {
   toggleReactionSchema,
   forwardMessagesSchema,
   createPollSchema,
-  votePollSchema
+  votePollSchema,
+  pinMessageParamsSchema,
+  pinnedListParamsSchema
 } from '../validators/chatValidators.js';
 import {
   getUserConversationsController,
@@ -22,6 +24,9 @@ import {
   addGroupParticipantsController,
   removeGroupParticipantController,
   updateGroupConversationController,
+  getGroupProfilePictureController,
+  updateGroupProfilePictureController,
+  deleteGroupProfilePictureController,
   leaveGroupConversationController,
   getConversationDetailsController,
   makeGroupAdminController,
@@ -39,6 +44,7 @@ import {
   getPinnedMessagesController
 } from '../controllers/conversationController.js';
 import { createOrGetDMController } from '../controllers/dmController.js';
+import { uploadMiddleware } from '../controllers/uploadController.js';
 
 const router = Router();
 
@@ -66,8 +72,23 @@ router.get('/:id/pinned', authMiddleware, getPinnedMessagesController);
 router.get('/:id/messages/pinned', authMiddleware, getPinnedMessagesController);
 router.post('/:id/messages/:messageId/reactions', authMiddleware, validate(toggleReactionSchema), toggleMessageReactionController);
 router.get('/:id/messages/:messageId/reactions', authMiddleware, getMessageReactionsController);
-router.get('/:id/search', authMiddleware, searchConversationMessagesController);
-router.patch('/:id', authMiddleware, validate(updateGroupSchema), updateGroupConversationController);
+router.patch('/:id', authMiddleware, uploadMiddleware, validate(updateGroupSchema), updateGroupConversationController);
+
+router.get('/:id/profile-picture', authMiddleware, getGroupProfilePictureController);
+router.post('/:id/profile-picture', authMiddleware, uploadMiddleware, updateGroupProfilePictureController);
+router.put('/:id/profile-picture', authMiddleware, uploadMiddleware, updateGroupProfilePictureController);
+router.delete('/:id/profile-picture', authMiddleware, deleteGroupProfilePictureController);
+
+router.get('/:id/avatar', authMiddleware, getGroupProfilePictureController);
+router.post('/:id/avatar', authMiddleware, uploadMiddleware, updateGroupProfilePictureController);
+router.put('/:id/avatar', authMiddleware, uploadMiddleware, updateGroupProfilePictureController);
+router.delete('/:id/avatar', authMiddleware, deleteGroupProfilePictureController);
+
+router.get('/:id/image', authMiddleware, getGroupProfilePictureController);
+router.post('/:id/image', authMiddleware, uploadMiddleware, updateGroupProfilePictureController);
+router.put('/:id/image', authMiddleware, uploadMiddleware, updateGroupProfilePictureController);
+router.delete('/:id/image', authMiddleware, deleteGroupProfilePictureController);
+
 router.post('/:id/participants', authMiddleware, validate(addParticipantsSchema), addGroupParticipantsController);
 router.post('/:id/members', authMiddleware, validate(addParticipantsSchema), addGroupParticipantsController);
 router.delete('/:id/leave', authMiddleware, leaveGroupConversationController);
@@ -81,6 +102,11 @@ router.post('/:id/remove-admin', authMiddleware, dismissGroupAdminController);
 
 router.delete('/:id/participants/:userId', authMiddleware, removeGroupParticipantController);
 router.delete('/:id/members/:userId', authMiddleware, removeGroupParticipantController);
+
+router.post('/:id/messages/:messageId/pin', authMiddleware, pinMessageController);
+router.delete('/:id/messages/:messageId/pin', authMiddleware, unpinMessageController);
+router.get('/:id/pinned', authMiddleware, getPinnedMessagesController);
+
 
 export default router;
 

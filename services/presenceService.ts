@@ -16,6 +16,8 @@ export interface UserPresenceData {
   statusMessage?: string | null;
   statusExpiresAt?: Date | null;
   lastSeen?: Date | null;
+  isInMeeting?: boolean;
+  meetingCode?: string | null;
 }
 
 export interface CustomStatusInput {
@@ -137,7 +139,7 @@ export const getUserPresence = async (userId: string): Promise<UserPresenceData>
       // 1. Screen sharing forces DO NOT DISTURB
       status = 'DO_NOT_DISTURB';
       statusMessage = 'Presenting screen';
-    } else if (meetingRaw === 'in_meeting') {
+    } else if (meetingRaw?.startsWith('in_meeting')) {
       // 2. Active meeting marks user BUSY
       status = 'BUSY';
       statusMessage = 'In a meeting';
@@ -171,12 +173,24 @@ export const getUserPresence = async (userId: string): Promise<UserPresenceData>
     }
   }
 
+  let meetingCode: string | null=null;
+  let isInMeeting = false;
+
+  if(meetingRaw){
+    isInMeeting = true;
+    if(meetingRaw.startsWith('in_meeting:')){
+      meetingCode = meetingRaw.split(':')[1] || null;
+    }
+  }
+
   return {
     isOnline,
     status,
     statusMessage,
     statusExpiresAt,
     lastSeen,
+    isInMeeting,
+    meetingCode,
   };
 };
 
@@ -305,10 +319,11 @@ export const clearUserCustomStatus = async (userId: string): Promise<UserPresenc
   return getUserPresence(userId);
 };
 
-export const setMeetingPresence = async (userId: string, inMeeting: boolean): Promise<UserPresenceData> => {
+export const setMeetingPresence = async (userId: string, inMeeting: boolean, meetingCode?: string | null): Promise<UserPresenceData> => {
   const meetingKey = `user:meeting_state:${userId}`;
   if (inMeeting) {
-    await redis.set(meetingKey, 'in_meeting', 'EX', 14400); // 4-hour safety TTL
+    const value = meetingCode ? `in_meeting:${meetingCode}` : 'in_meeting';
+    await redis.set(meetingKey, value, 'EX', 14400); // 4-hour safety TTL
   } else {
     await redis.del(meetingKey);
   }
