@@ -11,11 +11,13 @@ export interface Peer {
     inboundSrtpSession?: SrtpSession;
     outboundSrtpSession?: SrtpSession;
     dtlsHandshake?: DtlsServerHandshake;
+    pendingTrackSource?: 'camera' | 'screen';
 }
 
 export interface PublishedTrack {
     trackId: string;
     kind: 'audio' | 'video';
+    source?: 'camera' | 'screen';
     peerId: string;
     mediaStreamTrack: MediaStreamTrack;
     ssrc?: number;
@@ -27,6 +29,7 @@ export interface SfuRoom {
     hostId?: string;
     peers: Map<string, Peer>;
     channels: Map<string, TrackSubscriber[]>;
+    activeScreenSharer?: { peerId: string; trackId?: string; startedAt: number } | null;
 }
 
 export interface TrackSubscriber {

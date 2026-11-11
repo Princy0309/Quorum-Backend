@@ -23,6 +23,7 @@ interface OfferPayload {
     type: 'offer';
     sdp: string;
   };
+  source?: 'camera' | 'screen';
 }
 
 interface CandidatePayload {
@@ -134,6 +135,17 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         return;
       }
 
+      const activeSharer = roomBroker.getActiveScreenSharer(activeRoom);
+      const wasScreenSharer = activeSharer?.peerId === activePeerId;
+      const screenTrackId = wasScreenSharer ? activeSharer.trackId : undefined;
+      if (wasScreenSharer) {
+        roomBroker.releaseScreenShareLock(activeRoom, activePeerId);
+        io.to(activeRoom).emit('sfu:screen-share-stopped', {
+          peerId: activePeerId,
+          trackId: screenTrackId,
+        });
+      }
+
       const publishedTrackIds = peer ? Array.from(peer.publishedTracks.keys()) : [];
 
       if (peer?.peerConnection) {
@@ -239,9 +251,13 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         trackId: t.trackId,
         kind: t.kind,
         peerId: t.peerId,
+        source: t.source || 'camera',
       }));
 
-      socket.emit('sfu:joined', { existingTracks });
+      socket.emit('sfu:joined', {
+        existingTracks,
+        activeScreenSharer: roomBroker.getActiveScreenSharer(roomCode),
+      });
       socket.to(roomCode).emit('sfu:peer-joined', { peerId: effectivePeerId, name: effectiveName });
 
       for (const t of existingTracks) {
@@ -250,6 +266,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
             peerId: t.peerId,
             trackId: t.trackId,
             kind: t.kind,
+            source: t.source,
           });
         }
       }
@@ -259,10 +276,11 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
 
   
 
-  socket.on('sfu:offer', async ({ roomCode, peerId, sdp }: OfferPayload) => {
+  socket.on('sfu:offer', async ({ roomCode, peerId, sdp, source }: OfferPayload) => {
     let pc: RTCPeerConnection | null = null;
     let activeRoom: string | null = null;
     let activePeerId: string | null = null;
+    let isRenegotiation = false;
     try {
       activeRoom = currentRoom;
       activePeerId = currentPeerId;
@@ -285,80 +303,103 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         return;
       }
 
-      if (peer.peerConnection) {
-        try {
-          const oldTrackIds = Array.from(peer.publishedTracks.keys());
-          for (const oldTrackId of oldTrackIds) {
-            const closed = subscriberRegistry.removeByRoomAndTrack(resolvedRoom, oldTrackId);
-            for (const subPc of closed) {
-              try {
-                subPc.close();
-              } catch {}
-            }
-            roomBroker.unpublishTrack(resolvedRoom, resolvedPeerId, oldTrackId);
-            socket.to(resolvedRoom).emit('sfu:track-unpublished', { peerId: resolvedPeerId, trackId: oldTrackId });
-          }
-          (peer.peerConnection as any).close();
-        } catch (err) {
-          logger.warn(`[Signaling] Error cleaning up previous publisher peerConnection for ${resolvedPeerId}:`, err);
-        }
-        peer.peerConnection = undefined;
-        peer.inboundSrtpSession = undefined;
-        peer.outboundSrtpSession = undefined;
+      if (source) {
+        peer.pendingTrackSource = source;
       }
 
-      pc = createPeerConnection();
-      peer.peerConnection = pc;
+      isRenegotiation = Boolean(
+        peer.peerConnection &&
+        (peer.peerConnection as any).connectionState !== 'closed' &&
+        !(peer.peerConnection as any).isClosed
+      );
 
-      for (const dtlsTransport of (pc as any).dtlsTransports || []) {
-        const onPublisherDtlsConnected = () => {
+      if (!isRenegotiation) {
+        if (peer.peerConnection) {
           try {
-            const dtls = (dtlsTransport as any).dtls;
-            if (dtls && typeof dtls.extractSessionKeys === 'function') {
-              const { localKey, localSalt, remoteKey, remoteSalt } = dtls.extractSessionKeys(16, 14);
-              const inboundContext = new SrtpContext(remoteKey, remoteSalt);
-              const outboundContext = new SrtpContext(localKey, localSalt);
-              const inboundSession = new SrtpSession(inboundContext, false);
-              const outboundSession = new SrtpSession(outboundContext, true);
-              roomBroker.attachPublisherSrtpSessions(resolvedRoom, resolvedPeerId, inboundSession, outboundSession);
-              logger.info(`[Signaling] Publisher DTLS connected and SRTP sessions attached for peer ${resolvedPeerId}`);
+            const oldTrackIds = Array.from(peer.publishedTracks.keys());
+            for (const oldTrackId of oldTrackIds) {
+              const closed = subscriberRegistry.removeByRoomAndTrack(resolvedRoom, oldTrackId);
+              for (const subPc of closed) {
+                try {
+                  subPc.close();
+                } catch {}
+              }
+              roomBroker.unpublishTrack(resolvedRoom, resolvedPeerId, oldTrackId);
+              socket.to(resolvedRoom).emit('sfu:track-unpublished', { peerId: resolvedPeerId, trackId: oldTrackId });
             }
+            (peer.peerConnection as any).close();
           } catch (err) {
-            logger.error(`[Signaling] Failed to extract publisher SRTP session keys:`, err);
+            logger.warn(`[Signaling] Error cleaning up previous publisher peerConnection for ${resolvedPeerId}:`, err);
           }
-        };
+          peer.peerConnection = undefined;
+          peer.inboundSrtpSession = undefined;
+          peer.outboundSrtpSession = undefined;
+        }
 
-        if (dtlsTransport.state === 'connected') {
-          onPublisherDtlsConnected();
-        } else {
-          dtlsTransport.onStateChange.subscribe((state: string) => {
-            if (state === 'connected') {
-              onPublisherDtlsConnected();
+        pc = createPeerConnection();
+        peer.peerConnection = pc;
+
+        for (const dtlsTransport of (pc as any).dtlsTransports || []) {
+          const onPublisherDtlsConnected = () => {
+            try {
+              const dtls = (dtlsTransport as any).dtls;
+              if (dtls && typeof dtls.extractSessionKeys === 'function') {
+                const { localKey, localSalt, remoteKey, remoteSalt } = dtls.extractSessionKeys(16, 14);
+                const inboundContext = new SrtpContext(remoteKey, remoteSalt);
+                const outboundContext = new SrtpContext(localKey, localSalt);
+                const inboundSession = new SrtpSession(inboundContext, false);
+                const outboundSession = new SrtpSession(outboundContext, true);
+                roomBroker.attachPublisherSrtpSessions(resolvedRoom, resolvedPeerId, inboundSession, outboundSession);
+                logger.info(`[Signaling] Publisher DTLS connected and SRTP sessions attached for peer ${resolvedPeerId}`);
+              }
+            } catch (err) {
+              logger.error(`[Signaling] Failed to extract publisher SRTP session keys:`, err);
             }
-          });
+          };
+
+          if (dtlsTransport.state === 'connected') {
+            onPublisherDtlsConnected();
+          } else {
+            dtlsTransport.onStateChange.subscribe((state: string) => {
+              if (state === 'connected') {
+                onPublisherDtlsConnected();
+              }
+            });
+          }
         }
-      }
 
-      pc.onTrack.subscribe((track) => {
-        const publishedTrack = roomBroker.publishTrack(resolvedRoom, resolvedPeerId, track);
+        pc.onTrack.subscribe((track) => {
+          const activeSharer = roomBroker.getActiveScreenSharer(resolvedRoom);
+          const hasVideoTrack = Array.from(peer.publishedTracks.values()).some((t) => t.kind === 'video');
+          const resolvedSource: 'camera' | 'screen' =
+            peer.pendingTrackSource ||
+            (activeSharer?.peerId === resolvedPeerId && (hasVideoTrack || !activeSharer.trackId)
+              ? 'screen'
+              : 'camera');
+          peer.pendingTrackSource = undefined;
+          const publishedTrack = roomBroker.publishTrack(resolvedRoom, resolvedPeerId, track, resolvedSource);
 
-        socket.to(resolvedRoom).emit('sfu:new-producer', {
-          peerId: resolvedPeerId,
-          trackId: publishedTrack.trackId,
-          kind: publishedTrack.kind,
-        });
-      });
-
-      pc.onIceCandidate.subscribe((candidate) => {
-        if (candidate) {
-          socket.emit('sfu:ice-candidate', {
-            roomCode: resolvedRoom,
+          socket.to(resolvedRoom).emit('sfu:new-producer', {
             peerId: resolvedPeerId,
-            target: 'publisher',
-            candidate: candidate.toJSON ? candidate.toJSON() : candidate,
+            trackId: publishedTrack.trackId,
+            kind: publishedTrack.kind,
+            source: publishedTrack.source,
           });
-        }
-      });
+        });
+
+        pc.onIceCandidate.subscribe((candidate) => {
+          if (candidate) {
+            socket.emit('sfu:ice-candidate', {
+              roomCode: resolvedRoom,
+              peerId: resolvedPeerId,
+              target: 'publisher',
+              candidate: candidate.toJSON ? candidate.toJSON() : candidate,
+            });
+          }
+        });
+      } else {
+        pc = peer.peerConnection!;
+      }
 
       await pc.setRemoteDescription(new RTCSessionDescription(sdp.sdp, sdp.type));
 
@@ -387,7 +428,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       logger.info(`[Signaling] Negotiated publishing offer/answer for peer ${activePeerId}`);
     } catch (err) {
       logger.error(`[Signaling] Error handling offer from peer ${activePeerId || currentPeerId}:`, err);
-      if (activeRoom && activePeerId) {
+      if (activeRoom && activePeerId && !isRenegotiation) {
         const room = roomBroker.getRoom(activeRoom);
         const peer = room?.peers.get(activePeerId);
         if (peer && pc && peer.peerConnection === pc) {
@@ -734,6 +775,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
 
         socket.emit('sfu:subscribed', {
           trackId,
+          source: publishedTrack.source || 'camera',
           sdp: {
             type: answer.type,
             sdp: answer.sdp,
@@ -788,6 +830,12 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       return;
     }
 
+    const activeSharer = roomBroker.getActiveScreenSharer(activeRoom);
+    const room = roomBroker.getRoom(activeRoom);
+    const peer = room?.peers.get(activePeerId);
+    const track = peer?.publishedTracks.get(trackId);
+    const wasScreenTrack = track?.source === 'screen' || activeSharer?.trackId === trackId;
+
     const closed = subscriberRegistry.removeByRoomAndTrack(activeRoom, trackId);
     for (const pc of closed) {
       try {
@@ -803,9 +851,90 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
 
     const unpublished = roomBroker.unpublishTrack(activeRoom, activePeerId, trackId);
     if (unpublished) {
+      if (wasScreenTrack && activeSharer?.peerId === activePeerId) {
+        roomBroker.releaseScreenShareLock(activeRoom, activePeerId);
+        io.to(activeRoom).emit('sfu:screen-share-stopped', { peerId: activePeerId, trackId });
+      }
       socket.to(activeRoom).emit('sfu:track-unpublished', { peerId: activePeerId, trackId });
       logger.info(`[Signaling] Peer ${activePeerId} unpublished track ${trackId}`);
     }
+  });
+
+  socket.on('sfu:start-screen-share', ({ roomCode, peerId }: { roomCode?: string; peerId?: string }) => {
+    const activeRoom = currentRoom;
+    const activePeerId = currentPeerId;
+    const rCode = roomCode || activeRoom;
+    const pId = peerId || activePeerId;
+    if (!activeRoom || rCode !== activeRoom || !activePeerId || pId !== activePeerId) {
+      socket.emit('sfu:error', { message: 'Unauthorized screen share request' });
+      return;
+    }
+
+    const acquired = roomBroker.acquireScreenShareLock(activeRoom, activePeerId);
+    if (!acquired) {
+      const currentSharer = roomBroker.getActiveScreenSharer(activeRoom);
+      socket.emit('sfu:screen-share-rejected', {
+        message: 'Another participant is already sharing screen',
+        activeSharerPeerId: currentSharer?.peerId,
+      });
+      return;
+    }
+
+    const peer = roomBroker.getRoom(activeRoom)?.peers.get(activePeerId);
+    if (peer) {
+      peer.pendingTrackSource = 'screen';
+    }
+
+    io.to(activeRoom).emit('sfu:screen-share-started', {
+      peerId: activePeerId,
+    });
+    socket.emit('sfu:screen-share-started-ack', {
+      peerId: activePeerId,
+    });
+    logger.info(`[Signaling] Screen share lock acquired by peer ${activePeerId} in room ${activeRoom}`);
+  });
+
+  socket.on('sfu:stop-screen-share', ({ roomCode, peerId }: { roomCode?: string; peerId?: string }) => {
+    const activeRoom = currentRoom;
+    const activePeerId = currentPeerId;
+    const rCode = roomCode || activeRoom;
+    const pId = peerId || activePeerId;
+    if (!activeRoom || rCode !== activeRoom || !activePeerId || pId !== activePeerId) {
+      return;
+    }
+
+    const activeSharer = roomBroker.getActiveScreenSharer(activeRoom);
+    if (!activeSharer || activeSharer.peerId !== activePeerId) {
+      return;
+    }
+
+    const screenTrackId = activeSharer.trackId;
+    roomBroker.releaseScreenShareLock(activeRoom, activePeerId);
+
+    if (screenTrackId) {
+      const closed = subscriberRegistry.removeByRoomAndTrack(activeRoom, screenTrackId);
+      for (const pc of closed) {
+        try {
+          pc.close();
+        } catch {}
+      }
+      for (const key of pendingSubscriberCandidates.keys()) {
+        if (key.startsWith(`${activeRoom}:`) && key.endsWith(`:${screenTrackId}`)) {
+          pendingSubscriberCandidates.delete(key);
+        }
+      }
+      roomBroker.unpublishTrack(activeRoom, activePeerId, screenTrackId);
+      io.to(activeRoom).emit('sfu:track-unpublished', {
+        peerId: activePeerId,
+        trackId: screenTrackId,
+      });
+    }
+
+    io.to(activeRoom).emit('sfu:screen-share-stopped', {
+      peerId: activePeerId,
+      trackId: screenTrackId,
+    });
+    logger.info(`[Signaling] Screen share stopped by peer ${activePeerId} in room ${activeRoom}`);
   });
 
   socket.on('sfu:leave', handleLeave);
