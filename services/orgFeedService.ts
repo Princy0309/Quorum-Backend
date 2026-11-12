@@ -214,7 +214,7 @@ const buildOrgPostCopy = (post: any, actorName: string, preview: string) => {
             title: isMilestone ? `${teamName} reached a milestone!` : `${teamName} was highlighted`,
             body: isMilestone
                 ? `${actorName} appreciated ${teamName}: "${preview}" — send them kudos!`
-                : `${actorName} gave a shoutout to ${teamName}: "${preview}"`,
+                : `${actorName} posted an update mentioning ${teamName}: "${preview}"`,
         };
     } else if (targetName) {
         if (category === OrgPostCategory.BIRTHDAY) {
