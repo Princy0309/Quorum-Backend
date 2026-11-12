@@ -737,6 +737,16 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
 
           let validRecipients: { id: string }[] = [];
           if (orgId) {
+            const callerOrg = await getUserOrganizationContext(userId, orgId);
+            if (!callerOrg) {
+              throw new ApiError(403, 'You are not a member of the target organization');
+            }
+
+            const org = await prisma.organization.findUnique({
+              where: { id: orgId },
+              select: { ownerId: true },
+            });
+
             const orgMembers = await prisma.organizationMember.findMany({
               where: {
                 organizationId: orgId,
@@ -744,7 +754,12 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               },
               select: { userId: true },
             });
-            validRecipients = orgMembers.map((m) => ({ id: m.userId }));
+
+            const recipientSet = new Set(orgMembers.map((m) => m.userId));
+            if (org?.ownerId && userIds.includes(org.ownerId)) {
+              recipientSet.add(org.ownerId);
+            }
+            validRecipients = Array.from(recipientSet).map((id) => ({ id }));
           } else {
             validRecipients = await prisma.user.findMany({
               where: { id: { in: userIds } },

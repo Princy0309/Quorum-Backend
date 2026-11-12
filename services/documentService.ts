@@ -4,6 +4,8 @@ import logger from '../utils/logger.js';
 import { getIO } from '../sockets/socketServer.js';
 import { generateRawCompletion } from './aiService.js';
 import { DocumentScopeType } from '@prisma/client';
+import { canUserJoinMeeting } from './meetingPermissionService.js';
+import { meetingRooms } from '../sockets/meetingPresence.js';
 import {
   CreateDocumentInput,
   UpdateDocumentInput,
@@ -148,7 +150,18 @@ export const checkDocumentAccess = async (
     if (meeting) {
       const isLinkedToMeeting = doc.meetings.some((dm) => dm.meetingId === meeting.id) || doc.meetingId === meeting.id;
       if (isLinkedToMeeting) {
-        return { doc, permission: 'EDIT' as const, isCreator: false, isMeetingParticipant: true };
+        const permCheck = await canUserJoinMeeting(userId, meeting.code);
+        if (permCheck.allowed) {
+          const roomState = meetingRooms.get(meeting.code.toLowerCase());
+          const isParticipant =
+            meeting.hostId === userId ||
+            (Array.isArray(meeting.admitted) && meeting.admitted.includes(userId)) ||
+            (roomState && roomState.participants.has(userId));
+
+          if (isParticipant) {
+            return { doc, permission: 'EDIT' as const, isCreator: false, isMeetingParticipant: true };
+          }
+        }
       }
     }
   }
@@ -582,7 +595,7 @@ export const removeCollaborator = async (userId: string, documentId: string, tar
 };
 
 export const openDocumentInMeeting = async (userId: string, documentId: string, meetingCode: string) => {
-  const { doc } = await checkDocumentAccess(userId, documentId, 'VIEW');
+  const { doc } = await checkDocumentAccess(userId, documentId, 'EDIT');
 
   const meeting = await prisma.meeting.findFirst({
     where: {
@@ -593,6 +606,11 @@ export const openDocumentInMeeting = async (userId: string, documentId: string, 
 
   if (!meeting) {
     throw new ApiError(404, 'Active meeting not found');
+  }
+
+  const permCheck = await canUserJoinMeeting(userId, meeting.code);
+  if (!permCheck.allowed) {
+    throw new ApiError(permCheck.statusCode || 403, permCheck.reason || 'You are not authorized to join this meeting');
   }
 
   await prisma.documentMeeting.upsert({
