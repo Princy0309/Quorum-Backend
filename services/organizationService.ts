@@ -9,8 +9,7 @@ import { addOrgInviteEmailToQueue } from '../queues/emailQueue.js';
 import env from '../config/env.js';
 import { uploadBufferToS3 } from './uploadService.js';
 import { deleteS3Object } from '../config/s3.js';
-
-
+import { createSystemOrgFeedPost } from './orgFeedService.js';
 
 function slugify(text: string): string {
   return text
@@ -96,12 +95,12 @@ export const searchOrganizations = async (
   if (scope === 'all' || scope === 'global') {
     const whereClause: any = trimmedQuery
       ? {
-          OR: [
-            { name: { contains: trimmedQuery, mode: 'insensitive' } },
-            { slug: { contains: trimmedQuery, mode: 'insensitive' } },
-            { description: { contains: trimmedQuery, mode: 'insensitive' } },
-          ],
-        }
+        OR: [
+          { name: { contains: trimmedQuery, mode: 'insensitive' } },
+          { slug: { contains: trimmedQuery, mode: 'insensitive' } },
+          { description: { contains: trimmedQuery, mode: 'insensitive' } },
+        ],
+      }
       : {};
 
     const organizations = await prisma.organization.findMany({
@@ -250,7 +249,7 @@ export const updateOrganization = async (orgId: string, data: UpdateOrgInput) =>
   const resolvedLogo = data.logo !== undefined ? data.logo : (data.avatar !== undefined ? data.avatar : data.profilePicture);
 
   if (resolvedLogo !== undefined && existingOrg.logo && existingOrg.logo !== resolvedLogo) {
-    await deleteS3Object(existingOrg.logo).catch(() => {});
+    await deleteS3Object(existingOrg.logo).catch(() => { });
   }
 
   const updatedOrg = await prisma.organization.update({
@@ -309,7 +308,7 @@ export const updateOrganizationProfilePicture = async (
   }
 
   if (org.logo && org.logo !== finalLogo) {
-    await deleteS3Object(org.logo).catch(() => {});
+    await deleteS3Object(org.logo).catch(() => { });
   }
 
   const updatedOrg = await prisma.organization.update({
@@ -361,7 +360,6 @@ export const deleteOrganization = async (orgId: string, userId: string) => {
 
   return { message: `Organization '${org.name}' deleted successfully` };
 };
-
 
 export const getOrganizationMembers = async (
   orgId: string,
@@ -479,6 +477,24 @@ export const updateMemberRole = async (
       },
     },
   });
+
+  const roleRank: Record<OrgRole, number> = {
+    [OrgRole.MEMBER]: 1,
+    [OrgRole.TEAM_HEAD]: 2,
+    [OrgRole.ORG_ADMIN]: 3,
+  };
+
+  if (roleRank[newRole] > roleRank[membership.role]) {
+    const roleLabel = newRole === OrgRole.ORG_ADMIN ? 'Organization Admin' : 'Team Head';
+    void createSystemOrgFeedPost({
+      organizationId: orgId,
+      category: 'PROMOTION',
+      title: 'Promotion Announcement!',
+      content: `Congratulations to ${updatedMembership.user.name} on being promoted to ${roleLabel}!`,
+      actorId: currentUserId,
+      targetUserId,
+    });
+  }
 
   return {
     id: updatedMembership.id,
@@ -1025,6 +1041,30 @@ export const acceptOrganizationInvite = async (
 
     return member;
   });
+
+  void (async () => {
+    try {
+      const [newUser, joinedTeam] = await Promise.all([
+        prisma.user.findUnique({ where: { id: userId }, select: { name: true } }),
+        invite.teamId
+          ? prisma.team.findUnique({ where: { id: invite.teamId }, select: { name: true } })
+          : Promise.resolve(null),
+      ]);
+      const memberName = newUser?.name || 'A new teammate';
+      const teamSuffix = joinedTeam ? ` (${joinedTeam.name})` : '';
+      await createSystemOrgFeedPost({
+        organizationId: invite.organizationId,
+        category: 'WELCOME',
+        title: `Welcome ${memberName}!`,
+        content: `Everyone please join us in welcoming ${memberName}${teamSuffix} to ${result.organization.name}!`,
+        actorId: invite.inviterId,
+        targetUserId: userId,
+        targetTeamId: joinedTeam ? invite.teamId : null,
+      });
+    } catch (err: any) {
+      logger.warn(`[OrganizationInvite] Failed to post welcome feed item: ${err?.message}`);
+    }
+  })();
 
   return result;
 };

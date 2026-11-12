@@ -4,7 +4,7 @@ import { ApiError } from '../utils/ApiError.js';
 import type { CreateTeamInput, UpdateTeamInput } from '../types/team.js';
 import { queueNotification } from '../queues/notificationQueue.js';
 import logger from '../utils/logger.js';
-
+import { createSystemOrgFeedPost } from './orgFeedService.js';
 
 export const createTeam = async (
   organizationId: string,
@@ -33,7 +33,7 @@ export const createTeam = async (
     throw new ApiError(409, 'A team with this name already exists in this organization');
   }
 
-  return await prisma.$transaction(async (tx) => {
+  const createdTeam = await prisma.$transaction(async (tx) => {
     const team = await tx.team.create({
       data: {
         organizationId,
@@ -68,6 +68,17 @@ export const createTeam = async (
 
     return team;
   });
+
+  void createSystemOrgFeedPost({
+    organizationId,
+    category: 'NEW_TEAM',
+    title: `New Team Launched: ${createdTeam.name}`,
+    content: `A new team "${createdTeam.name}" has been created in the organization. Let's cheer them on!`,
+    actorId: creatorUserId,
+    targetTeamId: createdTeam.id,
+  });
+
+  return createdTeam;
 
 };
 
@@ -466,4 +477,95 @@ export const removeTeamMember = async (
   });
 
   return { message: 'Member removed from team successfully' };
+};
+
+export const getTeamMembers = async (
+  organizationId: string,
+  teamId: string,
+  options?: { search?: string; role?: string }
+) => {
+  const team = await prisma.team.findFirst({
+    where: { id: teamId, organizationId },
+    select: { id: true, name: true },
+  });
+
+  if (!team) {
+    throw new ApiError(404, 'Team not found in this organization');
+  }
+
+  const whereClause: any = {
+    teamId,
+  };
+
+  if (options?.role && ['LEAD', 'MEMBER'].includes(options.role.toUpperCase())) {
+    whereClause.role = options.role.toUpperCase();
+  }
+
+  if (options?.search && options.search.trim().length > 0) {
+    const term = options.search.trim();
+    whereClause.user = {
+      OR: [
+        { name: { contains: term, mode: 'insensitive' } },
+        { email: { contains: term, mode: 'insensitive' } },
+      ],
+    };
+  }
+
+  const members = await prisma.teamMember.findMany({
+    where: whereClause,
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          avatar: true,
+          memberships: {
+            where: { organizationId },
+            select: { role: true, joinedAt: true },
+            take: 1,
+          },
+        },
+      },
+    },
+    orderBy: [
+      { role: 'asc' }, // 'LEAD' < 'MEMBER' alphabetically, so Team Leads are always sorted first
+      { joinedAt: 'asc' },
+    ],
+  });
+
+  return {
+    totalCount: members.length,
+    members: members.map((m) => {
+      const orgMember = m.user.memberships[0];
+      return {
+        id: m.id,
+        userId: m.userId,
+        teamRole: m.role,
+        organizationRole: orgMember?.role || OrgRole.MEMBER,
+        joinedAt: m.joinedAt,
+        user: {
+          id: m.user.id,
+          name: m.user.name,
+          email: m.user.email,
+          avatar: m.user.avatar,
+          orgJoinedAt: orgMember?.joinedAt,
+        },
+      };
+    }),
+  };
+};
+
+export const leaveTeam = async (
+  organizationId: string,
+  teamId: string,
+  userId: string
+) => {
+  return await removeTeamMember(
+    organizationId,
+    teamId,
+    userId,
+    OrgRole.MEMBER,
+    userId
+  );
 };

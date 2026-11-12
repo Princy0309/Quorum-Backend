@@ -34,6 +34,7 @@ import { registerCommunityHandler } from './handlers/communityHandler.js';
 import { registerWhiteboardHandler } from './handlers/whiteboardHandler.js';
 import { registerOfficeHandler } from './handlers/officeHandler.js';
 import { registerDocumentHandler } from './handlers/documentHandler.js';
+import { registerOrgFeedHandler } from './handlers/orgFeedHandler.js';
 
 import { broadcastUserPresenceUpdate } from './handlers/presenceHandler.js';
 import { setMeetingPresence, setScreenSharePresence } from '../services/presenceService.js';
@@ -205,6 +206,7 @@ export const initSocketServer = (httpServer: any) => {
     registerWhiteboardHandler(io, socket as any);
     registerOfficeHandler(io, socket as any);
     registerDocumentHandler(io, socket as any);
+    registerOrgFeedHandler(io, socket as any);
 
 
     const handleDynamicAuth = async (data: { token?: string }, ack?: (res: any) => void) => {

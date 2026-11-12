@@ -1,0 +1,85 @@
+enum OrgPostCategory {
+  ANNOUNCEMENT
+  FESTIVAL
+  MILESTONE
+  WELCOME
+  NEW_TEAM
+  PROMOTION
+  BIRTHDAY
+  GENERAL
+}
+
+model OrgFeedPost {
+  id                String            @id @default(uuid())
+  organizationId    String
+  authorId          String?
+  category          OrgPostCategory   @default(GENERAL)
+  title             String?
+  content           String            @default("")
+  fileUrl           String?
+  fileType          String?
+  fileName          String?
+  fileSize          Int?
+  targetUserId      String?
+  targetTeamId      String?
+  mentionedUserIds  String[]          @default([])
+  isPinned          Boolean           @default(false)
+  pinnedAt          DateTime?
+  pinnedById        String?
+  isSystemGenerated Boolean           @default(false)
+  isEdited          Boolean           @default(false)
+  editedAt          DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  author            User?             @relation("OrgFeedAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  targetUser        User?             @relation("OrgFeedTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  targetTeam        Team?             @relation("OrgFeedTargetTeam", fields: [targetTeamId], references: [id], onDelete: SetNull)
+  pinnedBy          User?             @relation("OrgFeedPinnedBy", fields: [pinnedById], references: [id], onDelete: SetNull)
+  comments          OrgFeedComment[]
+  reactions         OrgFeedReaction[]
+
+  @@index([organizationId, isPinned, createdAt])
+  @@index([organizationId, category, createdAt])
+  @@index([organizationId, createdAt])
+  @@index([targetTeamId])
+  @@index([targetUserId])
+  @@index([authorId])
+}
+
+model OrgFeedComment {
+  id        String           @id @default(uuid())
+  postId    String
+  authorId  String
+  parentId  String?
+  content   String
+  isEdited  Boolean          @default(false)
+  editedAt  DateTime?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  post      OrgFeedPost      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User             @relation("OrgFeedCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  parent    OrgFeedComment?  @relation("OrgFeedCommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   OrgFeedComment[] @relation("OrgFeedCommentReplies")
+
+  @@index([postId, parentId, createdAt])
+  @@index([parentId])
+  @@index([authorId])
+}
+
+model OrgFeedReaction {
+  id        String      @id @default(uuid())
+  postId    String
+  userId    String
+  emoji     String
+  createdAt DateTime    @default(now())
+
+  post      OrgFeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User        @relation("OrgFeedReactionUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId, emoji])
+  @@index([postId])
+  @@index([userId])
+}
