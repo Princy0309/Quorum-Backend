@@ -25,14 +25,14 @@ const inMemoryExecutingPlans = new Set<string>();
 
 const savePlan = async (plan: StoredWorkflowPlan): Promise<void> => {
   const serialized = JSON.stringify(plan);
+  inMemoryPlans.set(plan.planId, {
+    data: plan,
+    expiresAt: Date.now() + 900 * 1000,
+  });
   try {
     await redis.set(`workflow:plan:${plan.planId}`, serialized, 'EX', 900);
   } catch (err) {
     logger.warn('Failed to cache workflow plan in Redis, falling back to memory', err);
-    inMemoryPlans.set(plan.planId, {
-      data: plan,
-      expiresAt: Date.now() + 900 * 1000,
-    });
   }
 };
 
@@ -579,8 +579,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           });
 
           variables.set(`$step${step.step}.meetingCode`, meeting.code);
-          variables.set(`$step${step.step}.meetingId`, meeting.code);
-          variables.set(`$step${step.step}.id`, meeting.code);
+          variables.set(`$step${step.step}.meetingId`, meeting.id);
+          variables.set(`$step${step.step}.id`, meeting.id);
 
           results.push({
             step: step.step,
@@ -588,6 +588,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             description: step.description,
             success: true,
             resource: {
+              meetingId: meeting.id,
               meetingCode: meeting.code,
               title: meeting.title,
               scheduledStartTime: meeting.scheduledStartTime,
@@ -602,6 +603,9 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           }
 
           const { doc } = await checkDocumentAccess(userId, documentId, 'EDIT');
+
+          let addedCollaboratorCount = 0;
+          const failedCollaboratorIds: string[] = [];
 
           const targetTeamId = resolvedParams.teamId ? String(resolvedParams.teamId).trim() : undefined;
           if (targetTeamId) {
@@ -676,7 +680,9 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
                       userId: tm.userId,
                       permission: 'VIEW',
                     });
+                    addedCollaboratorCount++;
                   } catch (collabErr) {
+                    failedCollaboratorIds.push(tm.userId);
                     logger.warn(`Could not add team member ${tm.userId} as collaborator:`, collabErr);
                   }
                 }
@@ -685,11 +691,9 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           }
 
           const memberIds = Array.isArray(resolvedParams.memberIds) ? resolvedParams.memberIds : [];
-          let addedCollaboratorCount = 0;
-          const failedCollaboratorIds: string[] = [];
 
           for (const targetId of memberIds) {
-            if (targetId && targetId !== userId) {
+            if (targetId && targetId !== userId && !failedCollaboratorIds.includes(targetId)) {
               try {
                 await addCollaborator(userId, doc.id, {
                   userId: targetId,
@@ -797,7 +801,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
     const finalStatus = allFailed ? 'FAILED' : hasFailures ? 'PARTIALLY_COMPLETED' : 'COMPLETED';
 
     try {
-      getIO().to(userId).emit('workflow:completed', {
+      getIO().to(`user:${userId}`).emit('workflow:completed', {
         planId,
         status: finalStatus,
         results,

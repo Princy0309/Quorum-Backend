@@ -423,6 +423,7 @@ export const createScopedMeeting = async (
 
 
   return {
+    id: meeting.id,
     code: meeting.code,
     title: meeting.title,
     scopeType: meeting.scopeType,
