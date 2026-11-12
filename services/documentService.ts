@@ -3,6 +3,7 @@ import { ApiError } from '../utils/ApiError.js';
 import logger from '../utils/logger.js';
 import { getIO } from '../sockets/socketServer.js';
 import { generateRawCompletion } from './aiService.js';
+import { DocumentScopeType } from '@prisma/client';
 import {
   CreateDocumentInput,
   UpdateDocumentInput,
@@ -351,12 +352,59 @@ export const listUserDocuments = async (
 ) => {
   await ensureDocumentSchema();
 
+  const userTeamMemberships = await prisma.teamMember.findMany({
+    where: { userId },
+    select: { teamId: true }
+  });
+  const userTeamIds = userTeamMemberships.map((tm) => tm.teamId);
+
+  let isOrgAdminOrOwner = false;
+  if (query?.organizationId) {
+    const org = await prisma.organization.findUnique({
+      where: { id: query.organizationId },
+      select: { ownerId: true }
+    });
+    if (org?.ownerId === userId) {
+      isOrgAdminOrOwner = true;
+    } else {
+      const orgMember = await prisma.organizationMember.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId: query.organizationId,
+            userId
+          }
+        },
+        select: { role: true }
+      });
+      if (orgMember?.role === 'ORG_ADMIN') {
+        isOrgAdminOrOwner = true;
+      }
+    }
+  }
+
+  const orgCondition = query?.organizationId
+    ? (isOrgAdminOrOwner
+        ? { organizationId: query.organizationId }
+        : {
+            organizationId: query.organizationId,
+            scopeType: { not: DocumentScopeType.TEAM },
+            teamId: null
+          })
+    : null;
+
+  const teamCondition = userTeamIds.length > 0
+    ? (query?.organizationId
+        ? { organizationId: query.organizationId, teamId: { in: userTeamIds } }
+        : { teamId: { in: userTeamIds } })
+    : null;
+
   const whereClause: any = {
     isArchived: false,
     OR: [
       { createdById: userId },
       { collaborators: { some: { userId } } },
-      ...(query?.organizationId ? [{ organizationId: query.organizationId }] : []),
+      ...(orgCondition ? [orgCondition] : []),
+      ...(teamCondition ? [teamCondition] : []),
       ...(query?.projectId ? [{ projectId: query.projectId }] : [])
     ]
   };

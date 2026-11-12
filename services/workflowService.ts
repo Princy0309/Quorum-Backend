@@ -8,7 +8,7 @@ import { generateRawCompletion, sanitizeAiInput } from './aiService.js';
 import { createTeam, addTeamMember } from './teamService.js';
 import { createScopedMeeting } from './meetingService.js';
 import { addCollaborator, checkDocumentAccess } from './documentService.js';
-import { MeetingScopeType, NotificationType, OrgRole } from '@prisma/client';
+import { MeetingScopeType, NotificationType, OrgRole, DocumentScopeType } from '@prisma/client';
 import { WorkflowStep, workflowStepSchema } from '../validators/workflowValidators.js';
 
 interface StoredWorkflowPlan {
@@ -165,12 +165,59 @@ const getUserOrganizationContext = async (userId: string, targetOrgId?: string) 
 };
 
 const getUserAccessibleDocuments = async (userId: string, organizationId?: string) => {
+  const userTeamMemberships = await prisma.teamMember.findMany({
+    where: { userId },
+    select: { teamId: true },
+  });
+  const userTeamIds = userTeamMemberships.map((tm) => tm.teamId);
+
+  let isOrgAdminOrOwner = false;
+  if (organizationId) {
+    const org = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { ownerId: true },
+    });
+    if (org?.ownerId === userId) {
+      isOrgAdminOrOwner = true;
+    } else {
+      const orgMember = await prisma.organizationMember.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId,
+            userId,
+          },
+        },
+        select: { role: true },
+      });
+      if (orgMember?.role === OrgRole.ORG_ADMIN) {
+        isOrgAdminOrOwner = true;
+      }
+    }
+  }
+
+  const orgCondition = organizationId
+    ? (isOrgAdminOrOwner
+        ? { organizationId }
+        : {
+            organizationId,
+            scopeType: { not: DocumentScopeType.TEAM },
+            teamId: null,
+          })
+    : null;
+
+  const teamCondition = userTeamIds.length > 0
+    ? (organizationId
+        ? { organizationId, teamId: { in: userTeamIds } }
+        : { teamId: { in: userTeamIds } })
+    : null;
+
   const docs = await prisma.document.findMany({
     where: {
       OR: [
-        { createdById: userId },
-        { collaborators: { some: { userId } } },
-        ...(organizationId ? [{ organizationId }] : []),
+        { createdById: userId, ...(organizationId ? { organizationId } : {}) },
+        { collaborators: { some: { userId } }, ...(organizationId ? { organizationId } : {}) },
+        ...(orgCondition ? [orgCondition] : []),
+        ...(teamCondition ? [teamCondition] : []),
       ],
       isArchived: false,
     },
@@ -392,11 +439,6 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
   }
 
   try {
-    try {
-      await redis.del(`workflow:plan:${planId}`);
-    } catch {}
-    inMemoryPlans.delete(planId);
-
     const variables = new Map<string, string>();
     const results: Array<{
       step: number;
@@ -460,11 +502,13 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             }
           }
 
+          const hasMemberFailures = failedMemberIds.length > 0;
           results.push({
             step: step.step,
             action: step.action,
             description: step.description,
-            success: true,
+            success: !hasMemberFailures,
+            ...(hasMemberFailures ? { error: `Failed to add member(s): ${failedMemberIds.join(', ')}` } : {}),
             resource: {
               teamId: team.id,
               name: team.name,
@@ -597,13 +641,16 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             throw new ApiError(400, 'Failed to add any of the requested collaborators to the document');
           }
 
+          const hasCollabFailures = failedCollaboratorIds.length > 0;
+
           variables.set(`$step${step.step}.documentId`, doc.id);
 
           results.push({
             step: step.step,
             action: step.action,
             description: step.description,
-            success: true,
+            success: !hasCollabFailures,
+            ...(hasCollabFailures ? { error: `Failed to add collaborator(s): ${failedCollaboratorIds.join(', ')}` } : {}),
             resource: {
               documentId: doc.id,
               title: doc.title,
@@ -691,6 +738,11 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
     } catch (ioErr) {
       logger.warn('Failed to emit workflow:completed socket event', ioErr);
     }
+
+    try {
+      await redis.del(`workflow:plan:${planId}`);
+    } catch {}
+    inMemoryPlans.delete(planId);
 
     return {
       planId,
