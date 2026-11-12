@@ -379,6 +379,9 @@ const resolveVariables = (value: any, variables: Map<string, string>): any => {
       if (variables.has(value)) {
         return variables.get(value);
       }
+      if (/^\$step\d+(\.|$)/i.test(value)) {
+        throw new ApiError(400, `Unresolved workflow variable: ${value}`);
+      }
     }
     return value;
   }
@@ -517,13 +520,26 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             },
           });
         } else if (step.action === 'SCHEDULE_MEETING') {
-          let startTime = resolvedParams.startTime ? new Date(resolvedParams.startTime) : null;
-          if (!startTime || isNaN(startTime.getTime()) || startTime.getTime() <= Date.now()) {
-            startTime = new Date(Date.now() + 24 * 60 * 60 * 1000);
+          if (!resolvedParams.startTime) {
+            throw new ApiError(400, 'Meeting startTime is required');
+          }
+          const startTime = new Date(resolvedParams.startTime);
+          if (isNaN(startTime.getTime())) {
+            throw new ApiError(400, 'Invalid meeting startTime format');
+          }
+          if (startTime.getTime() < Date.now() - 60000) {
+            throw new ApiError(400, 'Meeting startTime cannot be in the past');
           }
 
           const meetingTitle = String(resolvedParams.title || 'Team Meeting').trim();
           const targetTeamId = resolvedParams.teamId ? String(resolvedParams.teamId) : undefined;
+          const durationMinutes = resolvedParams.durationMinutes !== undefined && resolvedParams.durationMinutes !== null
+            ? Number(resolvedParams.durationMinutes)
+            : undefined;
+
+          if (durationMinutes !== undefined && (isNaN(durationMinutes) || durationMinutes <= 0 || durationMinutes > 1440)) {
+            throw new ApiError(400, 'durationMinutes must be a positive number between 1 and 1440');
+          }
 
           const meeting = await createScopedMeeting(userId, {
             title: meetingTitle,
@@ -531,6 +547,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             organizationId: orgId,
             teamId: targetTeamId,
             scheduledStartTime: startTime,
+            durationMinutes,
           });
 
           variables.set(`$step${step.step}.meetingCode`, meeting.code);
@@ -545,6 +562,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               meetingCode: meeting.code,
               title: meeting.title,
               scheduledStartTime: meeting.scheduledStartTime,
+              durationMinutes: durationMinutes || 60,
               link: meeting.link,
             },
           });

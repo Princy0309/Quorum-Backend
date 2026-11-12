@@ -8,6 +8,7 @@ export const createScopedMeetingSchema = z
     organizationId: z.string().uuid('Invalid organization ID format').optional(),
     teamId: z.string().uuid('Invalid team ID format').optional(),
     scheduledStartTime: z.string().datetime().or(z.date()).optional(),
+    durationMinutes: z.number().int().positive().max(1440).optional(),
   })
   .refine(
     (data) => {

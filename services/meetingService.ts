@@ -182,7 +182,8 @@ const syncMeetingCalendarAndNotifications = async (
     hostId: string;
     organizationId: string | null;
     teamId: string | null;
-  }
+  },
+  durationMinutes?: number
 ) => {
   try {
     if (meeting.scopeType === MeetingScopeType.PERSONAL) {
@@ -231,7 +232,8 @@ const syncMeetingCalendarAndNotifications = async (
 
     if (meeting.status === MeetingStatus.SCHEDULED && meeting.scheduledStartTime) {
       const start = new Date(meeting.scheduledStartTime);
-      const end = new Date(start.getTime() + 60 * 60 * 1000);
+      const durationMs = (durationMinutes && durationMinutes > 0 ? durationMinutes : 60) * 60 * 1000;
+      const end = new Date(start.getTime() + durationMs);
 
       for (const userId of memberIds) {
         try {
@@ -360,6 +362,7 @@ export interface CreateScopedMeetingInput {
   organizationId?: string;
   teamId?: string;
   scheduledStartTime?: Date | string;
+  durationMinutes?: number;
 }
 
 export const createScopedMeeting = async (
@@ -414,7 +417,7 @@ export const createScopedMeeting = async (
     },
   });
 
-  syncMeetingCalendarAndNotifications(meeting).catch((err) =>
+  syncMeetingCalendarAndNotifications(meeting, input.durationMinutes).catch((err) =>
     logger.error('[MeetingService] Background calendar sync error:', err)
   );
 
@@ -425,6 +428,7 @@ export const createScopedMeeting = async (
     scopeType: meeting.scopeType,
     status: meeting.status,
     scheduledStartTime: meeting.scheduledStartTime,
+    durationMinutes: input.durationMinutes,
     organizationId: meeting.organizationId,
     organization: meeting.organization,
     teamId: meeting.teamId,
