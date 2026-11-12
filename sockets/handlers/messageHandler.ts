@@ -1,4 +1,5 @@
 import { Server as SocketIOServer } from 'socket.io';
+import prisma from '../../config/prisma.js';
 import { AuthenticatedSocket } from '../socketAuth.js';
 import {
   saveMessage,
@@ -93,6 +94,43 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         if (resolvedId !== payload.conversationId) {
           socket.join(`conversation:${resolvedId}`);
         }
+
+        try {
+          const participants = await prisma.conversationParticipant.findMany({
+            where: { conversationId: resolvedId },
+            select: {
+              userId: true,
+              lastReadSeq: true,
+              lastReadMessageId: true
+            }
+          });
+
+          for (const p of participants) {
+            if (p.lastReadSeq > 0) {
+              socket.emit(CHAT_EVENTS.MESSAGE_READ, {
+                conversationId: resolvedId,
+                userId: p.userId,
+                lastReadSeq: p.lastReadSeq,
+                lastReadMessageId: p.lastReadMessageId,
+                messageId: p.lastReadMessageId
+              });
+            }
+          }
+
+          if (callback) {
+            callback({
+              success: true,
+              data: {
+                conversationId: resolvedId,
+                participants
+              }
+            });
+            return;
+          }
+        } catch (syncErr: any) {
+          logger.warn('Failed to sync participant read states on join', syncErr);
+        }
+
         if (callback) callback({ success: true, data: { conversationId: resolvedId } });
       } catch (err: any) {
         logger.error('Error joining conversation room', { error: err.message });

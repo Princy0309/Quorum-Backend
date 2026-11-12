@@ -33,7 +33,8 @@ import {
   getMessageReactionsController,
   forwardMessagesController,
   createPollController,
-  votePollController
+  votePollController,
+  markMessageAsReadController
 } from '../controllers/conversationController.js';
 import { createOrGetDMController } from '../controllers/dmController.js';
 
@@ -53,6 +54,11 @@ router.post('/:id/polls/:pollId/vote', authMiddleware, validate(votePollSchema),
 router.get('/:id/presence', authMiddleware, getConversationPresenceController);
 router.get('/:id', authMiddleware, getConversationDetailsController);
 router.get('/:id/messages', authMiddleware, getConversationMessagesController);
+router.post('/:id/read', authMiddleware, markMessageAsReadController);
+router.patch('/:id/read', authMiddleware, markMessageAsReadController);
+router.post('/:id/messages/read', authMiddleware, markMessageAsReadController);
+router.post('/:id/messages/:messageId/read', authMiddleware, markMessageAsReadController);
+router.patch('/:id/messages/:messageId/read', authMiddleware, markMessageAsReadController);
 router.patch('/:id/messages/:messageId', authMiddleware, validate(editMessageSchema), editMessageController);
 router.delete('/:id/messages/:messageId', authMiddleware, validate(deleteMessageSchema), deleteMessageController);
 router.post('/:id/messages/:messageId/reactions', authMiddleware, validate(toggleReactionSchema), toggleMessageReactionController);

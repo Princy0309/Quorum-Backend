@@ -16,6 +16,7 @@ import {
   getMessageReactions,
   forwardMessages,
   saveMessage,
+  markMessageAsRead,
   votePoll
 } from '../services/chatService.js';
 import { getMultipleUserPresences } from '../services/presenceService.js';
@@ -108,6 +109,56 @@ export const getConversationMessagesController = async (req: Request, res: Respo
     const { cursor, limit } = parseAndValidatePagination(req.query.cursor, req.query.limit);
 
     const result = await getConversationMessages(userId, conversationId, cursor, limit);
+
+    res.status(200).json({
+      success: true,
+      data: result,
+      messages: result.messages,
+      nextCursor: result.nextCursor,
+      hasNextPage: result.hasNextPage,
+      participants: result.participants
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const markMessageAsReadController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const rawMessageId = req.params.messageId || req.body?.messageId;
+    const messageId = typeof rawMessageId === 'string' && rawMessageId.trim().length > 0 ? rawMessageId.trim() : undefined;
+
+    const result = await markMessageAsRead(userId, conversationId, messageId);
+
+    if (result.updated) {
+      try {
+        const io = getIO();
+        const readRooms = [`conversation:${result.conversationId}`];
+        if (conversationId !== result.conversationId) {
+          readRooms.push(`conversation:${conversationId}`);
+        }
+        io.to(readRooms).emit(CHAT_EVENTS.MESSAGE_READ, {
+          conversationId: result.conversationId,
+          userId: result.userId,
+          lastReadSeq: result.lastReadSeq,
+          lastReadMessageId: result.lastReadMessageId,
+          messageId: result.lastReadMessageId
+        });
+      } catch (ioErr) {
+        logger.warn('Failed to emit message:read via socket in controller', ioErr);
+      }
+    }
 
     res.status(200).json({
       success: true,

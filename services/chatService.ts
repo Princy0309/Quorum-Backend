@@ -905,19 +905,42 @@ export const getConversationMessages = async (
     mentionedUserMap = new Map(mentionedUsersList.map((u) => [u.id, u]));
   }
 
-  const enrichedMessages = messages.map((msg: any) => ({
-    ...msg,
-    reactions: formatReactions(msg.reactions || [], userId),
-    poll: formatPoll(msg.poll, userId),
-    mentionedUsers: (msg.mentionedUserIds || [])
-      .map((mId: string) => mentionedUserMap.get(mId))
-      .filter(Boolean)
-  }));
+  const participants = await prisma.conversationParticipant.findMany({
+    where: { conversationId: targetConversationId },
+    select: {
+      userId: true,
+      lastReadSeq: true,
+      lastReadMessageId: true
+    }
+  });
+
+  const enrichedMessages = messages.map((msg: any) => {
+    const otherParticipants = participants.filter((p) => p.userId !== msg.senderId);
+    const readByUserIds = otherParticipants
+      .filter((p) => p.lastReadSeq >= msg.seq)
+      .map((p) => p.userId);
+    const isRead = otherParticipants.length > 0 && readByUserIds.length > 0;
+
+    return {
+      ...msg,
+      isRead,
+      read: isRead,
+      status: isRead ? 'read' : 'sent',
+      readBy: readByUserIds,
+      readCount: readByUserIds.length,
+      reactions: formatReactions(msg.reactions || [], userId),
+      poll: formatPoll(msg.poll, userId),
+      mentionedUsers: (msg.mentionedUserIds || [])
+        .map((mId: string) => mentionedUserMap.get(mId))
+        .filter(Boolean)
+    };
+  });
 
   return {
     messages: enrichedMessages,
     nextCursor,
-    hasNextPage
+    hasNextPage,
+    participants
   };
 };
 
@@ -1083,17 +1106,34 @@ export const getUserConversations = async (userId: string, query?: string) => {
     logger.warn('Failed to calculate unread counts with raw query:', rawErr);
   }
 
-  return conversations.map((conv) => ({
-    ...conv,
-    lastMessage: conv.messages[0] || null,
-    unreadCount: unreadMap.get(conv.id) || 0
-  }));
+  return conversations.map((conv) => {
+    const rawLastMsg = conv.messages[0] || null;
+    let lastMessage: any = rawLastMsg;
+    if (rawLastMsg) {
+      const otherParticipants = (conv.participants || []).filter((p: any) => p.userId !== rawLastMsg.senderId);
+      const isRead = otherParticipants.length > 0 && otherParticipants.every((p: any) => (p.lastReadSeq ?? 0) >= rawLastMsg.seq);
+      const readBy = otherParticipants.filter((p: any) => (p.lastReadSeq ?? 0) >= rawLastMsg.seq).map((p: any) => p.userId);
+      lastMessage = {
+        ...rawLastMsg,
+        isRead,
+        read: isRead,
+        status: isRead ? 'read' : 'sent',
+        readBy,
+        readCount: readBy.length
+      };
+    }
+    return {
+      ...conv,
+      lastMessage,
+      unreadCount: unreadMap.get(conv.id) || 0
+    };
+  });
 };
 
 export const markMessageAsRead = async (
   userId: string,
   conversationId: string,
-  messageId: string
+  messageId?: string
 ) => {
   return await prisma.$transaction(async (tx) => {
     let targetConversationId = conversationId;
@@ -1134,15 +1174,38 @@ export const markMessageAsRead = async (
       throw new ApiError(403, 'User is not a participant in this conversation');
     }
 
-    const targetMessage = await tx.message.findFirst({
-      where: {
-        id: messageId,
-        conversationId: targetConversationId
-      }
-    });
+    let targetMessage = null;
+    if (messageId) {
+      targetMessage = await tx.message.findFirst({
+        where: {
+          id: messageId,
+          conversationId: targetConversationId
+        }
+      });
+    }
 
     if (!targetMessage) {
-      throw new ApiError(404, 'Message not found in this conversation');
+      targetMessage = await tx.message.findFirst({
+        where: {
+          conversationId: targetConversationId
+        },
+        orderBy: [{ seq: 'desc' }, { id: 'desc' }]
+      });
+    }
+
+    if (!targetMessage) {
+      return {
+        conversationId: targetConversationId,
+        userId,
+        lastReadSeq: participant.lastReadSeq,
+        lastReadMessageId: participant.lastReadMessageId,
+        messageId: participant.lastReadMessageId || '',
+        updated: false,
+        participants: await tx.conversationParticipant.findMany({
+          where: { conversationId: targetConversationId },
+          select: { userId: true }
+        })
+      };
     }
 
     const updateResult = await tx.conversationParticipant.updateMany({
@@ -1152,7 +1215,7 @@ export const markMessageAsRead = async (
         lastReadSeq: { lt: targetMessage.seq }
       },
       data: {
-        lastReadMessageId: messageId,
+        lastReadMessageId: targetMessage.id,
         lastReadSeq: targetMessage.seq
       }
     });
@@ -1160,7 +1223,7 @@ export const markMessageAsRead = async (
     const isUpdated = updateResult.count > 0;
 
     const currentParticipant = isUpdated
-      ? { lastReadSeq: targetMessage.seq, lastReadMessageId: messageId }
+      ? { lastReadSeq: targetMessage.seq, lastReadMessageId: targetMessage.id }
       : (await tx.conversationParticipant.findUnique({
           where: {
             conversationId_userId: {
