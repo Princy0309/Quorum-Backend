@@ -158,18 +158,21 @@ export const checkDocumentAccess = async (
     });
 
     if (meeting) {
-      const isLinkedToMeeting = doc.meetings.some((dm) => dm.meetingId === meeting.id) || doc.meetingId === meeting.id;
-      if (isLinkedToMeeting) {
-        const permCheck = await canUserJoinMeeting(userId, meeting.code);
-        if (permCheck.allowed) {
-          const roomState = meetingRooms.get(meeting.code.toLowerCase());
-          const isParticipant =
-            meeting.hostId === userId ||
-            (Array.isArray(meeting.admitted) && meeting.admitted.includes(userId)) ||
-            (roomState && roomState.participants.has(userId));
+      const isOrgCompatible = !doc.organizationId || !meeting.organizationId || doc.organizationId === meeting.organizationId;
+      if (isOrgCompatible) {
+        const isLinkedToMeeting = doc.meetings.some((dm) => dm.meetingId === meeting.id) || doc.meetingId === meeting.id;
+        if (isLinkedToMeeting) {
+          const permCheck = await canUserJoinMeeting(userId, meeting.code);
+          if (permCheck.allowed) {
+            const roomState = meetingRooms.get(meeting.code.toLowerCase());
+            const isParticipant =
+              meeting.hostId === userId ||
+              (Array.isArray(meeting.admitted) && meeting.admitted.includes(userId)) ||
+              (roomState && roomState.participants.has(userId));
 
-          if (isParticipant) {
-            return { doc, permission: 'EDIT' as const, isCreator: false, isMeetingParticipant: true };
+            if (isParticipant) {
+              return { doc, permission: 'EDIT' as const, isCreator: false, isMeetingParticipant: true };
+            }
           }
         }
       }
@@ -315,6 +318,9 @@ export const createDocument = async (userId: string, input: CreateDocumentInput)
     if (input.organizationId && team.organizationId !== input.organizationId) {
       throw new ApiError(400, 'Team does not belong to the specified organization');
     }
+    if (team.organizationId && !input.organizationId) {
+      input.organizationId = team.organizationId;
+    }
     const isOwner = team.organization?.ownerId === userId;
     const teamMember = await prisma.teamMember.findFirst({
       where: { teamId: input.teamId, userId }
@@ -348,7 +354,15 @@ export const createDocument = async (userId: string, input: CreateDocumentInput)
   }
 
   if (input.whiteboardId) {
-    await getWhiteboardById(userId, input.whiteboardId);
+    const whiteboard = await getWhiteboardById(userId, input.whiteboardId);
+    if (whiteboard?.organizationId) {
+      if (input.organizationId && input.organizationId !== whiteboard.organizationId) {
+        throw new ApiError(400, 'Whiteboard and document must belong to the same organization');
+      }
+      if (!input.organizationId) {
+        input.organizationId = whiteboard.organizationId;
+      }
+    }
   }
 
   let resolvedMeetingId = input.meetingId;
@@ -360,10 +374,18 @@ export const createDocument = async (userId: string, input: CreateDocumentInput)
           { code: resolvedMeetingId }
         ]
       },
-      select: { id: true, code: true, hostId: true }
+      select: { id: true, code: true, hostId: true, organizationId: true }
     });
     if (!meeting) {
       throw new ApiError(404, 'Meeting not found');
+    }
+    if (meeting.organizationId) {
+      if (input.organizationId && input.organizationId !== meeting.organizationId) {
+        throw new ApiError(400, 'Meeting and document must belong to the same organization');
+      }
+      if (!input.organizationId) {
+        input.organizationId = meeting.organizationId;
+      }
     }
     const permCheck = await canUserJoinMeeting(userId, meeting.code);
     if (!permCheck.allowed) {
@@ -741,11 +763,16 @@ export const openDocumentInMeeting = async (userId: string, documentId: string, 
     where: {
       code: meetingCode.trim().toLowerCase(),
       status: { in: ['ACTIVE', 'SCHEDULED'] }
-    }
+    },
+    select: { id: true, code: true, organizationId: true }
   });
 
   if (!meeting) {
     throw new ApiError(404, 'Active meeting not found');
+  }
+
+  if (doc.organizationId && meeting.organizationId && doc.organizationId !== meeting.organizationId) {
+    throw new ApiError(400, 'Meeting and document must belong to the same organization');
   }
 
   const permCheck = await canUserJoinMeeting(userId, meeting.code);
@@ -787,9 +814,12 @@ export const openDocumentInMeeting = async (userId: string, documentId: string, 
 };
 
 export const embedWhiteboardInDocument = async (userId: string, documentId: string, whiteboardId: string) => {
-  await checkDocumentAccess(userId, documentId, 'EDIT');
+  const { doc } = await checkDocumentAccess(userId, documentId, 'EDIT');
 
   const whiteboard = await getWhiteboardById(userId, whiteboardId);
+  if (doc.organizationId && whiteboard?.organizationId && doc.organizationId !== whiteboard.organizationId) {
+    throw new ApiError(400, 'Whiteboard and document must belong to the same organization');
+  }
 
   const link = await prisma.documentWhiteboard.upsert({
     where: {

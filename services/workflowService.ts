@@ -24,6 +24,17 @@ interface StoredWorkflowPlan {
 const inMemoryPlans = new Map<string, { data: StoredWorkflowPlan; expiresAt: number }>();
 const inMemoryExecutingPlans = new Set<string>();
 const inMemoryExecutedPlans = new Set<string>();
+const inMemoryPlanCheckpoints = new Map<string, {
+  results: Array<{
+    step: number;
+    action: string;
+    description?: string;
+    success: boolean;
+    resource?: any;
+    error?: string;
+  }>;
+  variables: Record<string, string>;
+}>();
 
 const savePlan = async (plan: StoredWorkflowPlan): Promise<void> => {
   const serialized = JSON.stringify(plan);
@@ -538,7 +549,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
 
   try {
     const variables = new Map<string, string>();
-    const results: Array<{
+    let results: Array<{
       step: number;
       action: string;
       description?: string;
@@ -547,6 +558,33 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
       error?: string;
     }> = [];
 
+    try {
+      const savedCheckpoint = await redis.get(`workflow:plan:checkpoint:${planId}`);
+      if (savedCheckpoint) {
+        const parsed = JSON.parse(savedCheckpoint);
+        if (Array.isArray(parsed.results)) {
+          results = parsed.results;
+        }
+        if (parsed.variables && typeof parsed.variables === 'object') {
+          for (const [k, v] of Object.entries(parsed.variables)) {
+            variables.set(k, String(v));
+          }
+        }
+      }
+    } catch (chkErr) {
+      logger.warn('Failed to read workflow checkpoint from Redis', chkErr);
+    }
+
+    if (results.length === 0) {
+      const memChk = inMemoryPlanCheckpoints.get(planId);
+      if (memChk) {
+        results = [...memChk.results];
+        for (const [k, v] of Object.entries(memChk.variables)) {
+          variables.set(k, String(v));
+        }
+      }
+    }
+
     let orgId = plan.organizationId;
     if (!orgId) {
       const userOrg = await getUserOrganizationContext(userId);
@@ -554,6 +592,12 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
     }
 
     for (const step of plan.steps) {
+      const existingSuccess = results.find((r) => r.step === step.step && r.success);
+      if (existingSuccess) {
+        continue;
+      }
+      results = results.filter((r) => r.step !== step.step);
+
       try {
         const resolvedParams = resolveVariables(step.params, variables);
         if (step.action === 'CREATE_TEAM') {
@@ -944,7 +988,20 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           error: err?.message || 'Action failed during execution',
         });
       }
+
+      const checkpointData = {
+        results,
+        variables: Object.fromEntries(variables.entries()),
+      };
+      inMemoryPlanCheckpoints.set(planId, checkpointData);
+      try {
+        await redis.set(`workflow:plan:checkpoint:${planId}`, JSON.stringify(checkpointData), 'EX', 900);
+      } catch (saveChkErr) {
+        logger.warn('Failed to save workflow checkpoint in Redis', saveChkErr);
+      }
     }
+
+    results.sort((a, b) => a.step - b.step);
 
     const hasFailures = results.some((r) => !r.success);
     const allFailed = results.length > 0 && results.every((r) => !r.success);
@@ -960,17 +1017,31 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
       logger.warn('Failed to emit workflow:completed socket event', ioErr);
     }
 
-    inMemoryExecutedPlans.add(planId);
-    inMemoryPlans.delete(planId);
+    if (hasFailures) {
+      if (allFailed) {
+        inMemoryPlanCheckpoints.delete(planId);
+        try {
+          await redis.del(`workflow:plan:checkpoint:${planId}`);
+        } catch {}
+      }
+    } else {
+      inMemoryPlanCheckpoints.delete(planId);
+      inMemoryExecutedPlans.add(planId);
+      inMemoryPlans.delete(planId);
 
-    try {
-      await redis.set(`workflow:plan:executed:${planId}`, '1', 'EX', 1800);
-      await redis.del(`workflow:plan:${planId}`);
-    } catch (delErr) {
-      logger.warn('Failed to delete workflow plan from Redis, overwriting as consumed', delErr);
       try {
-        await redis.set(`workflow:plan:${planId}`, JSON.stringify({ ...plan, isExecuted: true }), 'EX', 60);
+        await redis.del(`workflow:plan:checkpoint:${planId}`);
       } catch {}
+
+      try {
+        await redis.set(`workflow:plan:executed:${planId}`, '1', 'EX', 1800);
+        await redis.del(`workflow:plan:${planId}`);
+      } catch (delErr) {
+        logger.warn('Failed to delete workflow plan from Redis, overwriting as consumed', delErr);
+        try {
+          await redis.set(`workflow:plan:${planId}`, JSON.stringify({ ...plan, isExecuted: true }), 'EX', 60);
+        } catch {}
+      }
     }
 
     return {
