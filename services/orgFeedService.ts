@@ -907,3 +907,44 @@ export const deleteOrgComment = async (
         parentId: existing.parentId,
     };
 };
+
+export interface SystemOrgPostInput {
+    organizationId: string;
+    category: OrgPostCategory;
+    title?: string;
+    content: string;
+    actorId?: string | null;
+    targetUserId?: string | null;
+    targetTeamId?: string | null;
+}
+
+export const createSystemOrgFeedPost = async (input: SystemOrgPostInput) => {
+    try {
+        const post = await prisma.orgFeedPost.create({
+            data: {
+                organizationId: input.organizationId,
+                authorId: input.actorId || null,
+                category: input.category,
+                title: input.title?.trim() || null,
+                content: input.content.trim(),
+                targetUserId: input.targetUserId || null,
+                targetTeamId: input.targetTeamId || null,
+                isSystemGenerated: true,
+            },
+            include: ORG_POST_INCLUDE,
+        });
+
+        const formatted = formatOrgFeedPost(post, '');
+        emitOrgFeedEvent(input.organizationId, ORG_FEED_EVENTS.POST_NEW, {
+            organizationId: input.organizationId,
+            post: formatted,
+        });
+        void notifyOrgFeedPostRecipients(input.organizationId, post, input.actorId || null);
+
+        return formatted;
+    } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn(`[OrgFeedSystemPost] Failed to auto-create ${input.category} post: ${msg}`);
+        return null;
+    }
+};

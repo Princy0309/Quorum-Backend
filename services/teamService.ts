@@ -4,7 +4,7 @@ import { ApiError } from '../utils/ApiError.js';
 import type { CreateTeamInput, UpdateTeamInput } from '../types/team.js';
 import { queueNotification } from '../queues/notificationQueue.js';
 import logger from '../utils/logger.js';
-
+import { createSystemOrgFeedPost } from './orgFeedService.js';
 
 export const createTeam = async (
   organizationId: string,
@@ -33,7 +33,7 @@ export const createTeam = async (
     throw new ApiError(409, 'A team with this name already exists in this organization');
   }
 
-  return await prisma.$transaction(async (tx) => {
+  const createdTeam = await prisma.$transaction(async (tx) => {
     const team = await tx.team.create({
       data: {
         organizationId,
@@ -68,6 +68,17 @@ export const createTeam = async (
 
     return team;
   });
+
+  void createSystemOrgFeedPost({
+    organizationId,
+    category: 'NEW_TEAM',
+    title: `New Team Launched: ${createdTeam.name}`,
+    content: `A new team "${createdTeam.name}" has been created in the organization. Let's cheer them on!`,
+    actorId: creatorUserId,
+    targetTeamId: createdTeam.id,
+  });
+
+  return createdTeam;
 
 };
 

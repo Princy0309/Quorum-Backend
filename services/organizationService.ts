@@ -3,17 +3,17 @@ import { ApiError } from "../utils/ApiError.js";
 import { OrgRole } from '@prisma/client';
 import crypto from 'crypto';
 import type { CreateOrgInput, UpdateOrgInput, CreateInviteInput } from '../types/organization.js';
-import {queueNotification} from '../queues/notificationQueue.js';
+import { queueNotification } from '../queues/notificationQueue.js';
 import logger from "../utils/logger.js";
 import { addOrgInviteEmailToQueue } from '../queues/emailQueue.js';
 import env from '../config/env.js';
 import { uploadBufferToS3 } from './uploadService.js';
 import { deleteS3Object } from '../config/s3.js';
+import { createSystemOrgFeedPost } from './orgFeedService.js';
 
 
-
-function slugify(text: string): string{
-    return text
+function slugify(text: string): string {
+  return text
     .toLowerCase()
     .trim()
     .replace(/[^\w\s-]/g, '')
@@ -96,12 +96,12 @@ export const searchOrganizations = async (
   if (scope === 'all' || scope === 'global') {
     const whereClause: any = trimmedQuery
       ? {
-          OR: [
-            { name: { contains: trimmedQuery, mode: 'insensitive' } },
-            { slug: { contains: trimmedQuery, mode: 'insensitive' } },
-            { description: { contains: trimmedQuery, mode: 'insensitive' } },
-          ],
-        }
+        OR: [
+          { name: { contains: trimmedQuery, mode: 'insensitive' } },
+          { slug: { contains: trimmedQuery, mode: 'insensitive' } },
+          { description: { contains: trimmedQuery, mode: 'insensitive' } },
+        ],
+      }
       : {};
 
     const organizations = await prisma.organization.findMany({
@@ -250,7 +250,7 @@ export const updateOrganization = async (orgId: string, data: UpdateOrgInput) =>
   const resolvedLogo = data.logo !== undefined ? data.logo : (data.avatar !== undefined ? data.avatar : data.profilePicture);
 
   if (resolvedLogo !== undefined && existingOrg.logo && existingOrg.logo !== resolvedLogo) {
-    await deleteS3Object(existingOrg.logo).catch(() => {});
+    await deleteS3Object(existingOrg.logo).catch(() => { });
   }
 
   const updatedOrg = await prisma.organization.update({
@@ -309,7 +309,7 @@ export const updateOrganizationProfilePicture = async (
   }
 
   if (org.logo && org.logo !== finalLogo) {
-    await deleteS3Object(org.logo).catch(() => {});
+    await deleteS3Object(org.logo).catch(() => { });
   }
 
   const updatedOrg = await prisma.organization.update({
@@ -364,7 +364,7 @@ export const deleteOrganization = async (orgId: string, userId: string) => {
 
 
 export const getOrganizationMembers = async (orgId: string) => {
-  
+
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
     select: { id: true },
@@ -374,7 +374,7 @@ export const getOrganizationMembers = async (orgId: string) => {
     throw new ApiError(404, 'Organization not found');
   }
 
-  
+
   const members = await prisma.organizationMember.findMany({
     where: { organizationId: orgId },
     include: {
@@ -461,6 +461,24 @@ export const updateMemberRole = async (
     },
   });
 
+  const roleRank: Record<OrgRole, number> = {
+    [OrgRole.MEMBER]: 1,
+    [OrgRole.TEAM_HEAD]: 2,
+    [OrgRole.ORG_ADMIN]: 3,
+  };
+
+  if (roleRank[newRole] > roleRank[membership.role]) {
+    const roleLabel = newRole === OrgRole.ORG_ADMIN ? 'Organization Admin' : 'Team Head';
+    void createSystemOrgFeedPost({
+      organizationId: orgId,
+      category: 'PROMOTION',
+      title: 'Promotion Announcement!',
+      content: `Congratulations to ${updatedMembership.user.name} on being promoted to ${roleLabel}!`,
+      actorId: currentUserId,
+      targetUserId,
+    });
+  }
+
   return {
     id: updatedMembership.id,
     userId: updatedMembership.userId,
@@ -505,7 +523,7 @@ export const removeMember = async (
     throw new ApiError(404, 'Member not found in this organization');
   }
 
- 
+
   await prisma.organizationMember.delete({
     where: { id: membership.id },
   });
@@ -524,7 +542,7 @@ export const leaveOrganization = async (orgId: string, userId: string) => {
     throw new ApiError(404, 'Organization not found');
   }
 
- 
+
   if (org.ownerId === userId) {
     throw new ApiError(
       400,
@@ -610,7 +628,7 @@ export const createOrganizationInvite = async (
       select: { id: true },
     });
 
-        if (existingUser) {
+    if (existingUser) {
       const existingMember = await prisma.organizationMember.findUnique({
         where: {
           organizationId_userId: {
@@ -712,8 +730,8 @@ export const createOrganizationInvite = async (
       try {
         const notifBody = targetTeam
           ? (targetTeamRole === 'LEAD'
-              ? `${invite.inviter.name} invited you to lead ${targetTeam.name} at ${invite.organization.name}`
-              : `${invite.inviter.name} invited you to join ${targetTeam.name} at ${invite.organization.name}`)
+            ? `${invite.inviter.name} invited you to lead ${targetTeam.name} at ${invite.organization.name}`
+            : `${invite.inviter.name} invited you to join ${targetTeam.name} at ${invite.organization.name}`)
           : `${invite.inviter.name} invited you to join ${invite.organization.name}`;
 
         await queueNotification({
@@ -1006,6 +1024,30 @@ export const acceptOrganizationInvite = async (
 
     return member;
   });
+
+  void (async () => {
+    try {
+      const [newUser, joinedTeam] = await Promise.all([
+        prisma.user.findUnique({ where: { id: userId }, select: { name: true } }),
+        invite.teamId
+          ? prisma.team.findUnique({ where: { id: invite.teamId }, select: { name: true } })
+          : Promise.resolve(null),
+      ]);
+      const memberName = newUser?.name || 'A new teammate';
+      const teamSuffix = joinedTeam ? ` (${joinedTeam.name})` : '';
+      await createSystemOrgFeedPost({
+        organizationId: invite.organizationId,
+        category: 'WELCOME',
+        title: `Welcome ${memberName}!`,
+        content: `Everyone please join us in welcoming ${memberName}${teamSuffix} to ${result.organization.name}!`,
+        actorId: invite.inviterId,
+        targetUserId: userId,
+        targetTeamId: joinedTeam ? invite.teamId : null,
+      });
+    } catch (err: any) {
+      logger.warn(`[OrganizationInvite] Failed to post welcome feed item: ${err?.message}`);
+    }
+  })();
 
   return result;
 };
