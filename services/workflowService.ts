@@ -399,7 +399,9 @@ Generate the JSON execution plan:`;
 
     if (parseResult.success) {
       const newStepNumber = sanitizedSteps.length + 1;
-      stepNumberMap.set(originalStep, newStepNumber);
+      if (!stepNumberMap.has(originalStep)) {
+        stepNumberMap.set(originalStep, newStepNumber);
+      }
       sanitizedSteps.push({
         ...parseResult.data,
         step: newStepNumber,
@@ -750,9 +752,33 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           }
 
           const memberIds = Array.isArray(resolvedParams.memberIds) ? resolvedParams.memberIds : [];
+          const docOrgId = doc.organizationId || orgId;
+          let allowedOrgMembers = new Set<string>();
+          if (docOrgId) {
+            const orgMembers = await prisma.organizationMember.findMany({
+              where: {
+                organizationId: docOrgId,
+                userId: { in: memberIds },
+              },
+              select: { userId: true },
+            });
+            const org = await prisma.organization.findUnique({
+              where: { id: docOrgId },
+              select: { ownerId: true },
+            });
+            allowedOrgMembers = new Set(orgMembers.map((m) => m.userId));
+            if (org?.ownerId) {
+              allowedOrgMembers.add(org.ownerId);
+            }
+          }
 
           for (const targetId of memberIds) {
             if (targetId && targetId !== userId && !failedCollaboratorIds.includes(targetId)) {
+              if (docOrgId && !allowedOrgMembers.has(targetId)) {
+                failedCollaboratorIds.push(targetId);
+                logger.warn(`Cannot add collaborator ${targetId}: user does not belong to document organization ${docOrgId}`);
+                continue;
+              }
               try {
                 await addCollaborator(userId, doc.id, {
                   userId: targetId,
@@ -824,10 +850,43 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             }
             validRecipients = Array.from(recipientSet).map((id) => ({ id }));
           } else {
-            validRecipients = await prisma.user.findMany({
-              where: { id: { in: userIds } },
+            const senderOrgMemberships = await prisma.organizationMember.findMany({
+              where: { userId },
+              select: { organizationId: true },
+            });
+            const senderOwnedOrgs = await prisma.organization.findMany({
+              where: { ownerId: userId },
               select: { id: true },
             });
+            const senderOrgIds = Array.from(new Set([
+              ...senderOrgMemberships.map((m) => m.organizationId),
+              ...senderOwnedOrgs.map((o) => o.id),
+            ]));
+
+            if (senderOrgIds.length === 0) {
+              throw new ApiError(403, 'An active organization context is required to send notifications');
+            }
+
+            const sharedOrgMembers = await prisma.organizationMember.findMany({
+              where: {
+                organizationId: { in: senderOrgIds },
+                userId: { in: userIds },
+              },
+              select: { userId: true },
+            });
+            const sharedOrgOwners = await prisma.organization.findMany({
+              where: {
+                id: { in: senderOrgIds },
+                ownerId: { in: userIds },
+              },
+              select: { ownerId: true },
+            });
+
+            const recipientSet = new Set([
+              ...sharedOrgMembers.map((m) => m.userId),
+              ...sharedOrgOwners.map((o) => o.ownerId),
+            ]);
+            validRecipients = Array.from(recipientSet).map((id) => ({ id }));
           }
 
           if (validRecipients.length === 0) {
