@@ -3,9 +3,10 @@ import { ApiError } from '../utils/ApiError.js';
 import logger from '../utils/logger.js';
 import { getIO } from '../sockets/socketServer.js';
 import { generateRawCompletion } from './aiService.js';
-import { DocumentScopeType } from '@prisma/client';
+import { DocumentScopeType, OrgRole } from '@prisma/client';
 import { canUserJoinMeeting } from './meetingPermissionService.js';
 import { meetingRooms } from '../sockets/meetingPresence.js';
+import { verifyProjectMemberAccess } from './projectService.js';
 import {
   CreateDocumentInput,
   UpdateDocumentInput,
@@ -131,9 +132,17 @@ export const checkDocumentAccess = async (
     return { doc, permission: 'EDIT' as const, isCreator: true };
   }
 
+  const permissionRank: Record<'VIEW' | 'COMMENT' | 'EDIT', number> = {
+    VIEW: 1,
+    COMMENT: 2,
+    EDIT: 3,
+  };
+
   const directCollab = doc.collaborators.find((c) => c.userId === userId);
   if (directCollab) {
-    if (requiredPermission === 'EDIT' && directCollab.permission !== 'EDIT') {
+    const userRank = permissionRank[directCollab.permission as 'VIEW' | 'COMMENT' | 'EDIT'] || 0;
+    const requiredRank = permissionRank[requiredPermission];
+    if (userRank < requiredRank) {
       throw new ApiError(403, 'You only have view/comment permissions for this document');
     }
     return { doc, permission: directCollab.permission, isCreator: false };
@@ -237,14 +246,82 @@ export const createDocument = async (userId: string, input: CreateDocumentInput)
     content: [{ type: 'paragraph' }]
   };
 
-  let resolvedMeetingId = input.meetingId;
-  if (!resolvedMeetingId && input.organizationId) {
+  if (input.organizationId) {
     const org = await prisma.organization.findUnique({
-      where: { id: input.organizationId }
+      where: { id: input.organizationId },
+      select: { id: true, ownerId: true }
     });
     if (!org) {
       throw new ApiError(404, 'Organization not found');
     }
+    const isOwner = org.ownerId === userId;
+    const orgMember = await prisma.organizationMember.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId: input.organizationId,
+          userId
+        }
+      }
+    });
+    if (!isOwner && !orgMember) {
+      throw new ApiError(403, 'You do not belong to this organization');
+    }
+  }
+
+  if (input.teamId) {
+    const team = await prisma.team.findUnique({
+      where: { id: input.teamId },
+      select: {
+        id: true,
+        organizationId: true,
+        organization: { select: { ownerId: true } }
+      }
+    });
+    if (!team) {
+      throw new ApiError(404, 'Team not found');
+    }
+    if (input.organizationId && team.organizationId !== input.organizationId) {
+      throw new ApiError(400, 'Team does not belong to the specified organization');
+    }
+    const isOwner = team.organization?.ownerId === userId;
+    const teamMember = await prisma.teamMember.findFirst({
+      where: { teamId: input.teamId, userId }
+    });
+    const orgAdmin = await prisma.organizationMember.findFirst({
+      where: {
+        organizationId: team.organizationId,
+        userId,
+        role: OrgRole.ORG_ADMIN
+      }
+    });
+    if (!isOwner && !teamMember && !orgAdmin) {
+      throw new ApiError(403, 'You do not belong to this team');
+    }
+  }
+
+  if (input.projectId) {
+    await verifyProjectMemberAccess(userId, input.projectId);
+  }
+
+  let resolvedMeetingId = input.meetingId;
+  if (resolvedMeetingId) {
+    const meeting = await prisma.meeting.findFirst({
+      where: {
+        OR: [
+          { id: resolvedMeetingId },
+          { code: resolvedMeetingId }
+        ]
+      },
+      select: { id: true, code: true, hostId: true }
+    });
+    if (!meeting) {
+      throw new ApiError(404, 'Meeting not found');
+    }
+    const permCheck = await canUserJoinMeeting(userId, meeting.code);
+    if (!permCheck.allowed) {
+      throw new ApiError(permCheck.statusCode || 403, permCheck.reason || 'You are not authorized to attach documents to this meeting');
+    }
+    resolvedMeetingId = meeting.id;
   }
 
   const document = await prisma.$transaction(async (tx) => {

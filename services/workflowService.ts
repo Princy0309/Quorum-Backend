@@ -88,6 +88,9 @@ const getUserOrganizationContext = async (userId: string, targetOrgId?: string) 
           id: true,
           name: true,
           ownerId: true,
+          owner: {
+            select: { id: true, name: true, email: true },
+          },
           members: {
             select: {
               role: true,
@@ -105,18 +108,29 @@ const getUserOrganizationContext = async (userId: string, targetOrgId?: string) 
   });
 
   if (membership?.organization) {
+    const org = membership.organization;
+    const membersList = org.members.map((m) => ({
+      id: m.user.id,
+      name: m.user.name,
+      email: m.user.email,
+      role: m.role as string,
+    }));
+    if (org.owner && !membersList.some((m) => m.id === org.owner.id)) {
+      membersList.unshift({
+        id: org.owner.id,
+        name: org.owner.name,
+        email: org.owner.email,
+        role: 'OWNER',
+      });
+    }
+
     return {
-      organizationId: membership.organization.id,
-      organizationName: membership.organization.name,
+      organizationId: org.id,
+      organizationName: org.name,
       userRole: membership.role,
-      isOwner: membership.organization.ownerId === userId,
-      availableMembers: membership.organization.members.map((m) => ({
-        id: m.user.id,
-        name: m.user.name,
-        email: m.user.email,
-        role: m.role,
-      })),
-      availableTeams: membership.organization.teams.map((t) => ({
+      isOwner: org.ownerId === userId,
+      availableMembers: membersList,
+      availableTeams: org.teams.map((t) => ({
         id: t.id,
         name: t.name,
       })),
@@ -128,6 +142,10 @@ const getUserOrganizationContext = async (userId: string, targetOrgId?: string) 
     select: {
       id: true,
       name: true,
+      ownerId: true,
+      owner: {
+        select: { id: true, name: true, email: true },
+      },
       members: {
         select: {
           role: true,
@@ -143,17 +161,27 @@ const getUserOrganizationContext = async (userId: string, targetOrgId?: string) 
   });
 
   if (ownedOrg) {
+    const membersList = ownedOrg.members.map((m) => ({
+      id: m.user.id,
+      name: m.user.name,
+      email: m.user.email,
+      role: m.role as string,
+    }));
+    if (ownedOrg.owner && !membersList.some((m) => m.id === ownedOrg.owner.id)) {
+      membersList.unshift({
+        id: ownedOrg.owner.id,
+        name: ownedOrg.owner.name,
+        email: ownedOrg.owner.email,
+        role: 'OWNER',
+      });
+    }
+
     return {
       organizationId: ownedOrg.id,
       organizationName: ownedOrg.name,
       userRole: OrgRole.ORG_ADMIN,
       isOwner: true,
-      availableMembers: ownedOrg.members.map((m) => ({
-        id: m.user.id,
-        name: m.user.name,
-        email: m.user.email,
-        role: m.role,
-      })),
+      availableMembers: membersList,
       availableTeams: ownedOrg.teams.map((t) => ({
         id: t.id,
         name: t.name,
@@ -488,6 +516,15 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
     }
 
     for (const step of plan.steps) {
+      if (step.action === 'SHARE_DOCUMENT' && step.params?.documentId) {
+        const rawDocId = String(step.params.documentId).trim();
+        if (rawDocId && !rawDocId.startsWith('$step')) {
+          await checkDocumentAccess(userId, rawDocId, 'EDIT');
+        }
+      }
+    }
+
+    for (const step of plan.steps) {
       try {
         const resolvedParams = resolveVariables(step.params, variables);
         if (step.action === 'CREATE_TEAM') {
@@ -735,6 +772,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           const notifTitle = String(resolvedParams.title || 'Workflow Update').trim();
           const notifMessage = String(resolvedParams.message || 'A new workflow action was completed.').trim();
 
+          if (userIds.length === 0) {
+            throw new ApiError(400, 'At least one recipient user ID is required to send notifications');
+          }
+
           let validRecipients: { id: string }[] = [];
           if (orgId) {
             const callerOrg = await getUserOrganizationContext(userId, orgId);
@@ -765,6 +806,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               where: { id: { in: userIds } },
               select: { id: true },
             });
+          }
+
+          if (validRecipients.length === 0) {
+            throw new ApiError(400, 'None of the requested recipients belong to the organization or are valid users');
           }
 
           for (const u of validRecipients) {
