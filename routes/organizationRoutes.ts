@@ -45,6 +45,7 @@ import {
   deleteTeamController,
   addTeamMemberController,
   removeTeamMemberController,
+  getTeamMembersController,
   getTeamMessagesController,
   sendTeamMessageController,
   deleteTeamMessageController,
@@ -283,6 +284,13 @@ router.get(
   authMiddleware,
   requireOrgMember(),
   getTeamMessagesController
+);
+
+router.get(
+  '/:id/teams/:teamId/members',
+  authMiddleware,
+  requireOrgMember(),
+  getTeamMembersController
 );
 
 router.post(
