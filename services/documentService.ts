@@ -158,7 +158,7 @@ export const checkDocumentAccess = async (
     });
 
     if (meeting) {
-      const isOrgCompatible = !doc.organizationId || !meeting.organizationId || doc.organizationId === meeting.organizationId;
+      const isOrgCompatible = (doc.organizationId || null) === (meeting.organizationId || null);
       if (isOrgCompatible) {
         const isLinkedToMeeting = doc.meetings.some((dm) => dm.meetingId === meeting.id) || doc.meetingId === meeting.id;
         if (isLinkedToMeeting) {
@@ -355,13 +355,14 @@ export const createDocument = async (userId: string, input: CreateDocumentInput)
 
   if (input.whiteboardId) {
     const whiteboard = await getWhiteboardById(userId, input.whiteboardId);
-    if (whiteboard?.organizationId) {
-      if (input.organizationId && input.organizationId !== whiteboard.organizationId) {
-        throw new ApiError(400, 'Whiteboard and document must belong to the same organization');
-      }
-      if (!input.organizationId) {
-        input.organizationId = whiteboard.organizationId;
-      }
+    if (input.scopeType === 'PERSONAL' && whiteboard?.organizationId) {
+      throw new ApiError(400, 'Whiteboard and document must belong to the same organization');
+    }
+    if (input.organizationId && whiteboard?.organizationId && input.organizationId !== whiteboard.organizationId) {
+      throw new ApiError(400, 'Whiteboard and document must belong to the same organization');
+    }
+    if (!input.organizationId && whiteboard?.organizationId && input.scopeType !== 'PERSONAL') {
+      input.organizationId = whiteboard.organizationId;
     }
   }
 
@@ -379,13 +380,19 @@ export const createDocument = async (userId: string, input: CreateDocumentInput)
     if (!meeting) {
       throw new ApiError(404, 'Meeting not found');
     }
-    if (meeting.organizationId) {
-      if (input.organizationId && input.organizationId !== meeting.organizationId) {
+    const docOrg = input.organizationId || null;
+    const meetingOrg = meeting.organizationId || null;
+    if (input.scopeType === 'PERSONAL' && meetingOrg) {
+      throw new ApiError(400, 'Meeting and document must belong to the same organization');
+    }
+    if (docOrg && docOrg !== meetingOrg) {
+      throw new ApiError(400, 'Meeting and document must belong to the same organization');
+    }
+    if (!docOrg && meetingOrg) {
+      if (input.scopeType === 'PERSONAL') {
         throw new ApiError(400, 'Meeting and document must belong to the same organization');
       }
-      if (!input.organizationId) {
-        input.organizationId = meeting.organizationId;
-      }
+      input.organizationId = meetingOrg;
     }
     const permCheck = await canUserJoinMeeting(userId, meeting.code);
     if (!permCheck.allowed) {
@@ -771,7 +778,7 @@ export const openDocumentInMeeting = async (userId: string, documentId: string, 
     throw new ApiError(404, 'Active meeting not found');
   }
 
-  if (doc.organizationId && meeting.organizationId && doc.organizationId !== meeting.organizationId) {
+  if ((doc.organizationId || null) !== (meeting.organizationId || null)) {
     throw new ApiError(400, 'Meeting and document must belong to the same organization');
   }
 
@@ -817,7 +824,7 @@ export const embedWhiteboardInDocument = async (userId: string, documentId: stri
   const { doc } = await checkDocumentAccess(userId, documentId, 'EDIT');
 
   const whiteboard = await getWhiteboardById(userId, whiteboardId);
-  if (doc.organizationId && whiteboard?.organizationId && doc.organizationId !== whiteboard.organizationId) {
+  if ((doc.organizationId || null) !== (whiteboard?.organizationId || null)) {
     throw new ApiError(400, 'Whiteboard and document must belong to the same organization');
   }
 

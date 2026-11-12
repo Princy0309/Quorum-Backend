@@ -619,10 +619,31 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           const teamName = String(resolvedParams.name || 'New Team').trim();
           const teamDesc = resolvedParams.description ? String(resolvedParams.description).trim() : undefined;
 
-          const team = await createTeam(orgId, userId, {
-            name: teamName,
-            description: teamDesc,
-          });
+          let createdTeamId: string | undefined;
+          let team: any = null;
+          const existingTeamId = variables.get(`$step${step.step}.teamId`);
+          if (existingTeamId) {
+            team = await prisma.team.findUnique({ where: { id: existingTeamId } });
+          }
+          if (!team) {
+            const existingTeam = await prisma.team.findUnique({
+              where: {
+                organizationId_name: {
+                  organizationId: orgId,
+                  name: teamName,
+                },
+              },
+            });
+            if (existingTeam) {
+              team = existingTeam;
+            } else {
+              team = await createTeam(orgId, userId, {
+                name: teamName,
+                description: teamDesc,
+              });
+              createdTeamId = team.id;
+            }
+          }
 
           variables.set(`$step${step.step}.teamId`, team.id);
           variables.set(`$step${step.step}.id`, team.id);
@@ -634,7 +655,12 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           for (const targetId of memberIds) {
             if (targetId && targetId !== userId) {
               try {
-                await addTeamMember(orgId, team.id, userId, callerRole, targetId, 'member');
+                const existingMember = await prisma.teamMember.findFirst({
+                  where: { teamId: team.id, userId: targetId }
+                });
+                if (!existingMember) {
+                  await addTeamMember(orgId, team.id, userId, callerRole, targetId, 'member');
+                }
                 addedCount++;
               } catch (memberErr) {
                 failedMemberIds.push(targetId);
@@ -644,6 +670,17 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           }
 
           const hasMemberFailures = failedMemberIds.length > 0;
+          if (hasMemberFailures) {
+            try {
+              await prisma.team.delete({ where: { id: team.id } });
+            } catch (delErr) {
+              logger.warn(`Failed to clean up team ${team.id} after member failure`, delErr);
+            }
+            variables.delete(`$step${step.step}.teamId`);
+            variables.delete(`$step${step.step}.id`);
+            variables.delete(`$step${step.step}.name`);
+          }
+
           results.push({
             step: step.step,
             action: step.action,
@@ -679,14 +716,36 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             throw new ApiError(400, 'durationMinutes must be a positive number between 1 and 1440');
           }
 
-          const meeting = await createScopedMeeting(userId, {
-            title: meetingTitle,
-            scopeType: targetTeamId ? MeetingScopeType.TEAM : (orgId ? MeetingScopeType.ORGANIZATION : MeetingScopeType.PERSONAL),
-            organizationId: orgId,
-            teamId: targetTeamId,
-            scheduledStartTime: startTime,
-            durationMinutes,
-          });
+          let meeting: any = null;
+          const existingMeetingId = variables.get(`$step${step.step}.meetingId`);
+          if (existingMeetingId) {
+            meeting = await prisma.meeting.findUnique({ where: { id: existingMeetingId } });
+          }
+          if (!meeting) {
+            const recentMeeting = await prisma.meeting.findFirst({
+              where: {
+                hostId: userId,
+                title: meetingTitle,
+                organizationId: orgId || null,
+                teamId: targetTeamId || null,
+                scheduledStartTime: startTime,
+                createdAt: { gte: new Date(Date.now() - 15 * 60 * 1000) },
+              },
+              orderBy: { createdAt: 'desc' },
+            });
+            if (recentMeeting) {
+              meeting = recentMeeting;
+            } else {
+              meeting = await createScopedMeeting(userId, {
+                title: meetingTitle,
+                scopeType: targetTeamId ? MeetingScopeType.TEAM : (orgId ? MeetingScopeType.ORGANIZATION : MeetingScopeType.PERSONAL),
+                organizationId: orgId,
+                teamId: targetTeamId,
+                scheduledStartTime: startTime,
+                durationMinutes,
+              });
+            }
+          }
 
           variables.set(`$step${step.step}.meetingCode`, meeting.code);
           variables.set(`$step${step.step}.meetingId`, meeting.id);
@@ -947,24 +1006,34 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           }
 
           for (const u of validRecipients) {
-            await prisma.notification.create({
-              data: {
-                recipientId: u.id,
-                actorId: userId,
-                type: NotificationType.SYSTEM,
-                title: notifTitle,
-                body: notifMessage,
-                data: { planId },
-              },
+            const notifHash = crypto.createHash('sha256').update(`notif:${planId}:${step.step}:${u.id}`).digest('hex');
+            const notifId = `${notifHash.slice(0, 8)}-${notifHash.slice(8, 12)}-4${notifHash.slice(13, 16)}-a${notifHash.slice(17, 20)}-${notifHash.slice(20, 32)}`;
+
+            const existingNotif = await prisma.notification.findUnique({
+              where: { id: notifId },
             });
 
-            try {
-              getIO().to(`user:${u.id}`).emit('notification:new', {
-                title: notifTitle,
-                body: notifMessage,
+            if (!existingNotif) {
+              await prisma.notification.create({
+                data: {
+                  id: notifId,
+                  recipientId: u.id,
+                  actorId: userId,
+                  type: NotificationType.SYSTEM,
+                  title: notifTitle,
+                  body: notifMessage,
+                  data: { planId, step: step.step },
+                },
               });
-            } catch (socketErr) {
-              logger.warn('Failed to emit live notification to user ' + u.id, socketErr);
+
+              try {
+                getIO().to(`user:${u.id}`).emit('notification:new', {
+                  title: notifTitle,
+                  body: notifMessage,
+                });
+              } catch (socketErr) {
+                logger.warn('Failed to emit live notification to user ' + u.id, socketErr);
+              }
             }
           }
 
