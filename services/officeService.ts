@@ -240,7 +240,8 @@ export async function changeOfficeZone(
     teamId: string,
     userId: string,
     newZoneId: OfficeZoneId,
-    targetDeskId?: string | null
+    targetDeskId?: string | null,
+    durationMinutes?: number | null
 ): Promise<OfficeZoneChangedEvent> {
     const membersKey = getOfficeMembersKey(teamId);
     const desksKey = getOfficeDesksKey(teamId);
@@ -289,7 +290,10 @@ export async function changeOfficeZone(
 
     // Bidirectional Presence synchronization:
     if (newZoneId === 'FOCUS_POD') {
-        await setUserCustomStatus(userId, { status: 'DO_NOT_DISTURB', statusMessage: 'In Focus Pod' });
+        await setUserCustomStatus(userId, { status: 'DO_NOT_DISTURB', 
+            statusMessage: durationMinutes ? `Focus Pod (${durationMinutes}m)`: 'In Focus Pod',
+            clearAfterMinutes: durationMinutes || null,
+         });
     } else if (newZoneId === 'COFFEE_LOUNGE') {
         await setUserCustomStatus(userId, { status: 'BE_RIGHT_BACK', statusMessage: 'Coffee Break' });
     } else if (newZoneId === 'OPEN_WORKSPACE' && (previousZoneId === 'FOCUS_POD' || previousZoneId === 'COFFEE_LOUNGE')) {
