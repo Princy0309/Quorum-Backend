@@ -158,7 +158,9 @@ export const checkDocumentAccess = async (
     });
 
     if (meeting) {
-      const isOrgCompatible = (doc.organizationId || null) === (meeting.organizationId || null);
+      const isDocPersonal = !doc.organizationId && doc.scopeType === 'PERSONAL' && !doc.teamId && !doc.projectId;
+      const isMeetingPersonal = !meeting.organizationId;
+      const isOrgCompatible = isDocPersonal ? isMeetingPersonal : (!!doc.organizationId && doc.organizationId === meeting.organizationId);
       if (isOrgCompatible) {
         const isLinkedToMeeting = doc.meetings.some((dm) => dm.meetingId === meeting.id) || doc.meetingId === meeting.id;
         if (isLinkedToMeeting) {
@@ -778,7 +780,10 @@ export const openDocumentInMeeting = async (userId: string, documentId: string, 
     throw new ApiError(404, 'Active meeting not found');
   }
 
-  if ((doc.organizationId || null) !== (meeting.organizationId || null)) {
+  const isDocPersonal = !doc.organizationId && doc.scopeType === 'PERSONAL' && !doc.teamId && !doc.projectId;
+  const isMeetingPersonal = !meeting.organizationId;
+  const isScopeCompatible = isDocPersonal ? isMeetingPersonal : (!!doc.organizationId && doc.organizationId === meeting.organizationId);
+  if (!isScopeCompatible) {
     throw new ApiError(400, 'Meeting and document must belong to the same organization');
   }
 
@@ -824,7 +829,10 @@ export const embedWhiteboardInDocument = async (userId: string, documentId: stri
   const { doc } = await checkDocumentAccess(userId, documentId, 'EDIT');
 
   const whiteboard = await getWhiteboardById(userId, whiteboardId);
-  if ((doc.organizationId || null) !== (whiteboard?.organizationId || null)) {
+  const isDocPersonal = !doc.organizationId && doc.scopeType === 'PERSONAL' && !doc.teamId && !doc.projectId;
+  const isWbPersonal = !whiteboard?.organizationId;
+  const isWbScopeCompatible = isDocPersonal ? isWbPersonal : (!!doc.organizationId && doc.organizationId === whiteboard?.organizationId);
+  if (!isWbScopeCompatible) {
     throw new ApiError(400, 'Whiteboard and document must belong to the same organization');
   }
 

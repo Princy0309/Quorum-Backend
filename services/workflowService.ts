@@ -1049,6 +1049,17 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
         }
       } catch (err: any) {
         logger.error(`Error executing workflow step ${step.step} (${step.action})`, err);
+        if (step.action === 'CREATE_TEAM') {
+          const failedTeamId = variables.get(`$step${step.step}.teamId`);
+          if (failedTeamId) {
+            try {
+              await prisma.team.delete({ where: { id: failedTeamId } });
+            } catch {}
+            variables.delete(`$step${step.step}.teamId`);
+            variables.delete(`$step${step.step}.id`);
+            variables.delete(`$step${step.step}.name`);
+          }
+        }
         results.push({
           step: step.step,
           action: step.action,
