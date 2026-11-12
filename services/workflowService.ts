@@ -322,6 +322,7 @@ Generate the JSON execution plan:`;
   }
 
   const sanitizedSteps: WorkflowStep[] = [];
+  const stepNumberMap = new Map<number, number>();
 
   for (let i = 0; i < parsedPlan.steps.length; i++) {
     const rawStep = parsedPlan.steps[i];
@@ -329,20 +330,48 @@ Generate the JSON execution plan:`;
       continue;
     }
 
+    const originalStep = typeof (rawStep as any).step === 'number' ? (rawStep as any).step : i + 1;
     const parseResult = workflowStepSchema.safeParse({
-      step: typeof (rawStep as any).step === 'number' ? (rawStep as any).step : i + 1,
+      step: originalStep,
       action: (rawStep as any).action,
       params: (rawStep as any).params && typeof (rawStep as any).params === 'object' ? (rawStep as any).params : {},
       description: typeof (rawStep as any).description === 'string' ? (rawStep as any).description : undefined,
     });
 
     if (parseResult.success) {
+      const newStepNumber = sanitizedSteps.length + 1;
+      stepNumberMap.set(originalStep, newStepNumber);
       sanitizedSteps.push({
         ...parseResult.data,
-        step: sanitizedSteps.length + 1,
+        step: newStepNumber,
         description: parseResult.data.description || parseResult.data.action.replace('_', ' ').toLowerCase(),
       });
     }
+  }
+
+  const remapStepVariables = (val: any): any => {
+    if (typeof val === 'string') {
+      return val.replace(/\$step(\d+)\b/g, (match, oldNumStr) => {
+        const oldNum = parseInt(oldNumStr, 10);
+        const newNum = stepNumberMap.get(oldNum);
+        return newNum !== undefined ? `$step${newNum}` : match;
+      });
+    }
+    if (Array.isArray(val)) {
+      return val.map(remapStepVariables);
+    }
+    if (val !== null && typeof val === 'object') {
+      const res: Record<string, any> = {};
+      for (const [k, v] of Object.entries(val)) {
+        res[k] = remapStepVariables(v);
+      }
+      return res;
+    }
+    return val;
+  };
+
+  for (const step of sanitizedSteps) {
+    step.params = remapStepVariables(step.params);
   }
 
   if (sanitizedSteps.length === 0) {
@@ -459,9 +488,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
     }
 
     for (const step of plan.steps) {
-      const resolvedParams = resolveVariables(step.params, variables);
-
       try {
+        const resolvedParams = resolveVariables(step.params, variables);
         if (step.action === 'CREATE_TEAM') {
           if (!orgId) {
             throw new ApiError(400, 'An active organization is required to create a team');
@@ -551,6 +579,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           });
 
           variables.set(`$step${step.step}.meetingCode`, meeting.code);
+          variables.set(`$step${step.step}.meetingId`, meeting.code);
           variables.set(`$step${step.step}.id`, meeting.code);
 
           results.push({
@@ -599,6 +628,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               throw new ApiError(403, 'Document does not belong to the target team organization');
             }
 
+            const isOwner = team.organization?.ownerId === userId;
             const userOrgMembership = await prisma.organizationMember.findUnique({
               where: {
                 organizationId_userId: {
@@ -608,13 +638,13 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               },
             });
 
-            if (!userOrgMembership) {
+            if (!isOwner && !userOrgMembership) {
               throw new ApiError(403, 'You do not belong to the target team organization');
             }
 
             const isOrgAdminOrOwner =
-              userOrgMembership.role === OrgRole.ORG_ADMIN ||
-              team.organization?.ownerId === userId;
+              isOwner ||
+              userOrgMembership?.role === OrgRole.ORG_ADMIN;
 
             if (!isOrgAdminOrOwner) {
               const teamMember = await prisma.teamMember.findFirst({
@@ -625,14 +655,33 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               }
             }
 
-            await prisma.document.update({
-              where: { id: doc.id },
-              data: {
-                teamId: targetTeamId,
-                organizationId: team.organizationId,
-                scopeType: 'TEAM',
-              },
-            });
+            if (!doc.teamId) {
+              await prisma.document.update({
+                where: { id: doc.id },
+                data: {
+                  teamId: targetTeamId,
+                  organizationId: team.organizationId,
+                  scopeType: 'TEAM',
+                },
+              });
+            } else if (doc.teamId !== targetTeamId) {
+              const targetTeamMembers = await prisma.teamMember.findMany({
+                where: { teamId: targetTeamId },
+                select: { userId: true },
+              });
+              for (const tm of targetTeamMembers) {
+                if (tm.userId !== userId) {
+                  try {
+                    await addCollaborator(userId, doc.id, {
+                      userId: tm.userId,
+                      permission: 'VIEW',
+                    });
+                  } catch (collabErr) {
+                    logger.warn(`Could not add team member ${tm.userId} as collaborator:`, collabErr);
+                  }
+                }
+              }
+            }
           }
 
           const memberIds = Array.isArray(resolvedParams.memberIds) ? resolvedParams.memberIds : [];
@@ -712,7 +761,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             });
 
             try {
-              getIO().to(u.id).emit('notification:new', {
+              getIO().to(`user:${u.id}`).emit('notification:new', {
                 title: notifTitle,
                 body: notifMessage,
               });
