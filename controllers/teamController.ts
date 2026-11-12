@@ -10,6 +10,7 @@ import {
   addTeamMember,
   removeTeamMember,
   getTeamMembers,
+  leaveTeam,
 } from '../services/teamService.js';
 import prisma from '../config/prisma.js';
 import { queueNotification } from '../queues/notificationQueue.js';
@@ -178,7 +179,23 @@ export const getTeamMembersController = asyncHandler(
   }
 );
 
+export const leaveTeamController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id || !req.orgMembership) {
+      return next(new ApiError(401, 'Unauthorized'));
+    }
 
+    const orgId = getParam(req.params.id);
+    const teamId = getParam(req.params.teamId);
+
+    const result = await leaveTeam(orgId, teamId, req.user.id);
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  }
+);
 
 export const getTeamMessagesController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {

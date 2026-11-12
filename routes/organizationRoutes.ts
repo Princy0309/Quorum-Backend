@@ -46,6 +46,7 @@ import {
   addTeamMemberController,
   removeTeamMemberController,
   getTeamMembersController,
+  leaveTeamController,
   getTeamMessagesController,
   sendTeamMessageController,
   deleteTeamMessageController,
@@ -291,6 +292,13 @@ router.get(
   authMiddleware,
   requireOrgMember(),
   getTeamMembersController
+);
+
+router.post(
+  '/:id/teams/:teamId/leave',
+  authMiddleware,
+  requireOrgMember(),
+  leaveTeamController
 );
 
 router.post(

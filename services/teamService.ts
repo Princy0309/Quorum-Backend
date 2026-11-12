@@ -555,3 +555,17 @@ export const getTeamMembers = async (
     }),
   };
 };
+
+export const leaveTeam = async (
+  organizationId: string,
+  teamId: string,
+  userId: string
+) => {
+  return await removeTeamMember(
+    organizationId,
+    teamId,
+    userId,
+    OrgRole.MEMBER,
+    userId
+  );
+};
