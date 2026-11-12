@@ -112,6 +112,29 @@ export async function processJiraWebhook(
     return { error: 'Invalid HMAC signature' };
   }
 
+  if (webhookEvent === 'jira:issue_deleted' && issue?.key) {
+    const cleanKey = issue.key.toUpperCase();
+    const existingTicket = await prisma.jiraTicketLink.findFirst({
+      where: { jiraKey: cleanKey },
+    });
+
+    if (existingTicket) {
+      await prisma.jiraTicketLink.delete({
+        where: { id: existingTicket.id },
+      });
+      logger.info(`Removed Quorum ticket link ${cleanKey} after Jira deletion`);
+    }
+
+    await prisma.jiraWebhookEvent.update({
+      where: { id: loggedEvent.id },
+      data: { processed: true, processedAt: new Date() },
+    });
+
+    return { success: true, eventId, deleted: true };
+  }
+
+
+
   if (issue && issue.key) {
     const cleanKey = issue.key.toUpperCase();
     const newStatus = issue.fields?.status?.name;
@@ -140,6 +163,53 @@ export async function processJiraWebhook(
       });
 
       logger.info(`Synced ticket ${cleanKey} from Jira webhook: Status="${newStatus}"`);
+    }
+    try {
+      const assigneeAccountId = issue.fields?.assignee?.accountId;
+
+      const assigneeChangedInUpdate =
+        webhookEvent === 'jira:issue_updated' &&
+        Array.isArray(payload?.changelog?.items) &&
+        payload.changelog.items.some(
+          (item: any) => item.field === 'assignee' && item.to
+        );
+
+      const createdWithAssignee =
+        webhookEvent === 'jira:issue_created' && assigneeAccountId;
+
+      if (assigneeAccountId && (assigneeChangedInUpdate || createdWithAssignee)) {
+        const assigneeLink = await prisma.userJiraLink.findFirst({
+          where: { jiraAccountId: assigneeAccountId },
+          select: { userId: true },
+        });
+
+        if (assigneeLink) {
+          const jiraUrl = integration.siteUrl
+            ? `${integration.siteUrl}/browse/${cleanKey}`
+            : null;
+
+          await prisma.notification.create({
+            data: {
+              recipientId: assigneeLink.userId,
+              type: 'SYSTEM',
+              title: `Assigned: ${cleanKey}`,
+              body: newSummary
+                ? `You've been assigned to "${newSummary}" in Jira.`
+                : `You've been assigned ticket ${cleanKey} in Jira.`,
+              data: {
+                source: 'jira',
+                jiraKey: cleanKey,
+                jiraStatus: newStatus || null,
+                jiraUrl,
+              },
+            },
+          });
+
+          logger.info(`Notified user ${assigneeLink.userId} of Jira assignment: ${cleanKey}`);
+        }
+      }
+    } catch (notifErr: any) {
+      logger.warn(`Failed to send Jira assignment notification for ${cleanKey}: ${notifErr.message}`);
     }
   }
 
