@@ -36,7 +36,11 @@ import {
   votePollController,
   markMessageAsReadController,
   clearConversationMessagesController,
-  deleteConversationController
+  deleteConversationController,
+  muteConversationController,
+  unmuteConversationController,
+  blockConversationController,
+  unblockConversationController
 } from '../controllers/conversationController.js';
 import { createOrGetDMController } from '../controllers/dmController.js';
 
@@ -65,6 +69,14 @@ router.delete('/:id/messages', authMiddleware, clearConversationMessagesControll
 router.post('/:id/clear', authMiddleware, clearConversationMessagesController);
 router.delete('/:id/clear', authMiddleware, clearConversationMessagesController);
 router.delete('/:id', authMiddleware, deleteConversationController);
+router.post('/:id/mute', authMiddleware, muteConversationController);
+router.patch('/:id/mute', authMiddleware, muteConversationController);
+router.post('/:id/unmute', authMiddleware, unmuteConversationController);
+router.delete('/:id/mute', authMiddleware, unmuteConversationController);
+router.post('/:id/block', authMiddleware, blockConversationController);
+router.patch('/:id/block', authMiddleware, blockConversationController);
+router.post('/:id/unblock', authMiddleware, unblockConversationController);
+router.delete('/:id/block', authMiddleware, unblockConversationController);
 router.patch('/:id/messages/:messageId', authMiddleware, validate(editMessageSchema), editMessageController);
 router.delete('/:id/messages/:messageId', authMiddleware, validate(deleteMessageSchema), deleteMessageController);
 router.post('/:id/messages/:messageId/reactions', authMiddleware, validate(toggleReactionSchema), toggleMessageReactionController);

@@ -13,7 +13,11 @@ import {
   forwardMessages,
   votePoll,
   clearConversationMessages,
-  deleteConversationForUser
+  deleteConversationForUser,
+  muteConversation,
+  unmuteConversation,
+  blockConversation,
+  unblockConversation
 } from '../../services/chatService.js';
 import { sendPushToOfflineUsers } from '../../services/notificationService.js';
 import { checkSocketMessageRateLimit } from '../../middlewares/rateLimiter.js';
@@ -234,6 +238,133 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
   );
 
   socket.on(
+    CHAT_EVENTS.CONVERSATION_MUTE,
+    async (
+      payload: { conversationId: string; mutedUntil?: string; duration?: number },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+          return;
+        }
+
+        if (!payload?.conversationId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId is required'));
+          return;
+        }
+
+        let mutedUntil: Date | undefined;
+        if (payload.mutedUntil) {
+          mutedUntil = new Date(payload.mutedUntil);
+        } else if (typeof payload.duration === 'number' && payload.duration > 0) {
+          mutedUntil = new Date(Date.now() + payload.duration * 1000);
+        }
+
+        const result = await muteConversation(userId, payload.conversationId, mutedUntil);
+        if (callback) callback({ success: true, data: result });
+      } catch (err: any) {
+        logger.error('Error muting conversation via socket', { error: err.message });
+        if (callback) {
+          const code = err instanceof ApiError && err.statusCode === 404 ? 'NOT_FOUND' : 'SERVER_ERROR';
+          callback(formatErrorResponse(code, err.message || 'Failed to mute conversation'));
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.CONVERSATION_UNMUTE,
+    async (
+      payload: { conversationId: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+          return;
+        }
+
+        if (!payload?.conversationId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId is required'));
+          return;
+        }
+
+        const result = await unmuteConversation(userId, payload.conversationId);
+        if (callback) callback({ success: true, data: result });
+      } catch (err: any) {
+        logger.error('Error unmuting conversation via socket', { error: err.message });
+        if (callback) {
+          const code = err instanceof ApiError && err.statusCode === 404 ? 'NOT_FOUND' : 'SERVER_ERROR';
+          callback(formatErrorResponse(code, err.message || 'Failed to unmute conversation'));
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.CONVERSATION_BLOCK,
+    async (
+      payload: { conversationId: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+          return;
+        }
+
+        if (!payload?.conversationId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId is required'));
+          return;
+        }
+
+        const result = await blockConversation(userId, payload.conversationId);
+        if (callback) callback({ success: true, data: result });
+      } catch (err: any) {
+        logger.error('Error blocking conversation via socket', { error: err.message });
+        if (callback) {
+          const code = err instanceof ApiError && err.statusCode === 404 ? 'NOT_FOUND' : 'SERVER_ERROR';
+          callback(formatErrorResponse(code, err.message || 'Failed to block conversation'));
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.CONVERSATION_UNBLOCK,
+    async (
+      payload: { conversationId: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+          return;
+        }
+
+        if (!payload?.conversationId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId is required'));
+          return;
+        }
+
+        const result = await unblockConversation(userId, payload.conversationId);
+        if (callback) callback({ success: true, data: result });
+      } catch (err: any) {
+        logger.error('Error unblocking conversation via socket', { error: err.message });
+        if (callback) {
+          const code = err instanceof ApiError && err.statusCode === 404 ? 'NOT_FOUND' : 'SERVER_ERROR';
+          callback(formatErrorResponse(code, err.message || 'Failed to unblock conversation'));
+        }
+      }
+    }
+  );
+
+  socket.on(
     CHAT_EVENTS.MESSAGE_SEND,
     async (
       payload: SendMessagePayload,
@@ -321,7 +452,15 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           }
         });
 
-        const recipientUserIds = participants.map((p) => p.userId).filter((id) => id !== senderId);
+        const now = new Date();
+        const recipientUserIds = participants
+          .filter((p) => p.userId !== senderId)
+          .filter((p: any) => {
+            if (!p.isMuted) return true;
+            if (p.mutedUntil && new Date(p.mutedUntil) < now) return true;
+            return false;
+          })
+          .map((p) => p.userId);
         const mentionedRecipientIds = recipientUserIds.filter((id) =>
           ((message as any).mentionedUserIds || []).includes(id)
         );
