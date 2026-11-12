@@ -11,7 +11,9 @@ import {
   toggleMessageReaction,
   getMessageReactions,
   forwardMessages,
-  votePoll
+  votePoll,
+  clearConversationMessages,
+  deleteConversationForUser
 } from '../../services/chatService.js';
 import { sendPushToOfflineUsers } from '../../services/notificationService.js';
 import { checkSocketMessageRateLimit } from '../../middlewares/rateLimiter.js';
@@ -167,6 +169,66 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
       } catch (err: any) {
         logger.error('Error leaving conversation room', { error: err.message });
         if (callback) callback(formatErrorResponse('SERVER_ERROR', 'Failed to leave conversation'));
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.CONVERSATION_CLEAR,
+    async (
+      payload: { conversationId: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+          return;
+        }
+
+        if (!payload?.conversationId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId is required'));
+          return;
+        }
+
+        const result = await clearConversationMessages(userId, payload.conversationId);
+        if (callback) callback({ success: true, data: result });
+      } catch (err: any) {
+        logger.error('Error clearing conversation via socket', { error: err.message });
+        if (callback) {
+          const code = err instanceof ApiError && err.statusCode === 404 ? 'NOT_FOUND' : 'SERVER_ERROR';
+          callback(formatErrorResponse(code, err.message || 'Failed to clear conversation'));
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.CONVERSATION_DELETE,
+    async (
+      payload: { conversationId: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+          return;
+        }
+
+        if (!payload?.conversationId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId is required'));
+          return;
+        }
+
+        const result = await deleteConversationForUser(userId, payload.conversationId);
+        if (callback) callback({ success: true, data: result });
+      } catch (err: any) {
+        logger.error('Error deleting conversation via socket', { error: err.message });
+        if (callback) {
+          const code = err instanceof ApiError && err.statusCode === 404 ? 'NOT_FOUND' : 'SERVER_ERROR';
+          callback(formatErrorResponse(code, err.message || 'Failed to delete conversation'));
+        }
       }
     }
   );

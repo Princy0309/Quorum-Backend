@@ -34,7 +34,9 @@ import {
   forwardMessagesController,
   createPollController,
   votePollController,
-  markMessageAsReadController
+  markMessageAsReadController,
+  clearConversationMessagesController,
+  deleteConversationController
 } from '../controllers/conversationController.js';
 import { createOrGetDMController } from '../controllers/dmController.js';
 
@@ -59,6 +61,10 @@ router.patch('/:id/read', authMiddleware, markMessageAsReadController);
 router.post('/:id/messages/read', authMiddleware, markMessageAsReadController);
 router.post('/:id/messages/:messageId/read', authMiddleware, markMessageAsReadController);
 router.patch('/:id/messages/:messageId/read', authMiddleware, markMessageAsReadController);
+router.delete('/:id/messages', authMiddleware, clearConversationMessagesController);
+router.post('/:id/clear', authMiddleware, clearConversationMessagesController);
+router.delete('/:id/clear', authMiddleware, clearConversationMessagesController);
+router.delete('/:id', authMiddleware, deleteConversationController);
 router.patch('/:id/messages/:messageId', authMiddleware, validate(editMessageSchema), editMessageController);
 router.delete('/:id/messages/:messageId', authMiddleware, validate(deleteMessageSchema), deleteMessageController);
 router.post('/:id/messages/:messageId/reactions', authMiddleware, validate(toggleReactionSchema), toggleMessageReactionController);

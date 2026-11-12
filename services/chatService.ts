@@ -267,6 +267,44 @@ export const getOrCreateDirectConversation = async (userId: string, targetUserId
     }
   }
 
+  if (conversation) {
+    const existingIds = new Set(conversation.participants.map((p: any) => p.userId));
+    const missingIds = [userId, targetUserId].filter((id) => !existingIds.has(id));
+    if (missingIds.length > 0) {
+      await prisma.conversationParticipant.createMany({
+        data: missingIds.map((id) => ({
+          conversationId: conversation!.id,
+          userId: id
+        })),
+        skipDuplicates: true
+      });
+      const reloaded = await prisma.conversation.findUnique({
+        where: { id: conversation.id },
+        include: {
+          participants: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  avatar: true
+                }
+              }
+            }
+          },
+          messages: {
+            take: 1,
+            orderBy: [{ seq: 'desc' }, { id: 'desc' }]
+          }
+        }
+      });
+      if (reloaded) {
+        conversation = reloaded;
+      }
+    }
+  }
+
   return conversation;
 };
 
@@ -2614,6 +2652,125 @@ export const votePoll = async (
     messageId: poll.message.id,
     pollId: poll.id,
     poll: formattedForRequester
+  };
+};
+
+export const clearConversationMessages = async (userId: string, conversationIdOrUserId: string) => {
+  const resolvedId = await resolveConversationId(userId, conversationIdOrUserId);
+  if (!resolvedId) {
+    throw new ApiError(404, 'Conversation not found or user is not a participant');
+  }
+
+  await prisma.$executeRaw`
+    UPDATE "Message"
+    SET "deletedForUserIds" = array_append("deletedForUserIds", ${userId})
+    WHERE "conversationId" = ${resolvedId}
+      AND NOT (${userId} = ANY(COALESCE("deletedForUserIds", ARRAY[]::TEXT[])))
+  `;
+
+  const latestMsg = await prisma.message.findFirst({
+    where: { conversationId: resolvedId },
+    orderBy: [{ seq: 'desc' }, { id: 'desc' }],
+    select: { id: true, seq: true }
+  });
+
+  if (latestMsg) {
+    await prisma.conversationParticipant.updateMany({
+      where: { conversationId: resolvedId, userId },
+      data: {
+        lastReadSeq: latestMsg.seq,
+        lastReadMessageId: latestMsg.id
+      }
+    });
+  }
+
+  try {
+    const io = getIO();
+    io.to(`user:${userId}`).emit(CHAT_EVENTS.CONVERSATION_CLEARED, {
+      conversationId: resolvedId,
+      userId
+    });
+  } catch (ioErr: any) {
+    logger.warn('Failed to emit conversation:cleared event', ioErr);
+  }
+
+  return {
+    success: true,
+    conversationId: resolvedId,
+    cleared: true
+  };
+};
+
+export const deleteConversationForUser = async (userId: string, conversationIdOrUserId: string) => {
+  const resolvedId = await resolveConversationId(userId, conversationIdOrUserId);
+  if (!resolvedId) {
+    throw new ApiError(404, 'Conversation not found or user is not a participant');
+  }
+
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: resolvedId },
+    include: {
+      participants: true
+    }
+  });
+
+  if (!conversation) {
+    throw new ApiError(404, 'Conversation not found');
+  }
+
+  await prisma.$executeRaw`
+    UPDATE "Message"
+    SET "deletedForUserIds" = array_append("deletedForUserIds", ${userId})
+    WHERE "conversationId" = ${resolvedId}
+      AND NOT (${userId} = ANY(COALESCE("deletedForUserIds", ARRAY[]::TEXT[])))
+  `;
+
+  if (conversation.type === 'direct') {
+    await prisma.conversationParticipant.deleteMany({
+      where: {
+        conversationId: resolvedId,
+        userId
+      }
+    });
+
+    const remaining = await prisma.conversationParticipant.findMany({
+      where: { conversationId: resolvedId },
+      select: { userId: true }
+    });
+
+    if (remaining.length === 0) {
+      await prisma.conversation.delete({
+        where: { id: resolvedId }
+      });
+    }
+  } else {
+    try {
+      await removeGroupParticipant(userId, resolvedId, userId);
+    } catch (removeErr: any) {
+      await prisma.conversationParticipant.deleteMany({
+        where: {
+          conversationId: resolvedId,
+          userId
+        }
+      });
+    }
+  }
+
+  try {
+    const io = getIO();
+    io.in(`user:${userId}`).socketsLeave(`conversation:${resolvedId}`);
+    io.to(`user:${userId}`).emit(CHAT_EVENTS.CONVERSATION_DELETED, {
+      conversationId: resolvedId,
+      userId
+    });
+  } catch (ioErr: any) {
+    logger.warn('Failed to emit conversation:deleted event', ioErr);
+  }
+
+  return {
+    success: true,
+    conversationId: resolvedId,
+    deleted: true
   };
 };
 

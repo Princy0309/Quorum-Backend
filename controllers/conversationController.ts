@@ -17,6 +17,8 @@ import {
   forwardMessages,
   saveMessage,
   markMessageAsRead,
+  clearConversationMessages,
+  deleteConversationForUser,
   votePoll
 } from '../services/chatService.js';
 import { getMultipleUserPresences } from '../services/presenceService.js';
@@ -689,6 +691,56 @@ export const votePollController = async (req: Request, res: Response, next: Next
     res.status(200).json({
       success: true,
       message: 'Vote recorded successfully',
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const clearConversationMessagesController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const result = await clearConversationMessages(userId, conversationId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Chat cleared successfully',
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteConversationController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const result = await deleteConversationForUser(userId, conversationId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Chat deleted successfully',
       data: result
     });
   } catch (err) {
