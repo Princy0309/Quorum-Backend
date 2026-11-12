@@ -83,3 +83,16 @@ export const DOCUMENT_EVENTS = {
   MEETING_DOCUMENT_OPENED: 'meeting:document_opened',
   MEETING_DOCUMENT_CLOSED: 'meeting:document_closed'
 } as const;
+
+export const ORG_FEED_EVENTS = {
+  ORG_JOIN: 'org:join',
+  ORG_LEAVE: 'org:leave',
+  POST_NEW: 'org:feed:post:new',
+  POST_UPDATED: 'org:feed:post:updated',
+  POST_DELETED: 'org:feed:post:deleted',
+  POST_PINNED: 'org:feed:post:pinned',
+  REACTION_UPDATED: 'org:feed:reaction:updated',
+  COMMENT_NEW: 'org:feed:comment:new',
+  COMMENT_UPDATED: 'org:feed:comment:updated',
+  COMMENT_DELETED: 'org:feed:comment:deleted',
+} as const;

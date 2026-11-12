@@ -138,7 +138,7 @@ export const notificationWorker = new Worker(
       }
     }
 
-    if (allowEmail && type !== 'COMMUNITY_POST_COMMENT') {
+    if (allowEmail && type !== 'COMMUNITY_POST_COMMENT' && type != "ORG_FEED_COMMENT") {
       try {
         await queueEmailDigest(recipientId);
       } catch (digestErr: any) {
