@@ -18,10 +18,12 @@ interface StoredWorkflowPlan {
   summary: string;
   steps: WorkflowStep[];
   createdAt: string;
+  isExecuted?: boolean;
 }
 
 const inMemoryPlans = new Map<string, { data: StoredWorkflowPlan; expiresAt: number }>();
 const inMemoryExecutingPlans = new Set<string>();
+const inMemoryExecutedPlans = new Set<string>();
 
 const savePlan = async (plan: StoredWorkflowPlan): Promise<void> => {
   const serialized = JSON.stringify(plan);
@@ -37,10 +39,26 @@ const savePlan = async (plan: StoredWorkflowPlan): Promise<void> => {
 };
 
 const getPlan = async (planId: string): Promise<StoredWorkflowPlan | null> => {
+  if (inMemoryExecutedPlans.has(planId)) {
+    return null;
+  }
+  try {
+    const isExecuted = await redis.get(`workflow:plan:executed:${planId}`);
+    if (isExecuted) {
+      return null;
+    }
+  } catch (err) {
+    logger.warn('Failed to check executed status in Redis', err);
+  }
+
   try {
     const raw = await redis.get(`workflow:plan:${planId}`);
     if (raw) {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (parsed.isExecuted) {
+        return null;
+      }
+      return parsed;
     }
   } catch (err) {
     logger.warn('Failed to read workflow plan from Redis, checking memory fallback', err);
@@ -233,10 +251,22 @@ const getUserAccessibleDocuments = async (userId: string, organizationId?: strin
           })
     : null;
 
+  const userProjectMemberships = await prisma.projectMember.findMany({
+    where: { userId },
+    select: { projectId: true },
+  });
+  const userProjectIds = userProjectMemberships.map((pm) => pm.projectId);
+
   const teamCondition = userTeamIds.length > 0
     ? (organizationId
         ? { organizationId, teamId: { in: userTeamIds } }
         : { teamId: { in: userTeamIds } })
+    : null;
+
+  const projectCondition = userProjectIds.length > 0
+    ? (organizationId
+        ? { organizationId, projectId: { in: userProjectIds } }
+        : { projectId: { in: userProjectIds } })
     : null;
 
   const docs = await prisma.document.findMany({
@@ -246,6 +276,7 @@ const getUserAccessibleDocuments = async (userId: string, organizationId?: strin
         { collaborators: { some: { userId } }, ...(organizationId ? { organizationId } : {}) },
         ...(orgCondition ? [orgCondition] : []),
         ...(teamCondition ? [teamCondition] : []),
+        ...(projectCondition ? [projectCondition] : []),
       ],
       isArchived: false,
     },
@@ -513,15 +544,6 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
     if (!orgId) {
       const userOrg = await getUserOrganizationContext(userId);
       orgId = userOrg?.organizationId;
-    }
-
-    for (const step of plan.steps) {
-      if (step.action === 'SHARE_DOCUMENT' && step.params?.documentId) {
-        const rawDocId = String(step.params.documentId).trim();
-        if (rawDocId && !rawDocId.startsWith('$step')) {
-          await checkDocumentAccess(userId, rawDocId, 'EDIT');
-        }
-      }
     }
 
     for (const step of plan.steps) {
@@ -870,10 +892,18 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
       logger.warn('Failed to emit workflow:completed socket event', ioErr);
     }
 
-    try {
-      await redis.del(`workflow:plan:${planId}`);
-    } catch {}
+    inMemoryExecutedPlans.add(planId);
     inMemoryPlans.delete(planId);
+
+    try {
+      await redis.set(`workflow:plan:executed:${planId}`, '1', 'EX', 1800);
+      await redis.del(`workflow:plan:${planId}`);
+    } catch (delErr) {
+      logger.warn('Failed to delete workflow plan from Redis, overwriting as consumed', delErr);
+      try {
+        await redis.set(`workflow:plan:${planId}`, JSON.stringify({ ...plan, isExecuted: true }), 'EX', 60);
+      } catch {}
+    }
 
     return {
       planId,

@@ -442,6 +442,16 @@ export const listUserDocuments = async (
 ) => {
   await ensureDocumentSchema();
 
+  if (query?.projectId) {
+    await verifyProjectMemberAccess(userId, query.projectId);
+  }
+
+  const userProjectMemberships = await prisma.projectMember.findMany({
+    where: { userId },
+    select: { projectId: true }
+  });
+  const userProjectIds = userProjectMemberships.map((pm) => pm.projectId);
+
   const userTeamMemberships = await prisma.teamMember.findMany({
     where: { userId },
     select: { teamId: true }
@@ -488,6 +498,10 @@ export const listUserDocuments = async (
         : { teamId: { in: userTeamIds } })
     : null;
 
+  const projectCondition = query?.projectId
+    ? { projectId: query.projectId }
+    : (userProjectIds.length > 0 ? { projectId: { in: userProjectIds } } : null);
+
   const whereClause: any = {
     isArchived: false,
     OR: [
@@ -495,7 +509,7 @@ export const listUserDocuments = async (
       { collaborators: { some: { userId } } },
       ...(orgCondition ? [orgCondition] : []),
       ...(teamCondition ? [teamCondition] : []),
-      ...(query?.projectId ? [{ projectId: query.projectId }] : [])
+      ...(projectCondition ? [projectCondition] : [])
     ]
   };
 
