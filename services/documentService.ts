@@ -7,6 +7,7 @@ import { DocumentScopeType, OrgRole } from '@prisma/client';
 import { canUserJoinMeeting } from './meetingPermissionService.js';
 import { meetingRooms } from '../sockets/meetingPresence.js';
 import { verifyProjectMemberAccess } from './projectService.js';
+import { getWhiteboardById } from './whiteboardService.js';
 import {
   CreateDocumentInput,
   UpdateDocumentInput,
@@ -206,6 +207,40 @@ export const checkDocumentAccess = async (
         return { doc, permission: 'EDIT' as const, isCreator: false };
       }
     }
+  } else if (doc.projectId || doc.scopeType === 'PROJECT') {
+    if (doc.projectId) {
+      const projectMember = await prisma.projectMember.findFirst({
+        where: {
+          projectId: doc.projectId,
+          userId
+        }
+      });
+      if (projectMember) {
+        return { doc, permission: 'EDIT' as const, isCreator: false };
+      }
+    }
+
+    if (doc.organizationId) {
+      const org = await prisma.organization.findUnique({
+        where: { id: doc.organizationId },
+        select: { ownerId: true }
+      });
+      if (org?.ownerId === userId) {
+        return { doc, permission: 'EDIT' as const, isCreator: false };
+      }
+
+      const orgMembership = await prisma.organizationMember.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId: doc.organizationId,
+            userId
+          }
+        }
+      });
+      if (orgMembership && orgMembership.role === 'ORG_ADMIN') {
+        return { doc, permission: 'EDIT' as const, isCreator: false };
+      }
+    }
   } else if (doc.organizationId) {
     const orgMembership = await prisma.organizationMember.findUnique({
       where: {
@@ -221,19 +256,6 @@ export const checkDocumentAccess = async (
     }
   }
 
-  if (doc.projectId) {
-    const projectMember = await prisma.projectMember.findFirst({
-      where: {
-        projectId: doc.projectId,
-        userId
-      }
-    });
-
-    if (projectMember) {
-      return { doc, permission: 'EDIT' as const, isCreator: false };
-    }
-  }
-
   throw new ApiError(403, 'You do not have permission to access this document');
 };
 
@@ -245,6 +267,16 @@ export const createDocument = async (userId: string, input: CreateDocumentInput)
     type: 'doc',
     content: [{ type: 'paragraph' }]
   };
+
+  if (input.scopeType === 'ORGANIZATION' && !input.organizationId) {
+    throw new ApiError(400, 'organizationId is required for ORGANIZATION scope');
+  }
+  if (input.scopeType === 'TEAM' && !input.teamId) {
+    throw new ApiError(400, 'teamId is required for TEAM scope');
+  }
+  if (input.scopeType === 'PROJECT' && !input.projectId) {
+    throw new ApiError(400, 'projectId is required for PROJECT scope');
+  }
 
   if (input.organizationId) {
     const org = await prisma.organization.findUnique({
@@ -301,6 +333,22 @@ export const createDocument = async (userId: string, input: CreateDocumentInput)
 
   if (input.projectId) {
     await verifyProjectMemberAccess(userId, input.projectId);
+    const project = await prisma.project.findUnique({
+      where: { id: input.projectId },
+      select: { organizationId: true }
+    });
+    if (project?.organizationId) {
+      if (input.organizationId && input.organizationId !== project.organizationId) {
+        throw new ApiError(400, 'Project does not belong to the specified organization');
+      }
+      if (!input.organizationId) {
+        input.organizationId = project.organizationId;
+      }
+    }
+  }
+
+  if (input.whiteboardId) {
+    await getWhiteboardById(userId, input.whiteboardId);
   }
 
   let resolvedMeetingId = input.meetingId;
@@ -487,8 +535,9 @@ export const listUserDocuments = async (
         ? { organizationId: query.organizationId }
         : {
             organizationId: query.organizationId,
-            scopeType: { not: DocumentScopeType.TEAM },
-            teamId: null
+            scopeType: { notIn: [DocumentScopeType.TEAM, DocumentScopeType.PROJECT] },
+            teamId: null,
+            projectId: null
           })
     : null;
 
@@ -740,13 +789,7 @@ export const openDocumentInMeeting = async (userId: string, documentId: string, 
 export const embedWhiteboardInDocument = async (userId: string, documentId: string, whiteboardId: string) => {
   await checkDocumentAccess(userId, documentId, 'EDIT');
 
-  const whiteboard = await prisma.whiteboard.findUnique({
-    where: { id: whiteboardId }
-  });
-
-  if (!whiteboard) {
-    throw new ApiError(404, 'Whiteboard not found');
-  }
+  const whiteboard = await getWhiteboardById(userId, whiteboardId);
 
   const link = await prisma.documentWhiteboard.upsert({
     where: {

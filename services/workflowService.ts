@@ -246,8 +246,9 @@ const getUserAccessibleDocuments = async (userId: string, organizationId?: strin
         ? { organizationId }
         : {
             organizationId,
-            scopeType: { not: DocumentScopeType.TEAM },
+            scopeType: { notIn: [DocumentScopeType.TEAM, DocumentScopeType.PROJECT] },
             teamId: null,
+            projectId: null,
           })
     : null;
 
@@ -382,6 +383,7 @@ Generate the JSON execution plan:`;
 
   const sanitizedSteps: WorkflowStep[] = [];
   const stepNumberMap = new Map<number, number>();
+  const seenOriginalSteps = new Set<number>();
 
   for (let i = 0; i < parsedPlan.steps.length; i++) {
     const rawStep = parsedPlan.steps[i];
@@ -390,6 +392,11 @@ Generate the JSON execution plan:`;
     }
 
     const originalStep = typeof (rawStep as any).step === 'number' ? (rawStep as any).step : i + 1;
+    if (seenOriginalSteps.has(originalStep)) {
+      continue;
+    }
+    seenOriginalSteps.add(originalStep);
+
     const parseResult = workflowStepSchema.safeParse({
       step: originalStep,
       action: (rawStep as any).action,
@@ -399,9 +406,7 @@ Generate the JSON execution plan:`;
 
     if (parseResult.success) {
       const newStepNumber = sanitizedSteps.length + 1;
-      if (!stepNumberMap.has(originalStep)) {
-        stepNumberMap.set(originalStep, newStepNumber);
-      }
+      stepNumberMap.set(originalStep, newStepNumber);
       sanitizedSteps.push({
         ...parseResult.data,
         step: newStepNumber,
@@ -669,6 +674,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           const failedCollaboratorIds: string[] = [];
 
           const targetTeamId = resolvedParams.teamId ? String(resolvedParams.teamId).trim() : undefined;
+          let targetTeamOrgId: string | undefined;
           if (targetTeamId) {
             const team = await prisma.team.findUnique({
               where: { id: targetTeamId },
@@ -684,6 +690,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             if (!team) {
               throw new ApiError(404, 'Target team not found');
             }
+            targetTeamOrgId = team.organizationId;
 
             if (orgId && team.organizationId !== orgId) {
               throw new ApiError(403, 'Target team does not belong to the active organization');
@@ -729,6 +736,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
                   scopeType: 'TEAM',
                 },
               });
+              doc.teamId = targetTeamId;
+              doc.organizationId = team.organizationId;
             } else if (doc.teamId !== targetTeamId) {
               const targetTeamMembers = await prisma.teamMember.findMany({
                 where: { teamId: targetTeamId },
@@ -752,7 +761,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           }
 
           const memberIds = Array.isArray(resolvedParams.memberIds) ? resolvedParams.memberIds : [];
-          const docOrgId = doc.organizationId || orgId;
+          const docOrgId = doc.organizationId || targetTeamOrgId || orgId;
           let allowedOrgMembers = new Set<string>();
           if (docOrgId) {
             const orgMembers = await prisma.organizationMember.findMany({
