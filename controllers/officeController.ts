@@ -266,7 +266,7 @@ export const endWarRoomMeetingController = asyncHandler(async (req: Request, res
     throw new ApiError(400, 'Team ID is required');
   }
 
-  const result = await endWarRoomMeeting(teamId);
+  const result = await endWarRoomMeeting(teamId, userId);
 
   // Broadcast that the War Room meeting has concluded
   try {
