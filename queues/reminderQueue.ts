@@ -89,6 +89,23 @@ export const reminderWorker = new Worker(
         return null;
       }
 
+      if (currentEvent.eventType === 'MEETING' && currentEvent.meetingLink) {
+        const match = currentEvent.meetingLink.match(/\/meet\/([^\/?#]+)/);
+        if (match && match[1]) {
+          const meeting = await tx.meeting.findFirst({
+            where: { code: match[1] },
+            select: { status: true }
+          });
+          if (meeting && (meeting.status === 'ENDED' || meeting.status === 'CANCELLED')) {
+            await tx.calendarEvent.update({
+              where: { id: eventId },
+              data: { hasReminder: false, isNotified: true }
+            });
+            return null;
+          }
+        }
+      }
+
       await tx.calendarEvent.update({
         where: { id: eventId },
         data: { isNotified: true },

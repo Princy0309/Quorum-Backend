@@ -8,7 +8,7 @@ import { canUserCreateMeeting, canUserJoinMeeting } from './meetingPermissionSer
 import logger from '../utils/logger.js';
 import { getIO } from '../sockets/socketServer.js';
 import { sendPushToOfflineUsers } from './notificationService.js';
-import { scheduleEventReminder } from '../queues/reminderQueue.js';
+import { scheduleEventReminder, cancelEventReminder } from '../queues/reminderQueue.js';
 import { addScopedMeetingInviteEmailToQueue } from '../queues/emailQueue.js';
 
 
@@ -537,6 +537,8 @@ export const endMeeting = async (code: string, hostId: string) => {
     data: { status: MeetingStatus.ENDED },
   });
 
+  await cleanupMeetingCalendarEventsAndReminders(code);
+
   try {
     closeMeetingRoom(code);
   } catch (err) {
@@ -868,6 +870,8 @@ export const cancelMeeting = async (code: string, userId: string) => {
     data: { status: MeetingStatus.CANCELLED },
   });
 
+  await cleanupMeetingCalendarEventsAndReminders(code);
+
   try {
     closeMeetingRoom(code);
   } catch (err) {
@@ -875,5 +879,39 @@ export const cancelMeeting = async (code: string, userId: string) => {
   }
 
   return { message: 'Meeting cancelled successfully' };
+};
+
+const cleanupMeetingCalendarEventsAndReminders = async (meetingCode: string) => {
+  try {
+    const meetingLink = `${env.CLIENT_URL}/meet/${meetingCode}`;
+    const events = await prisma.calendarEvent.findMany({
+      where: {
+        meetingLink,
+        eventType: 'MEETING',
+      },
+      select: { id: true },
+    });
+
+    for (const ev of events) {
+      try {
+        await cancelEventReminder(ev.id);
+      } catch (err) {
+        logger.warn(`Failed to cancel reminder job for event ${ev.id}:`, err);
+      }
+    }
+
+    await prisma.calendarEvent.updateMany({
+      where: {
+        meetingLink,
+        eventType: 'MEETING',
+      },
+      data: {
+        hasReminder: false,
+        isNotified: true,
+      },
+    });
+  } catch (cleanErr) {
+    logger.warn(`Failed to cleanup meeting calendar events for ${meetingCode}:`, cleanErr);
+  }
 };
 

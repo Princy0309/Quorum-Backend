@@ -834,34 +834,21 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               }
             }
 
-            if (!doc.teamId) {
-              await prisma.document.update({
-                where: { id: doc.id },
-                data: {
-                  teamId: targetTeamId,
-                  organizationId: team.organizationId,
-                  scopeType: 'TEAM',
-                },
-              });
-              doc.teamId = targetTeamId;
-              doc.organizationId = team.organizationId;
-            } else if (doc.teamId !== targetTeamId) {
-              const targetTeamMembers = await prisma.teamMember.findMany({
-                where: { teamId: targetTeamId },
-                select: { userId: true },
-              });
-              for (const tm of targetTeamMembers) {
-                if (tm.userId !== userId) {
-                  try {
-                    await addCollaborator(userId, doc.id, {
-                      userId: tm.userId,
-                      permission: 'VIEW',
-                    });
-                    addedCollaboratorCount++;
-                  } catch (collabErr) {
-                    failedCollaboratorIds.push(tm.userId);
-                    logger.warn(`Could not add team member ${tm.userId} as collaborator:`, collabErr);
-                  }
+            const targetTeamMembers = await prisma.teamMember.findMany({
+              where: { teamId: targetTeamId },
+              select: { userId: true },
+            });
+            for (const tm of targetTeamMembers) {
+              if (tm.userId !== userId) {
+                try {
+                  await addCollaborator(userId, doc.id, {
+                    userId: tm.userId,
+                    permission: 'VIEW',
+                  });
+                  addedCollaboratorCount++;
+                } catch (collabErr) {
+                  failedCollaboratorIds.push(tm.userId);
+                  logger.warn(`Could not add team member ${tm.userId} as collaborator:`, collabErr);
                 }
               }
             }
