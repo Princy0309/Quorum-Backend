@@ -5,7 +5,8 @@ export const savedItemTypeEnum = z.enum([
   'FILE',
   'CHAT',
   'DOCUMENT',
-  'RESOURCE'
+  'RESOURCE',
+  'ORG_POST'
 ]);
 
 export const saveItemSchema = z.object({

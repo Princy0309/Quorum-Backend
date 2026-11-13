@@ -5,6 +5,7 @@ import { env } from '../config/env.js';
 import { MeetingScopeType, MeetingStatus, OrgRole } from '@prisma/client';
 import { closeMeetingRoom } from '../sockets/meetingPresence.js';
 import { canUserCreateMeeting, canUserJoinMeeting } from './meetingPermissionService.js';
+import { stopActiveRecordingForMeeting } from './recordingService.js';
 import logger from '../utils/logger.js';
 import { getIO } from '../sockets/socketServer.js';
 import { sendPushToOfflineUsers } from './notificationService.js';
@@ -538,6 +539,7 @@ export const endMeeting = async (code: string, hostId: string) => {
   });
 
   await cleanupMeetingCalendarEventsAndReminders(code);
+  stopActiveRecordingForMeeting(code).catch(() => {});
 
   try {
     closeMeetingRoom(code);
@@ -871,6 +873,7 @@ export const cancelMeeting = async (code: string, userId: string) => {
   });
 
   await cleanupMeetingCalendarEventsAndReminders(code);
+  stopActiveRecordingForMeeting(code).catch(() => {});
 
   try {
     closeMeetingRoom(code);

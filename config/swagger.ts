@@ -8881,6 +8881,305 @@ export const swaggerDocument = {
         }
       }
     },
+    "/api/meetings/{code}/recordings": {
+      "get": {
+        "tags": [
+          "Meeting Recordings"
+        ],
+        "summary": "List all recordings for a meeting",
+        "description": "Returns paginated recordings for the specified meeting code. Accessible by participants.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of recordings"
+          }
+        }
+      }
+    },
+    "/api/meetings/{code}/recording/start": {
+      "post": {
+        "tags": [
+          "Meeting Recordings"
+        ],
+        "summary": "Start recording a meeting (Host only)",
+        "description": "Initiates video call recording session and broadcasts meeting:recording-status to all participants.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Recording started successfully"
+          }
+        }
+      }
+    },
+    "/api/meetings/{code}/recording/stop": {
+      "post": {
+        "tags": [
+          "Meeting Recordings"
+        ],
+        "summary": "Stop recording a meeting (Host only)",
+        "description": "Stops active recording session, calculates duration, and transitions status to PROCESSING until video upload is finalized.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recording stopped successfully"
+          }
+        }
+      }
+    },
+    "/api/meetings/{code}/recording/upload-url": {
+      "post": {
+        "tags": [
+          "Meeting Recordings"
+        ],
+        "summary": "Get presigned S3 / R2 upload URL for recording",
+        "description": "Generates a presigned PUT URL for Cloudflare R2 / S3 storage upload.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Presigned upload credentials"
+          }
+        }
+      }
+    },
+    "/api/recordings/{id}": {
+      "get": {
+        "tags": [
+          "Meeting Recordings"
+        ],
+        "summary": "Get recording details with signed playback URL",
+        "description": "Returns recording metadata and a time-limited presigned S3/R2 playback URL.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recording details with playback URL"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Meeting Recordings"
+        ],
+        "summary": "Complete recording upload",
+        "description": "Validates cloud storage upload and marks recording status as COMPLETED.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fileUrl"
+                ],
+                "properties": {
+                  "fileUrl": {
+                    "type": "string"
+                  },
+                  "thumbnailUrl": {
+                    "type": "string"
+                  },
+                  "transcriptUrl": {
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "durationSeconds": {
+                    "type": "integer"
+                  },
+                  "fileSizeBytes": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recording marked as COMPLETED"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Meeting Recordings"
+        ],
+        "summary": "Delete a recording (Host or Creator only)",
+        "description": "Deletes recording file from S3 / R2 and removes record from database.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recording deleted successfully"
+          }
+        }
+      }
+    },
+    "/api/recordings/{id}/summarize": {
+      "post": {
+        "tags": [
+          "Meeting Recordings"
+        ],
+        "summary": "Generate or retrieve an on-demand AI summary of the meeting recording",
+        "description": "Uses Google Gemini to analyze the meeting transcript and produce an executive summary with discussion points, decisions, and action items.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "transcriptText": {
+                    "type": "string",
+                    "description": "Optional inline transcript text if not fetching from transcriptUrl"
+                  },
+                  "regenerate": {
+                    "type": "boolean",
+                    "description": "Force regeneration even if a summary already exists"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Meeting summary generated or retrieved successfully"
+          }
+        }
+      }
+    },
     "/api/ai/workflows/plan": {
       "post": {
         "tags": [
@@ -8963,6 +9262,10 @@ export const swaggerDocument = {
     }
   },
   "tags": [
+    {
+      "name": "Meeting Recordings",
+      "description": "Meeting video recordings, real-time capture status, Cloudflare R2 / S3 storage, and 7-day auto-purge lifecycle."
+    },
     {
       "name": "Collaborative Documents",
       "description": "Live collaborative rich-text docs with whiteboard embeds, meeting notes, and AI copilot."

@@ -158,3 +158,6 @@ jira-creds.txt
 firebase-service-account.json
 *service-account*.json
 serviceAccountKey.json
+
+docs/
+

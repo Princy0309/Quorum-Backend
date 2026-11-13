@@ -58,6 +58,7 @@ export const ensureDocumentSchema = async (): Promise<void> => {
     `CREATE INDEX IF NOT EXISTS "Document_projectId_idx" ON "Document"("projectId");`,
     `CREATE INDEX IF NOT EXISTS "Document_meetingId_idx" ON "Document"("meetingId");`,
     `CREATE INDEX IF NOT EXISTS "Document_scopeType_idx" ON "Document"("scopeType");`,
+    `ALTER TABLE "Document" ADD COLUMN IF NOT EXISTS "defaultPermission" "DocumentPermission" NOT NULL DEFAULT 'EDIT';`,
 
     `CREATE TABLE IF NOT EXISTS "DocumentCollaborator" (
         "id" TEXT NOT NULL,
@@ -173,7 +174,11 @@ export const checkDocumentAccess = async (
               (roomState && roomState.participants.has(userId));
 
             if (isParticipant) {
-              return { doc, permission: 'EDIT' as const, isCreator: false, isMeetingParticipant: true };
+              const effectivePerm = (doc as any).defaultPermission || 'EDIT';
+              if (requiredPermission === 'EDIT' && effectivePerm !== 'EDIT') {
+                throw new ApiError(403, 'You only have view permissions for this document');
+              }
+              return { doc, permission: effectivePerm as 'VIEW' | 'COMMENT' | 'EDIT', isCreator: false, isMeetingParticipant: true };
             }
           }
         }
@@ -190,7 +195,11 @@ export const checkDocumentAccess = async (
         }
       });
       if (projectMember) {
-        return { doc, permission: 'EDIT' as const, isCreator: false };
+        const effectivePerm = (doc as any).defaultPermission || 'EDIT';
+        if (requiredPermission === 'EDIT' && effectivePerm !== 'EDIT') {
+          throw new ApiError(403, 'You only have view permissions for this document');
+        }
+        return { doc, permission: effectivePerm as 'VIEW' | 'COMMENT' | 'EDIT', isCreator: false };
       }
     }
   }
@@ -201,7 +210,11 @@ export const checkDocumentAccess = async (
         where: { teamId: doc.teamId, userId }
       });
       if (isTeamMember) {
-        return { doc, permission: 'EDIT' as const, isCreator: false };
+        const effectivePerm = (doc as any).defaultPermission || 'EDIT';
+        if (requiredPermission === 'EDIT' && effectivePerm !== 'EDIT') {
+          throw new ApiError(403, 'You only have view permissions for this document');
+        }
+        return { doc, permission: effectivePerm as 'VIEW' | 'COMMENT' | 'EDIT', isCreator: false };
       }
     }
   }
@@ -237,7 +250,11 @@ export const checkDocumentAccess = async (
     });
 
     if (orgMembership) {
-      return { doc, permission: 'EDIT' as const, isCreator: false };
+      const effectivePerm = (doc as any).defaultPermission || 'EDIT';
+      if (requiredPermission === 'EDIT' && effectivePerm !== 'EDIT') {
+        throw new ApiError(403, 'You only have view permissions for this document');
+      }
+      return { doc, permission: effectivePerm as 'VIEW' | 'COMMENT' | 'EDIT', isCreator: false };
     }
   }
 
@@ -397,22 +414,28 @@ export const createDocument = async (userId: string, input: CreateDocumentInput)
     resolvedMeetingId = meeting.id;
   }
 
+  const initialCollaboratorsData = [
+    { userId, permission: 'EDIT' as const },
+    ...(input.initialCollaborators?.filter((c) => c.userId !== userId).map((c) => ({
+      userId: c.userId,
+      permission: c.permission
+    })) || [])
+  ];
+
   const document = await prisma.$transaction(async (tx) => {
     const doc = await tx.document.create({
       data: {
         title,
         content: initialContent,
         scopeType: input.scopeType ?? 'PERSONAL',
+        defaultPermission: input.defaultPermission ?? 'EDIT',
         createdById: userId,
         organizationId: (!input.scopeType || input.scopeType === 'PERSONAL') ? null : input.organizationId,
         teamId: (!input.scopeType || input.scopeType === 'PERSONAL') ? null : input.teamId,
         projectId: (!input.scopeType || input.scopeType === 'PERSONAL') ? null : input.projectId,
         meetingId: resolvedMeetingId,
         collaborators: {
-          create: {
-            userId,
-            permission: 'EDIT'
-          }
+          create: initialCollaboratorsData
         },
         ...(input.whiteboardId ? {
           whiteboards: {
@@ -643,6 +666,7 @@ export const updateDocument = async (userId: string, documentId: string, input: 
     data: {
       ...(input.title ? { title: input.title.trim() } : {}),
       ...(input.content !== undefined ? { content: input.content, version: { increment: 1 } } : {}),
+      ...(input.defaultPermission !== undefined ? { defaultPermission: input.defaultPermission } : {}),
       ...(input.isArchived !== undefined ? { isArchived: input.isArchived } : {}),
       updatedAt: new Date()
     },

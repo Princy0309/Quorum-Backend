@@ -158,12 +158,19 @@ export const addParticipantsSchema = z.object({
 
 export const updateGroupSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
-  avatar: trustedMediaUrlSchema.optional().nullable().or(z.literal(''))
+  avatar: trustedMediaUrlSchema.optional().nullable().or(z.literal('')),
+  profilePicture: trustedMediaUrlSchema.optional().nullable().or(z.literal(''))
 }).refine((data) => {
-  return data.name !== undefined || data.avatar !== undefined;
+  return data.name !== undefined || data.avatar !== undefined || data.profilePicture !== undefined;
 }, {
-  message: 'At least one field (name or avatar) must be provided'
+  message: 'At least one field (name, avatar, or profilePicture) must be provided'
 });
+
+export const updateGroupProfilePictureSchema = z.object({
+  avatar: trustedMediaUrlSchema.optional().nullable().or(z.literal('')),
+  profilePicture: trustedMediaUrlSchema.optional().nullable().or(z.literal('')),
+  imageUrl: trustedMediaUrlSchema.optional().nullable().or(z.literal(''))
+}).passthrough();
 
 export const transferOwnershipSchema = z.object({
   newOwnerId: z.string().trim().min(1).max(100)
@@ -177,3 +184,13 @@ export const signUploadSchema = z.object({
   fileType: z.enum(['image', 'file', 'document', 'audio', 'voice']).optional(),
   folder: z.string().trim().max(100).optional()
 }).passthrough();
+
+export const pinMessageParamsSchema = z.object({
+  conversationId: z.string().trim().min(1, 'conversationId is required').max(100),
+  messageId: z.string().trim().min(1, 'messageId is required').max(100)
+}).passthrough();
+
+export const pinnedListParamsSchema = z.object({
+  conversationId: z.string().trim().min(1, 'conversationId is required').max(100)
+}).passthrough();
+

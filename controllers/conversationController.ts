@@ -7,6 +7,9 @@ import {
   addGroupParticipants,
   removeGroupParticipant,
   updateGroupConversation,
+  getGroupProfilePicture,
+  updateGroupProfilePicture,
+  deleteGroupProfilePicture,
   getConversationById,
   makeGroupAdmin,
   dismissGroupAdmin,
@@ -23,7 +26,10 @@ import {
   unmuteConversation,
   blockConversation,
   unblockConversation,
-  votePoll
+  votePoll,
+  pinMessage,
+  unpinMessage,
+  getPinnedMessages
 } from '../services/chatService.js';
 import { getMultipleUserPresences } from '../services/presenceService.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -299,12 +305,128 @@ export const updateGroupConversationController = async (req: Request, res: Respo
       throw new ApiError(400, 'conversationId is required');
     }
 
-    const { name, avatar } = req.body;
-    const conversation = await updateGroupConversation(userId, conversationId, { name, avatar });
+    const uploadedFile = (req.files && Array.isArray(req.files) && req.files.length > 0)
+      ? req.files[0]
+      : ((req as any).file || undefined);
+
+    let avatar = req.body?.avatar || req.body?.profilePicture;
+    if (uploadedFile) {
+      const isImage = (uploadedFile.mimetype && uploadedFile.mimetype.startsWith('image/')) ||
+        /\.(jpg|jpeg|png|gif|webp|svg|heic|avif)$/i.test(uploadedFile.originalname || '');
+      if (!isImage) {
+        throw new ApiError(400, 'Profile picture must be an image file');
+      }
+      const picResult = await updateGroupProfilePicture(userId, conversationId, {}, uploadedFile);
+      avatar = picResult.avatar;
+    }
+
+    const { name } = req.body;
+    const conversation = await updateGroupConversation(userId, conversationId, {
+      name,
+      ...(avatar !== undefined ? { avatar, profilePicture: avatar } : {})
+    });
 
     res.status(200).json({
       success: true,
       data: conversation
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getGroupProfilePictureController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const result = await getGroupProfilePicture(userId, conversationId);
+
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateGroupProfilePictureController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const uploadedFile = (req.files && Array.isArray(req.files) && req.files.length > 0)
+      ? req.files[0]
+      : ((req as any).file || undefined);
+
+    if (uploadedFile) {
+      const isImage = (uploadedFile.mimetype && uploadedFile.mimetype.startsWith('image/')) ||
+        /\.(jpg|jpeg|png|gif|webp|svg|heic|avif)$/i.test(uploadedFile.originalname || '');
+      if (!isImage) {
+        throw new ApiError(400, 'Profile picture must be an image file');
+      }
+    }
+
+    const { avatar, profilePicture, imageUrl, url } = req.body || {};
+    const inputAvatar = avatar !== undefined ? avatar : (profilePicture !== undefined ? profilePicture : (imageUrl !== undefined ? imageUrl : url));
+
+    if (!uploadedFile && inputAvatar === undefined) {
+      throw new ApiError(400, 'Either an image file or a valid picture URL must be provided');
+    }
+
+    const result = await updateGroupProfilePicture(
+      userId,
+      conversationId,
+      { avatar: inputAvatar },
+      uploadedFile
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Group profile picture updated successfully',
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteGroupProfilePictureController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const result = await deleteGroupProfilePicture(userId, conversationId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Group profile picture removed successfully',
+      data: result
     });
   } catch (err) {
     next(err);
@@ -695,6 +817,122 @@ export const votePollController = async (req: Request, res: Response, next: Next
     res.status(200).json({
       success: true,
       message: 'Vote recorded successfully',
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const pinMessageController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    const rawMessageId = req.params.messageId;
+    const messageId = Array.isArray(rawMessageId) ? rawMessageId[0] : rawMessageId;
+
+    if (!conversationId || !messageId) {
+      throw new ApiError(400, 'conversationId and messageId are required');
+    }
+
+    const result = await pinMessage(userId, conversationId, messageId);
+
+    try {
+      const io = getIO();
+      const targetRoom = result.conversationId || conversationId;
+      const rooms = [`conversation:${targetRoom}`];
+      if (conversationId !== targetRoom) {
+        rooms.push(`conversation:${conversationId}`);
+      }
+      io.to(rooms).emit(CHAT_EVENTS.MESSAGE_PINNED, {
+        conversationId: targetRoom,
+        messageId,
+        pinnedBy: userId,
+        message: (result as any).message ?? null,
+        pinnedAt: new Date().toISOString()
+      });
+    } catch (sockErr: any) {
+      logger.warn(`[PinMessage] Socket emit failed: ${sockErr?.message}`);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Message pinned successfully',
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const unpinMessageController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    const rawMessageId = req.params.messageId;
+    const messageId = Array.isArray(rawMessageId) ? rawMessageId[0] : rawMessageId;
+
+    if (!conversationId || !messageId) {
+      throw new ApiError(400, 'conversationId and messageId are required');
+    }
+
+    const result = await unpinMessage(userId, conversationId, messageId);
+
+    try {
+      const io = getIO();
+      const targetRoom = result.conversationId || conversationId;
+      const rooms = [`conversation:${targetRoom}`];
+      if (conversationId !== targetRoom) {
+        rooms.push(`conversation:${conversationId}`);
+      }
+      io.to(rooms).emit(CHAT_EVENTS.MESSAGE_UNPINNED, {
+        conversationId: targetRoom,
+        messageId,
+        unpinnedBy: userId,
+        unpinnedAt: new Date().toISOString()
+      });
+    } catch (sockErr: any) {
+      logger.warn(`[UnpinMessage] Socket emit failed: ${sockErr?.message}`);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Message unpinned successfully',
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getPinnedMessagesController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const result = await getPinnedMessages(userId, conversationId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Pinned messages retrieved successfully',
       data: result
     });
   } catch (err) {

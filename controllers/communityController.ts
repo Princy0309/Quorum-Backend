@@ -5,6 +5,9 @@ import {
   searchCommunities,
   getCommunityDetails,
   updateCommunity,
+  getCommunityProfilePicture,
+  updateCommunityProfilePicture,
+  deleteCommunityProfilePicture,
   deleteCommunity,
   createInviteLink,
   inviteUserToCommunity,
@@ -72,7 +75,28 @@ export const createCommunityController = async (req: Request, res: Response, nex
       throw new ApiError(401, 'Unauthorized');
     }
 
-    const result = await createCommunity(userId, req.body);
+    const uploadedFile = (req.files && Array.isArray(req.files) && req.files.length > 0)
+      ? req.files[0]
+      : ((req as any).file || undefined);
+
+    let avatar = req.body?.avatar || req.body?.profilePicture || null;
+    if (uploadedFile) {
+      const isImage = (uploadedFile.mimetype && uploadedFile.mimetype.startsWith('image/')) ||
+        /\.(jpg|jpeg|png|gif|webp|svg|heic|avif)$/i.test(uploadedFile.originalname || '');
+      if (!isImage) {
+        throw new ApiError(400, 'Profile picture must be an image file');
+      }
+      const { uploadBufferToS3 } = await import('../services/uploadService.js');
+      const uploadRes = await uploadBufferToS3(uploadedFile.buffer, uploadedFile.originalname, 'communities', uploadedFile.mimetype);
+      avatar = uploadRes.publicUrl;
+    }
+
+    const result = await createCommunity(userId, {
+      ...req.body,
+      avatar,
+      profilePicture: avatar
+    });
+
     res.status(201).json({
       success: true,
       data: result
@@ -148,9 +172,105 @@ export const updateCommunityController = async (req: Request, res: Response, nex
     }
 
     const id = validateCommunityId(req.params.id);
-    const result = await updateCommunity(userId, id, req.body);
+    const uploadedFile = (req.files && Array.isArray(req.files) && req.files.length > 0)
+      ? req.files[0]
+      : ((req as any).file || undefined);
+
+    let avatar = req.body?.avatar || req.body?.profilePicture;
+    if (uploadedFile) {
+      const isImage = (uploadedFile.mimetype && uploadedFile.mimetype.startsWith('image/')) ||
+        /\.(jpg|jpeg|png|gif|webp|svg|heic|avif)$/i.test(uploadedFile.originalname || '');
+      if (!isImage) {
+        throw new ApiError(400, 'Profile picture must be an image file');
+      }
+      const picResult = await updateCommunityProfilePicture(userId, id, {}, uploadedFile);
+      avatar = picResult.avatar;
+    }
+
+    const result = await updateCommunity(userId, id, {
+      ...req.body,
+      ...(avatar !== undefined ? { avatar, profilePicture: avatar } : {})
+    });
+
     res.status(200).json({
       success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getCommunityProfilePictureController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = validateCommunityId(req.params.id);
+    const result = await getCommunityProfilePicture(id);
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateCommunityProfilePictureController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const uploadedFile = (req.files && Array.isArray(req.files) && req.files.length > 0)
+      ? req.files[0]
+      : ((req as any).file || undefined);
+
+    if (uploadedFile) {
+      const isImage = (uploadedFile.mimetype && uploadedFile.mimetype.startsWith('image/')) ||
+        /\.(jpg|jpeg|png|gif|webp|svg|heic|avif)$/i.test(uploadedFile.originalname || '');
+      if (!isImage) {
+        throw new ApiError(400, 'Profile picture must be an image file');
+      }
+    }
+
+    const { avatar, profilePicture, logo, url, imageUrl } = req.body || {};
+    const inputAvatar = avatar !== undefined ? avatar : (profilePicture !== undefined ? profilePicture : (logo !== undefined ? logo : (url !== undefined ? url : imageUrl)));
+
+    if (!uploadedFile && inputAvatar === undefined) {
+      throw new ApiError(400, 'Either an image file or a valid picture URL must be provided');
+    }
+
+    const result = await updateCommunityProfilePicture(
+      userId,
+      id,
+      { avatar: inputAvatar },
+      uploadedFile
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Community profile picture updated successfully',
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteCommunityProfilePictureController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const id = validateCommunityId(req.params.id);
+    const result = await deleteCommunityProfilePicture(userId, id);
+
+    res.status(200).json({
+      success: true,
+      message: 'Community profile picture removed successfully',
       data: result
     });
   } catch (err) {

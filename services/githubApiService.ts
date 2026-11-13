@@ -32,11 +32,21 @@ async function callGithubApi<T>(
     throw new ApiError(504, 'GitHub API request timed out');
   });
 
-  if (response.status === 403 || response.status === 429) {
+    if (
+    response.status === 429 ||
+    (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')
+  ) {
     const resetHeader = response.headers.get('x-ratelimit-reset');
     const resetTime = resetHeader ? new Date(parseInt(resetHeader, 10) * 1000).toLocaleTimeString() : 'shortly';
     throw new ApiError(429, `GitHub rate limit reached. Please try again after ${resetTime}.`);
   }
+
+  if (response.status === 403) {
+    const errorBody = await response.text().catch(() => '');
+    logger.warn(`GitHub 403 Forbidden (${endpoint}): ${errorBody}`);
+    throw new ApiError(403, 'GitHub denied the request. Check your repository permissions or OAuth scopes.');
+  }
+
 
   if (response.status === 404) {
     throw new ApiError(404, 'Requested GitHub resource not found or access denied');
@@ -72,6 +82,38 @@ async function getEffectiveToken(userId: string, teamId: string): Promise<string
   }
 }
 
+async function assertTeamAccess(userId: string, teamId: string): Promise<void> {
+  const team = await prisma.team.findUnique({
+    where: { id: teamId },
+    select: { id: true, organizationId: true },
+  });
+
+  if (!team) {
+    throw new ApiError(404, 'Team not found');
+  }
+
+  const isMember = await prisma.teamMember.findUnique({
+    where: {
+      teamId_userId: { teamId, userId },
+    },
+  });
+
+  if (isMember) return;
+
+  const isOrgAdmin = await prisma.organizationMember.findFirst({
+    where: {
+      organizationId: team.organizationId,
+      userId,
+      role: 'ORG_ADMIN',
+    },
+  });
+
+  if (!isOrgAdmin) {
+    throw new ApiError(403, 'You must be a team member or Org Admin to access this team');
+  }
+}
+
+
 export async function getUserRepositories(userId: string, page = 1, perPage = 30) {
   const token = await getFreshGithubAccessToken(userId);
   const safePerPage = Math.min(Math.max(perPage, 1), 100);
@@ -87,6 +129,7 @@ export async function linkTeamRepository(
   teamId: string,
   repoFullName: string
 ) {
+  await assertTeamAccess(userId, teamId);
   const token = await getFreshGithubAccessToken(userId);
 
   const team = await prisma.team.findUnique({
@@ -158,6 +201,7 @@ export async function getTeamRepository(teamId: string) {
 }
 
 export async function unlinkTeamRepository(userId: string, teamId: string, repoFullName: string) {
+  await assertTeamAccess(userId, teamId);
   const existing = await prisma.githubRepoLink.findUnique({
     where: {
       teamId_repoFullName: {
@@ -183,7 +227,7 @@ export async function unlinkTeamRepository(userId: string, teamId: string, repoF
   const cachePattern = `gh:cache:${teamId}:*`;
   const keys = await redis.keys(cachePattern).catch(() => []);
   if (keys.length > 0) {
-    await redis.del(...keys).catch(() => {});
+    await redis.del(...keys).catch(() => { });
   }
 
   logger.info(`User ${userId} unlinked repository ${repoFullName} from team ${teamId}`);
@@ -195,6 +239,7 @@ export async function getTeamIssues(
   teamId: string,
   options: { state?: 'open' | 'closed' | 'all'; page?: number; perPage?: number } = {}
 ) {
+  await assertTeamAccess(userId, teamId);
   const { state = 'open', page = 1, perPage = 20 } = options;
   const safePerPage = Math.min(Math.max(perPage, 1), 100);
 
@@ -217,7 +262,7 @@ export async function getTeamIssues(
 
   const pureIssues = issues.filter((item) => !item.pull_request);
 
-  await redis.set(cacheKey, JSON.stringify(pureIssues), 'EX', CACHE_TTL_SECONDS).catch(() => {});
+  await redis.set(cacheKey, JSON.stringify(pureIssues), 'EX', CACHE_TTL_SECONDS).catch(() => { });
   return pureIssues;
 }
 
@@ -226,6 +271,7 @@ export async function createTeamIssue(
   teamId: string,
   data: { title: string; body?: string; assignees?: string[]; labels?: string[] }
 ) {
+  await assertTeamAccess(userId, teamId);
   if (!data.title || !data.title.trim()) {
     throw new ApiError(400, 'Issue title is required');
   }
@@ -254,7 +300,7 @@ export async function createTeamIssue(
 
   const keys = await redis.keys(`gh:cache:${teamId}:issues:*`).catch(() => []);
   if (keys.length > 0) {
-    await redis.del(...keys).catch(() => {});
+    await redis.del(...keys).catch(() => { });
   }
 
   logger.info(`User ${userId} created issue #${issue.number} in ${repoLink.repoFullName}`);
@@ -267,6 +313,7 @@ export async function updateTeamIssueStatus(
   issueNumber: number,
   state: 'open' | 'closed'
 ) {
+  await assertTeamAccess(userId, teamId);
   const repoLink = await prisma.githubRepoLink.findFirst({ where: { teamId } });
   if (!repoLink) {
     throw new ApiError(404, 'No GitHub repository is linked to this team');
@@ -286,7 +333,7 @@ export async function updateTeamIssueStatus(
 
   const keys = await redis.keys(`gh:cache:${teamId}:issues:*`).catch(() => []);
   if (keys.length > 0) {
-    await redis.del(...keys).catch(() => {});
+    await redis.del(...keys).catch(() => { });
   }
 
   return updated;
@@ -297,6 +344,7 @@ export async function getTeamPullRequests(
   teamId: string,
   options: { state?: 'open' | 'closed' | 'all'; page?: number; perPage?: number } = {}
 ) {
+  await assertTeamAccess(userId, teamId);
   const { state = 'open', page = 1, perPage = 20 } = options;
   const safePerPage = Math.min(Math.max(perPage, 1), 100);
 
@@ -317,7 +365,7 @@ export async function getTeamPullRequests(
     token
   );
 
-  await redis.set(cacheKey, JSON.stringify(pulls), 'EX', CACHE_TTL_SECONDS).catch(() => {});
+  await redis.set(cacheKey, JSON.stringify(pulls), 'EX', CACHE_TTL_SECONDS).catch(() => { });
   return pulls;
 }
 
@@ -326,6 +374,7 @@ export async function getTeamCommits(
   teamId: string,
   options: { branch?: string; page?: number; perPage?: number } = {}
 ) {
+  await assertTeamAccess(userId, teamId);
   const { branch, page = 1, perPage = 20 } = options;
   const safePerPage = Math.min(Math.max(perPage, 1), 100);
 
@@ -347,11 +396,12 @@ export async function getTeamCommits(
     token
   );
 
-  await redis.set(cacheKey, JSON.stringify(commits), 'EX', CACHE_TTL_SECONDS).catch(() => {});
+  await redis.set(cacheKey, JSON.stringify(commits), 'EX', CACHE_TTL_SECONDS).catch(() => { });
   return commits;
 }
 
 export async function getTeamBranches(userId: string, teamId: string) {
+  await assertTeamAccess(userId, teamId);
   const repoLink = await prisma.githubRepoLink.findFirst({ where: { teamId } });
   if (!repoLink) {
     throw new ApiError(404, 'No GitHub repository is linked to this team');
@@ -369,11 +419,12 @@ export async function getTeamBranches(userId: string, teamId: string) {
     token
   );
 
-  await redis.set(cacheKey, JSON.stringify(branches), 'EX', CACHE_TTL_SECONDS).catch(() => {});
+  await redis.set(cacheKey, JSON.stringify(branches), 'EX', CACHE_TTL_SECONDS).catch(() => { });
   return branches;
 }
 
 export async function getTeamCollaborators(userId: string, teamId: string) {
+  await assertTeamAccess(userId, teamId);
   const repoLink = await prisma.githubRepoLink.findFirst({ where: { teamId } });
   if (!repoLink) {
     throw new ApiError(404, 'No GitHub repository is linked to this team');

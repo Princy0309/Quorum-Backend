@@ -28,6 +28,7 @@ model Organization {
   documents          Document[]
   jiraIntegration    OrgJiraIntegration?
   githubIntegration  OrgGithubIntegration?
+  orgFeedPosts       OrgFeedPost[]
 
   @@index([slug])
   @@index([ownerId])
@@ -92,7 +93,7 @@ model Team {
   githubRepoLinks GithubRepoLink[]
   meetings       Meeting[]
   documents      Document[]
-
+  orgFeedPosts    OrgFeedPost[] @relation("OrgFeedTargetTeam")
 
   @@unique([organizationId, name])
   @@index([organizationId])

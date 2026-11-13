@@ -17,7 +17,10 @@ import {
   muteConversation,
   unmuteConversation,
   blockConversation,
-  unblockConversation
+  unblockConversation,
+  pinMessage,
+  unpinMessage,
+  getPinnedMessages
 } from '../../services/chatService.js';
 import { sendPushToOfflineUsers } from '../../services/notificationService.js';
 import { checkSocketMessageRateLimit } from '../../middlewares/rateLimiter.js';
@@ -851,4 +854,137 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
       }
     }
   );
+
+  socket.on(
+    CHAT_EVENTS.MESSAGE_PIN,
+    async (
+      payload: { conversationId: string; messageId: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId || !socket.data.user?.isAuthenticated) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
+          return;
+        }
+
+        if (!payload?.conversationId || !payload?.messageId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId and messageId are required'));
+          return;
+        }
+
+        const result = await pinMessage(userId, payload.conversationId, payload.messageId);
+        const targetRoom = result.conversationId || payload.conversationId;
+        const rooms = [`conversation:${targetRoom}`];
+        if (payload.conversationId !== targetRoom) {
+          rooms.push(`conversation:${payload.conversationId}`);
+        }
+        io.to(rooms).emit(CHAT_EVENTS.MESSAGE_PINNED, {
+          conversationId: targetRoom,
+          messageId: payload.messageId,
+          pinnedBy: userId,
+          message: (result as any).message ?? null,
+          pinnedAt: new Date().toISOString()
+        });
+
+        if (callback) {
+          callback({ success: true, data: result });
+        }
+      } catch (err: any) {
+        logger.error('Error pinning message via socket', { error: err.message });
+        if (callback) {
+          if (err instanceof ApiError) {
+            const code = err.statusCode === 403 ? 'FORBIDDEN' : err.statusCode === 404 ? 'NOT_FOUND' : 'INVALID_PAYLOAD';
+            callback(formatErrorResponse(code, err.message));
+          } else {
+            callback(formatErrorResponse('SERVER_ERROR', 'Failed to pin message'));
+          }
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.MESSAGE_UNPIN,
+    async (
+      payload: { conversationId: string; messageId: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId || !socket.data.user?.isAuthenticated) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
+          return;
+        }
+
+        if (!payload?.conversationId || !payload?.messageId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId and messageId are required'));
+          return;
+        }
+
+        const result = await unpinMessage(userId, payload.conversationId, payload.messageId);
+        const targetRoom = result.conversationId || payload.conversationId;
+        const rooms = [`conversation:${targetRoom}`];
+        if (payload.conversationId !== targetRoom) {
+          rooms.push(`conversation:${payload.conversationId}`);
+        }
+        io.to(rooms).emit(CHAT_EVENTS.MESSAGE_UNPINNED, {
+          conversationId: targetRoom,
+          messageId: payload.messageId,
+          unpinnedBy: userId,
+          unpinnedAt: new Date().toISOString()
+        });
+
+        if (callback) {
+          callback({ success: true, data: result });
+        }
+      } catch (err: any) {
+        logger.error('Error unpinning message via socket', { error: err.message });
+        if (callback) {
+          if (err instanceof ApiError) {
+            const code = err.statusCode === 403 ? 'FORBIDDEN' : err.statusCode === 404 ? 'NOT_FOUND' : 'INVALID_PAYLOAD';
+            callback(formatErrorResponse(code, err.message));
+          } else {
+            callback(formatErrorResponse('SERVER_ERROR', 'Failed to unpin message'));
+          }
+        }
+      }
+    }
+  );
+
+  const handleGetPinned = async (
+    payload: { conversationId: string },
+    callback?: (response: SocketCallbackResponse) => void
+  ) => {
+    try {
+      const userId = socket.data.user?.id;
+      if (!userId || !socket.data.user?.isAuthenticated) {
+        if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
+        return;
+      }
+
+      if (!payload?.conversationId) {
+        if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId is required'));
+        return;
+      }
+
+      const result = await getPinnedMessages(userId, payload.conversationId);
+      if (callback) {
+        callback({ success: true, data: result });
+      }
+    } catch (err: any) {
+      logger.error('Error fetching pinned messages via socket', { error: err.message });
+      if (callback) {
+        if (err instanceof ApiError) {
+          const code = err.statusCode === 403 ? 'FORBIDDEN' : err.statusCode === 404 ? 'NOT_FOUND' : 'INVALID_PAYLOAD';
+          callback(formatErrorResponse(code, err.message));
+        } else {
+          callback(formatErrorResponse('SERVER_ERROR', 'Failed to fetch pinned messages'));
+        }
+      }
+    }
+  };
+
+  socket.on(CHAT_EVENTS.MESSAGE_GET_PINNED, handleGetPinned);
+  socket.on('message:get_pinned', handleGetPinned);
 };

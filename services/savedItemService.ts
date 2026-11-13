@@ -41,79 +41,110 @@ const resolveItemsMetadataBatch = async (
   const messageIds = items.filter((i) => i.itemType === 'MESSAGE' || i.itemType === 'FILE').map((i) => i.itemId);
   const conversationIds = items.filter((i) => i.itemType === 'CHAT').map((i) => i.itemId);
   const postIds = items.filter((i) => i.itemType === 'DOCUMENT' || i.itemType === 'RESOURCE').map((i) => i.itemId);
-
-  const [messages, conversations, posts] = await Promise.all([
+  const orgPostIds = items.filter((i) => i.itemType === 'ORG_POST').map((i) => i.itemId);
+  const [messages, conversations, posts, orgPosts] = await Promise.all([
     messageIds.length > 0
       ? prisma.message.findMany({
-          where: { id: { in: messageIds } },
-          include: {
-            conversation: {
-              select: {
-                id: true,
-                type: true,
-                name: true,
-                participants: {
-                  where: { userId },
-                  select: { id: true }
-                }
-              }
-            },
-            sender: {
-              select: {
-                id: true,
-                name: true,
-                avatar: true
+        where: { id: { in: messageIds } },
+        include: {
+          conversation: {
+            select: {
+              id: true,
+              type: true,
+              name: true,
+              participants: {
+                where: { userId },
+                select: { id: true }
               }
             }
+          },
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true
+            }
           }
-        })
+        }
+      })
       : [],
     conversationIds.length > 0
       ? prisma.conversation.findMany({
-          where: { id: { in: conversationIds } },
-          include: {
-            participants: {
-              where: { userId },
-              select: { id: true, role: true }
-            }
+        where: { id: { in: conversationIds } },
+        include: {
+          participants: {
+            where: { userId },
+            select: { id: true, role: true }
           }
-        })
+        }
+      })
       : [],
     postIds.length > 0
       ? prisma.communityPost.findMany({
-          where: { id: { in: postIds } },
-          include: {
-            community: {
-              select: {
-                id: true,
-                name: true,
-                members: {
-                  where: { userId },
-                  select: { id: true }
-                }
-              }
-            },
-            channel: {
-              select: {
-                id: true,
-                name: true
-              }
-            },
-            author: {
-              select: {
-                id: true,
-                name: true,
-                avatar: true
+        where: { id: { in: postIds } },
+        include: {
+          community: {
+            select: {
+              id: true,
+              name: true,
+              members: {
+                where: { userId },
+                select: { id: true }
               }
             }
+          },
+          channel: {
+            select: {
+              id: true,
+              name: true
+            }
+          },
+          author: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true
+            }
           }
-        })
+        }
+      })
+      : [],
+    orgPostIds.length > 0
+      ? prisma.orgFeedPost.findMany({
+        where: { id: { in: orgPostIds } },
+        include: {
+          organization: {
+            select: {
+              id: true,
+              name: true,
+              members: {
+                where: { userId },
+                select: { id: true }
+              }
+            }
+          },
+          author: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true
+            }
+          },
+          targetTeam: {
+            select: {
+              id: true,
+              name: true
+            }
+          }
+        }
+      })
       : []
   ]);
 
   const messageMap = new Map(messages.map((m) => [m.id, m]));
   const conversationMap = new Map(conversations.map((c) => [c.id, c]));
   const postMap = new Map(posts.map((p) => [p.id, p]));
+  const orgPostMap = new Map(orgPosts.map((op) => [op.id, op]));
 
   const metadataMap = new Map<string, { isAccessible: boolean; content: any; title: string; searchText: string }>();
 
@@ -194,6 +225,36 @@ const resolveItemsMetadataBatch = async (
             fileType: post.fileType,
             fileSize: post.fileSize,
             createdAt: post.createdAt
+          },
+          title,
+          searchText
+        });
+      }
+    } else if (item.itemType === 'ORG_POST') {
+      const orgPost = orgPostMap.get(item.itemId);
+      if (!orgPost) {
+        metadataMap.set(item.id, { isAccessible: false, content: null, title: 'Deleted organization post', searchText: '' });
+      } else if (orgPost.organization.members.length === 0) {
+        metadataMap.set(item.id, { isAccessible: false, content: null, title: 'Inaccessible organization post', searchText: '' });
+      } else {
+        const title = orgPost.title || orgPost.fileName || orgPost.content.slice(0, 80) || 'Organization Post';
+        const searchText = `${orgPost.title || ''} ${orgPost.content || ''} ${orgPost.fileName || ''} ${orgPost.organization.name || ''}`.toLowerCase();
+        metadataMap.set(item.id, {
+          isAccessible: true,
+          content: {
+            id: orgPost.id,
+            organizationId: orgPost.organizationId,
+            organizationName: orgPost.organization.name,
+            category: orgPost.category,
+            title: orgPost.title,
+            author: orgPost.author,
+            targetTeam: orgPost.targetTeam,
+            content: orgPost.content,
+            fileUrl: orgPost.fileUrl,
+            fileName: orgPost.fileName,
+            fileType: orgPost.fileType,
+            fileSize: orgPost.fileSize,
+            createdAt: orgPost.createdAt
           },
           title,
           searchText

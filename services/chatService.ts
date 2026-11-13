@@ -3,6 +3,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { CHAT_EVENTS } from '../utils/constants.js';
 import logger from '../utils/logger.js';
 import { getIO } from '../sockets/socketServer.js';
+import { deleteS3Object } from '../config/s3.js';
 
 export const safeEjectUserFromRoom = (conversationId: string, targetUserId: string, removedByUserId: string) => {
   try {
@@ -1093,6 +1094,13 @@ export const getUserConversations = async (userId: string, query?: string) => {
       where: whereClause,
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       include: {
+        _count: {
+          select: {
+            messages: {
+              where: { isPinned: true, isDeleted: false }
+            }
+          }
+        },
         participants: {
           include: {
             user: {
@@ -1140,6 +1148,13 @@ export const getUserConversations = async (userId: string, query?: string) => {
         where: whereClause,
         orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         include: {
+          _count: {
+            select: {
+              messages: {
+                where: { isPinned: true, isDeleted: false }
+              }
+            }
+          },
           participants: {
             include: {
               user: {
@@ -1237,7 +1252,8 @@ export const getUserConversations = async (userId: string, query?: string) => {
       isBlocked,
       isBlockedByOther,
       lastMessage,
-      unreadCount: unreadMap.get(conv.id) || 0
+      unreadCount: unreadMap.get(conv.id) || 0,
+      pinnedCount: conv._count?.messages || 0
     };
   });
 };
@@ -1338,13 +1354,13 @@ export const markMessageAsRead = async (
     const currentParticipant = isUpdated
       ? { lastReadSeq: targetMessage.seq, lastReadMessageId: targetMessage.id }
       : (await tx.conversationParticipant.findUnique({
-          where: {
-            conversationId_userId: {
-              conversationId: targetConversationId,
-              userId
-            }
+        where: {
+          conversationId_userId: {
+            conversationId: targetConversationId,
+            userId
           }
-        })) || participant;
+        }
+      })) || participant;
 
     const participants = await tx.conversationParticipant.findMany({
       where: { conversationId: targetConversationId },
@@ -1746,7 +1762,7 @@ export const removeGroupParticipant = async (
 export const updateGroupConversation = async (
   userId: string,
   conversationId: string,
-  updates: { name?: string; avatar?: string | null }
+  updates: { name?: string; avatar?: string | null; profilePicture?: string | null }
 ) => {
   const { updated, allParticipantIds } = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT id FROM "Conversation" WHERE id = ${conversationId} FOR UPDATE`;
@@ -1771,7 +1787,7 @@ export const updateGroupConversation = async (
       throw new ApiError(403, 'You are not a member of this conversation');
     }
 
-    if (userParticipant.role !== 'admin') {
+    if (userParticipant.role !== 'admin' && conversation.ownerId !== userId) {
       throw new ApiError(403, 'Only group admins can update group details');
     }
 
@@ -1779,8 +1795,12 @@ export const updateGroupConversation = async (
     if (updates.name !== undefined) {
       dataToUpdate.name = updates.name.trim();
     }
-    if (updates.avatar !== undefined) {
-      dataToUpdate.avatar = updates.avatar;
+    const resolvedAvatar = updates.avatar !== undefined ? updates.avatar : updates.profilePicture;
+    if (resolvedAvatar !== undefined) {
+      if (conversation.avatar && conversation.avatar !== resolvedAvatar) {
+        await deleteS3Object(conversation.avatar).catch(() => {});
+      }
+      dataToUpdate.avatar = resolvedAvatar;
     }
     dataToUpdate.updatedAt = new Date();
 
@@ -1813,6 +1833,75 @@ export const updateGroupConversation = async (
   notifyConversationUpdate(allParticipantIds, updated);
 
   return updated;
+};
+
+export const getGroupProfilePicture = async (userId: string, conversationId: string) => {
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    include: {
+      participants: true
+    }
+  });
+
+  if (!conversation) {
+    throw new ApiError(404, 'Conversation not found');
+  }
+
+  const isMember = conversation.participants.some((p: any) => p.userId === userId);
+  if (!isMember) {
+    throw new ApiError(403, 'You are not a member of this conversation');
+  }
+
+  return {
+    conversationId: conversation.id,
+    avatar: conversation.avatar || null,
+    profilePicture: conversation.avatar || null,
+  };
+};
+
+export const updateGroupProfilePicture = async (
+  userId: string,
+  conversationId: string,
+  input: { avatar?: string | null; profilePicture?: string | null; imageUrl?: string | null },
+  file?: { buffer: Buffer; originalname: string; mimetype: string }
+) => {
+  let finalAvatar: string | null = input.avatar !== undefined
+    ? input.avatar
+    : (input.profilePicture !== undefined
+      ? input.profilePicture
+      : (input.imageUrl !== undefined ? input.imageUrl : null));
+
+  if (file && file.buffer && file.buffer.length > 0) {
+    const { uploadBufferToS3 } = await import('./uploadService.js');
+    const uploadRes = await uploadBufferToS3(file.buffer, file.originalname, 'groups', file.mimetype);
+    finalAvatar = uploadRes.publicUrl;
+  }
+
+  const updated = await updateGroupConversation(userId, conversationId, {
+    avatar: finalAvatar,
+    profilePicture: finalAvatar
+  });
+
+  return {
+    conversationId: updated.id,
+    name: updated.name,
+    avatar: updated.avatar || null,
+    profilePicture: updated.avatar || null,
+  };
+};
+
+export const deleteGroupProfilePicture = async (userId: string, conversationId: string) => {
+  const updated = await updateGroupConversation(userId, conversationId, {
+    avatar: null,
+    profilePicture: null
+  });
+
+  return {
+    conversationId: updated.id,
+    name: updated.name,
+    avatar: null,
+    profilePicture: null,
+  };
 };
 
 export const makeGroupAdmin = async (
@@ -2117,6 +2206,7 @@ export const deleteMessage = async (
       where: { id: messageId },
       data: {
         isDeleted: true,
+        isPinned: false,
         deletedAt: new Date(),
         content: 'This message was deleted',
         fileUrl: null,
@@ -2167,6 +2257,14 @@ export const deleteMessage = async (
       const rooms = [`conversation:${resolvedConversationId}`];
       if (conversationIdOrTarget !== resolvedConversationId) {
         rooms.push(`conversation:${conversationIdOrTarget}`);
+      }
+      if (message.isPinned) {
+        io.to(rooms).emit(CHAT_EVENTS.MESSAGE_UNPINNED, {
+          conversationId: resolvedConversationId,
+          messageId,
+          unpinnedBy: userId,
+          unpinnedAt: new Date().toISOString()
+        });
       }
       io.to(rooms).emit(CHAT_EVENTS.MESSAGE_DELETED, {
         conversationId: resolvedConversationId,
@@ -2398,12 +2496,12 @@ export const getMessageReactions = async (
 
   const allReactionsForSummary = emojiFilter
     ? await prisma.messageReaction.findMany({
-        where: { messageId },
-        select: {
-          emoji: true,
-          userId: true
-        }
-      })
+      where: { messageId },
+      select: {
+        emoji: true,
+        userId: true
+      }
+    })
     : allReactions;
 
   const summary = formatReactions(allReactionsForSummary, userId);
@@ -3083,11 +3181,191 @@ export const unblockConversation = async (
   };
 };
 
+const MAX_PINNED_PER_CONVERSATION = 15;
 
+export const pinMessage = async (
+  userId: string,
+  conversationIdOrTarget: string,
+  messageId: string
+) => {
+  const resolvedConversationId = await resolveConversationId(userId, conversationIdOrTarget);
+  if (!resolvedConversationId) {
+    throw new ApiError(403, 'You are not a member of this conversation');
+  }
 
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: {
+      id: true,
+      conversationId: true,
+      isPinned: true,
+      isDeleted: true,
+      deletedAt: true
+    }
+  });
 
+  if (!message) {
+    throw new ApiError(404, 'Message not found');
+  }
 
+  if (message.conversationId !== resolvedConversationId) {
+    throw new ApiError(400, 'Message does not belong to this conversation');
+  }
 
+  if (message.isDeleted || message.deletedAt) {
+    throw new ApiError(400, 'Cannot pin a deleted message');
+  }
 
+  if (message.isPinned) {
+    return {
+      alreadyPinned: true,
+      messageId,
+      conversationId: resolvedConversationId
+    };
+  }
 
+  const pinnedCount = await prisma.message.count({
+    where: {
+      conversationId: resolvedConversationId,
+      isPinned: true,
+      isDeleted: false
+    }
+  });
 
+  if (pinnedCount >= MAX_PINNED_PER_CONVERSATION) {
+    throw new ApiError(
+      400,
+      `Maximum ${MAX_PINNED_PER_CONVERSATION} pinned messages reached. Unpin one to pin another.`
+    );
+  }
+
+  const updated = await prisma.message.update({
+    where: { id: messageId },
+    data: { isPinned: true },
+    include: messageInclude
+  });
+
+  const allMentionedIds = (updated.mentionedUserIds || []) as string[];
+  let mentionedUsers: any[] = [];
+  if (allMentionedIds.length > 0) {
+    mentionedUsers = await prisma.user.findMany({
+      where: { id: { in: allMentionedIds } },
+      select: { id: true, name: true, avatar: true }
+    });
+  }
+
+  const enrichedMessage = {
+    ...updated,
+    reactions: formatReactions((updated as any).reactions || [], userId),
+    poll: formatPoll((updated as any).poll, userId),
+    mentionedUsers
+  };
+
+  return {
+    pinned: true,
+    conversationId: resolvedConversationId,
+    message: enrichedMessage
+  };
+};
+
+export const unpinMessage = async (
+  userId: string,
+  conversationIdOrTarget: string,
+  messageId: string
+) => {
+  const resolvedConversationId = await resolveConversationId(userId, conversationIdOrTarget);
+  if (!resolvedConversationId) {
+    throw new ApiError(403, 'You are not a member of this conversation');
+  }
+
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: {
+      id: true,
+      conversationId: true,
+      isPinned: true
+    }
+  });
+
+  if (!message) {
+    throw new ApiError(404, 'Message not found');
+  }
+
+  if (message.conversationId !== resolvedConversationId) {
+    throw new ApiError(400, 'Message does not belong to this conversation');
+  }
+
+  if (!message.isPinned) {
+    return {
+      alreadyUnpinned: true,
+      messageId,
+      conversationId: resolvedConversationId
+    };
+  }
+
+  await prisma.message.update({
+    where: { id: messageId },
+    data: { isPinned: false }
+  });
+
+  return {
+    unpinned: true,
+    messageId,
+    conversationId: resolvedConversationId
+  };
+};
+
+export const getPinnedMessages = async (
+  userId: string,
+  conversationIdOrTarget: string
+) => {
+  const resolvedConversationId = await resolveConversationId(userId, conversationIdOrTarget);
+  if (!resolvedConversationId) {
+    throw new ApiError(403, 'You are not a member of this conversation');
+  }
+
+  const messages = await prisma.message.findMany({
+    where: {
+      conversationId: resolvedConversationId,
+      isPinned: true,
+      isDeleted: false,
+      deletedAt: null,
+      NOT: {
+        deletedForUserIds: {
+          has: userId
+        }
+      }
+    },
+    orderBy: [{ seq: 'desc' }, { id: 'desc' }],
+    include: messageInclude
+  });
+
+  const allMentionedIds = Array.from(
+    new Set(messages.flatMap((m: any) => m.mentionedUserIds || []))
+  );
+
+  let mentionedUserMap = new Map<string, { id: string; name: string | null; avatar: string | null }>();
+  if (allMentionedIds.length > 0) {
+    const mentionedUsersList = await prisma.user.findMany({
+      where: { id: { in: allMentionedIds } },
+      select: { id: true, name: true, avatar: true }
+    });
+    mentionedUserMap = new Map(mentionedUsersList.map((u) => [u.id, u]));
+  }
+
+  const enrichedMessages = messages.map((msg: any) => ({
+    ...msg,
+    reactions: formatReactions(msg.reactions || [], userId),
+    poll: formatPoll(msg.poll, userId),
+    mentionedUsers: (msg.mentionedUserIds || [])
+      .map((mId: string) => mentionedUserMap.get(mId))
+      .filter(Boolean)
+  }));
+
+  return {
+    conversationId: resolvedConversationId,
+    count: enrichedMessages.length,
+    limit: MAX_PINNED_PER_CONVERSATION,
+    messages: enrichedMessages
+  };
+};

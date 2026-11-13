@@ -4,6 +4,11 @@ export const createDocumentSchema = z.object({
   title: z.string().trim().min(1, 'Title is required').max(255, 'Title cannot exceed 255 characters'),
   content: z.any().optional(),
   scopeType: z.enum(['PERSONAL', 'ORGANIZATION', 'TEAM', 'PROJECT']).optional(),
+  defaultPermission: z.enum(['VIEW', 'COMMENT', 'EDIT']).default('EDIT').optional(),
+  initialCollaborators: z.array(z.object({
+    userId: z.string().uuid('Invalid user ID'),
+    permission: z.enum(['VIEW', 'COMMENT', 'EDIT']).default('EDIT')
+  })).optional(),
   organizationId: z.string().uuid().optional(),
   teamId: z.string().uuid().optional(),
   projectId: z.string().uuid().optional(),
@@ -21,6 +26,7 @@ export const createDocumentSchema = z.object({
 export const updateDocumentSchema = z.object({
   title: z.string().trim().min(1).max(255).optional(),
   content: z.any().optional(),
+  defaultPermission: z.enum(['VIEW', 'COMMENT', 'EDIT']).optional(),
   isArchived: z.boolean().optional(),
 });
 

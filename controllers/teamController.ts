@@ -9,6 +9,9 @@ import {
   deleteTeam,
   addTeamMember,
   removeTeamMember,
+  getTeamMembers,
+  leaveTeam,
+  transferLeadAndLeaveTeam,
 } from '../services/teamService.js';
 import prisma from '../config/prisma.js';
 import { queueNotification } from '../queues/notificationQueue.js';
@@ -156,7 +159,72 @@ export const removeTeamMemberController = asyncHandler(
   }
 );
 
+export const getTeamMembersController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id || !req.orgMembership) {
+      return next(new ApiError(401, 'Unauthorized'));
+    }
 
+    const orgId = getParam(req.params.id);
+    const teamId = getParam(req.params.teamId);
+
+    const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+    const role = typeof req.query.role === 'string' ? req.query.role : undefined;
+
+    const data = await getTeamMembers(orgId, teamId, { search, role });
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  }
+);
+
+export const leaveTeamController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id || !req.orgMembership) {
+      return next(new ApiError(401, 'Unauthorized'));
+    }
+
+    const orgId = getParam(req.params.id);
+    const teamId = getParam(req.params.teamId);
+
+    const result = await leaveTeam(orgId, teamId, req.user.id);
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  }
+);
+
+export const transferLeadAndLeaveController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id || !req.orgMembership) {
+      return next(new ApiError(401, 'Unauthorized'));
+    }
+
+    const orgId = getParam(req.params.id);
+    const teamId = getParam(req.params.teamId);
+    const { successorId } = req.body;
+
+    if (!successorId) {
+      return next(new ApiError(400, 'successorId is required in request body'));
+    }
+
+    const result = await transferLeadAndLeaveTeam(
+      orgId,
+      teamId,
+      req.user.id,
+      String(successorId).trim()
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  }
+);
 
 export const getTeamMessagesController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -326,7 +394,7 @@ export const sendTeamMessageController = asyncHandler(
         const text = content.trim();
         const hasTeamMention = /@(team|all)\b/i.test(text);
 
-       
+
         if (hasTeamMention && isMember.role === 'LEAD') {
           const allMembers = await prisma.teamMember.findMany({
             where: {
@@ -346,7 +414,7 @@ export const sendTeamMessageController = asyncHandler(
             });
           }
         } else {
-          
+
           const mentionMatches = text.match(/@(\w+)/g);
           if (mentionMatches && mentionMatches.length > 0) {
             const mentionedNames = mentionMatches.map((m) => m.slice(1).toLowerCase());
@@ -376,7 +444,7 @@ export const sendTeamMessageController = asyncHandler(
           }
         }
       } catch (err: any) {
-        
+
       }
     }
 

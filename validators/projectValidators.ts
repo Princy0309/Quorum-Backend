@@ -2,33 +2,34 @@ import { z } from 'zod';
 
 export const createProjectSchema = z.object({
   name: z.string().trim().min(2, 'Project name must be at least 2 characters').max(100, 'Project name cannot exceed 100 characters'),
-  description: z.string().trim().max(1000, 'Description cannot exceed 1000 characters').optional(),
-  budget: z.number().positive('Budget must be a positive number').optional(),
-  dueDate: z.string().datetime({ message: 'Invalid dueDate format. Must be an ISO datetime string' }).optional(),
+  description: z.string().trim().max(1000, 'Description cannot exceed 1000 characters').optional().nullable(),
+  budget: z.preprocess((val) => (val === '' || val === null ? undefined : typeof val === 'string' ? parseFloat(val) : val), z.number().nonnegative('Budget must be a non-negative number').optional().nullable()),
+  dueDate: z.string().optional().nullable().refine((val) => !val || !isNaN(Date.parse(val)), { message: 'Invalid dueDate format' }),
+  organizationId: z.string().uuid('Invalid organization ID format').optional().nullable(),
 });
 
 export const updateProjectSchema = z.object({
   name: z.string().trim().min(2).max(100).optional(),
-  description: z.string().trim().max(1000).optional(),
+  description: z.string().trim().max(1000).optional().nullable(),
   status: z.enum(['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED', 'CANCELLED']).optional(),
-  budget: z.number().positive().optional(),
-  dueDate: z.string().datetime().optional().nullable(),
+  budget: z.preprocess((val) => (val === '' || val === null ? undefined : typeof val === 'string' ? parseFloat(val) : val), z.number().nonnegative().optional().nullable()),
+  dueDate: z.string().optional().nullable().refine((val) => !val || !isNaN(Date.parse(val)), { message: 'Invalid dueDate format' }),
 });
 
 export const inviteProjectMemberSchema = z.object({
   email: z.string().trim().email('Invalid email address'),
   role: z.enum(['PROJECT_MANAGER', 'INTERNAL_MEMBER', 'FREELANCER', 'CLIENT']).default('FREELANCER'),
-  hourlyRate: z.number().positive('Hourly rate must be a positive number').optional(),
-  companyId: z.string().uuid('Invalid company ID format').optional().nullable(),
-  companyName: z.string().trim().max(100).optional(),
+  hourlyRate: z.preprocess((val) => (val === '' || val === null ? undefined : typeof val === 'string' ? parseFloat(val) : val), z.number().nonnegative('Hourly rate must be a non-negative number').optional().nullable()),
+  companyId: z.preprocess((val) => (val === '' ? null : val), z.string().uuid('Invalid company ID format').optional().nullable()),
+  companyName: z.preprocess((val) => (val === '' ? null : val), z.string().trim().max(100).optional().nullable()),
 });
 
 export const updateProjectMemberRoleSchema = z
   .object({
     role: z.enum(['PROJECT_MANAGER', 'INTERNAL_MEMBER', 'FREELANCER', 'CLIENT']).optional(),
-    hourlyRate: z.number().positive('Hourly rate must be a positive number').optional().nullable(),
-    companyId: z.string().uuid('Invalid company ID format').optional().nullable(),
-    companyName: z.string().trim().max(100).optional().nullable(),
+    hourlyRate: z.preprocess((val) => (val === '' || val === null ? undefined : typeof val === 'string' ? parseFloat(val) : val), z.number().nonnegative('Hourly rate must be a non-negative number').optional().nullable()),
+    companyId: z.preprocess((val) => (val === '' ? null : val), z.string().uuid('Invalid company ID format').optional().nullable()),
+    companyName: z.preprocess((val) => (val === '' ? null : val), z.string().trim().max(100).optional().nullable()),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'At least one field must be provided for update',

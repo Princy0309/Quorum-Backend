@@ -18,6 +18,12 @@ import {
   createMeetingWhiteboardController,
   openWhiteboardInMeetingController,
 } from '../controllers/whiteboardController.js';
+import {
+  getMeetingRecordingsController,
+  startMeetingRecordingController,
+  stopMeetingRecordingController,
+  getRecordingUploadUrlController,
+} from '../controllers/recordingController.js';
 import { authMiddleware, optionalAuth } from '../middlewares/authMiddleware.js';
 
 const router = Router();
@@ -41,5 +47,9 @@ router.get('/:code/polls', authMiddleware, getMeetingPollsController);
 router.post('/:code/polls', authMiddleware, createMeetingPollController);
 router.post('/:code/polls/:pollId/vote', authMiddleware, voteMeetingPollController);
 router.patch('/:code/polls/:pollId/close', authMiddleware, closeMeetingPollController);
+router.get('/:code/recordings', authMiddleware, getMeetingRecordingsController);
+router.post('/:code/recording/start', authMiddleware, startMeetingRecordingController);
+router.post('/:code/recording/stop', authMiddleware, stopMeetingRecordingController);
+router.post('/:code/recording/upload-url', authMiddleware, getRecordingUploadUrlController);
 
 export default router;

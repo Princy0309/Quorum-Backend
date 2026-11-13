@@ -8,7 +8,7 @@ import {
   getJiraStatusController,
 } from '../controllers/jiraOAuthController.js';
 
-import { getMyTicketsController } from '../controllers/jiraTicketController.js';
+import { getMyTicketsController, createTeamTicketController, getTeamTicketsController, getTicketDetailsController, transitionTicketStatusController, getTeamAssigneesController } from '../controllers/jiraTicketController.js';
 import { handleJiraWebhookController } from '../controllers/jiraWebhookController.js';
 
 const router = Router();
@@ -27,15 +27,7 @@ const authorizeLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// ---------------------------------------------------------------------------
-// User Jira Integration Routes (/api/integrations/jira and /api/v1/integrations/jira)
-// Provides OAuth 2.0 3LO authorization, connection status, token revocation,
-// personal tickets, and webhook handling.
-// Multiple path aliases are provided to support diverse frontend/mobile clients.
-// ---------------------------------------------------------------------------
 
-// 1. Generate Atlassian OAuth Consent URL
-// Supports both '/oauth/authorize-url' and shorthand '/authorize-url'
 router.get(
   ['/oauth/authorize-url', '/authorize-url'],
   authMiddleware,
@@ -43,28 +35,35 @@ router.get(
   getAuthorizeUrlController
 );
 
-// 2. OAuth Callback from Atlassian (Public endpoint visited via browser redirect)
 router.get('/oauth/callback', handleOAuthCallbackController);
 
-// 3. Disconnect Personal Jira Account (Revokes Atlassian tokens)
 router.post(
   ['/disconnect', '/oauth/disconnect'],
   authMiddleware,
   disconnectJiraController
 );
 
-// 4. Get Current User's Personal Jira Connection Status
-// Supports '/oauth/status', '/status', and the root '/' of the integration router
 router.get(
   ['/oauth/status', '/status', '/'],
   authMiddleware,
   getJiraStatusController
 );
 
-// 5. Get Tickets Assigned to the Current User
 router.get('/tickets/my', authMiddleware, getMyTicketsController);
 
-// 6. Incoming Jira Webhook Event Dispatcher
+router.post('/teams/:teamId/tickets', authMiddleware, createTeamTicketController);
+
+router.get('/teams/:teamId/tickets', authMiddleware, getTeamTicketsController);
+
+router.get('/teams/:teamId/tickets/:key', authMiddleware, getTicketDetailsController);
+
+router.post('/teams/:teamId/tickets/:key/transition', authMiddleware, transitionTicketStatusController);
+
+router.get('/teams/:teamId/assignees', authMiddleware, getTeamAssigneesController);
+
+router.get('/organizations/:id/assignees', authMiddleware, getTeamAssigneesController);
+
+
 router.post('/webhook', handleJiraWebhookController);
 
 export default router;

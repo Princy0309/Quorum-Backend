@@ -1,0 +1,33 @@
+enum RecordingStatus {
+  RECORDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model MeetingRecording {
+  id              String          @id @default(uuid())
+  meetingId       String?
+  meeting         Meeting?        @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  meetingCode     String
+  recordedById    String?
+  recordedBy      User?           @relation("UserRecordings", fields: [recordedById], references: [id], onDelete: SetNull)
+  status          RecordingStatus @default(RECORDING)
+  fileUrl         String?
+  thumbnailUrl    String?
+  transcriptUrl   String?
+  summary         String?
+  durationSeconds Int?
+  fileSizeBytes   BigInt?
+  startedAt       DateTime        @default(now())
+  endedAt         DateTime?
+  expiresAt       DateTime?
+  errorMessage    String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([meetingId])
+  @@index([meetingCode])
+  @@index([recordedById])
+  @@index([expiresAt])
+}

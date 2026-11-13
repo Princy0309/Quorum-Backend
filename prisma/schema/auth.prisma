@@ -66,6 +66,12 @@ model User {
   meetingPollVotes         MeetingPollVote[]         @relation("MeetingPollVoter")
   createdDocuments         Document[]                @relation("DocumentCreator")
   documentCollaborations   DocumentCollaborator[]    @relation("DocumentCollaboratorUser")
+  recordings               MeetingRecording[]        @relation("UserRecordings")
+  orgFeedPosts             OrgFeedPost[]             @relation("OrgFeedAuthor")
+  orgFeedTargetedPosts     OrgFeedPost[]             @relation("OrgFeedTargetUser")
+  orgFeedPinnedPosts       OrgFeedPost[]             @relation("OrgFeedPinnedBy")
+  orgFeedComments          OrgFeedComment[]          @relation("OrgFeedCommentAuthor")
+  orgFeedReactions         OrgFeedReaction[]         @relation("OrgFeedReactionUser")
 }
 
 model RefreshToken {

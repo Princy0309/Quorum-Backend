@@ -1,0 +1,1 @@
+ALTER TABLE "Community" ADD COLUMN IF NOT EXISTS "avatar" TEXT;

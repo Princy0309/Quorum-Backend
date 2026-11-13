@@ -5,10 +5,14 @@ import {
   getUserOrganizationsController,
   getOrganizationController,
   updateOrganizationController,
+  getOrganizationProfilePictureController,
+  updateOrganizationProfilePictureController,
+  deleteOrganizationProfilePictureController,
   getOrganizationMembersController,
   updateMemberRoleController,
   removeMemberController,
   leaveOrganizationController,
+  transferOrganizationOwnershipController,
   createInviteController,
   getInvitePreviewController,
   acceptInviteController,
@@ -42,6 +46,9 @@ import {
   deleteTeamController,
   addTeamMemberController,
   removeTeamMemberController,
+  getTeamMembersController,
+  leaveTeamController,
+  transferLeadAndLeaveController,
   getTeamMessagesController,
   sendTeamMessageController,
   deleteTeamMessageController,
@@ -67,6 +74,28 @@ import {
   updateTeamSchema,
 } from '../validators/organizationValidators.js';
 
+import rateLimit from 'express-rate-limit';
+import {
+  createOrgPostController,
+  getOrgFeedController,
+  getOrgPostByIdController,
+  updateOrgPostController,
+  deleteOrgPostController,
+  togglePinOrgPostController,
+  toggleOrgPostReactionController,
+  createOrgCommentController,
+  getOrgCommentsController,
+  updateOrgCommentController,
+  deleteOrgCommentController,
+} from '../controllers/orgFeedController.js';
+import {
+  createOrgPostSchema,
+  updateOrgPostSchema,
+  toggleReactionSchema,
+  createOrgCommentSchema,
+  updateOrgCommentSchema,
+} from '../validators/orgFeedValidators.js';
+
 const router = Router();
 
 router.get('/join/:token', getInvitePreviewController);
@@ -75,14 +104,82 @@ router.post('/join/:token', authMiddleware, acceptInviteController);
 
 router.post('/', authMiddleware, validate(createOrganizationSchema), createOrganizationController);
 router.get('/', authMiddleware, getUserOrganizationsController);
+router.get('/search', authMiddleware, getUserOrganizationsController);
 
 router.get('/:id', authMiddleware, requireOrgMember(), getOrganizationController);
 router.patch(
   '/:id',
   authMiddleware,
   requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
   validate(updateOrganizationSchema),
   updateOrganizationController
+);
+
+router.get('/:id/profile-picture', authMiddleware, requireOrgMember(), getOrganizationProfilePictureController);
+router.post(
+  '/:id/profile-picture',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
+  updateOrganizationProfilePictureController
+);
+router.put(
+  '/:id/profile-picture',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
+  updateOrganizationProfilePictureController
+);
+router.delete(
+  '/:id/profile-picture',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  deleteOrganizationProfilePictureController
+);
+
+router.get('/:id/avatar', authMiddleware, requireOrgMember(), getOrganizationProfilePictureController);
+router.post(
+  '/:id/avatar',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
+  updateOrganizationProfilePictureController
+);
+router.put(
+  '/:id/avatar',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
+  updateOrganizationProfilePictureController
+);
+router.delete(
+  '/:id/avatar',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  deleteOrganizationProfilePictureController
+);
+
+router.get('/:id/logo', authMiddleware, requireOrgMember(), getOrganizationProfilePictureController);
+router.post(
+  '/:id/logo',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
+  updateOrganizationProfilePictureController
+);
+router.put(
+  '/:id/logo',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  uploadMiddleware,
+  updateOrganizationProfilePictureController
+);
+router.delete(
+  '/:id/logo',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN]),
+  deleteOrganizationProfilePictureController
 );
 
 router.delete(
@@ -107,6 +204,13 @@ router.delete(
   authMiddleware,
   requireOrgMember([OrgRole.ORG_ADMIN]),
   removeMemberController
+);
+
+router.post(
+  '/:id/transfer-ownership',
+  authMiddleware,
+  requireOrgMember(),
+  transferOrganizationOwnershipController
 );
 
 router.post('/:id/leave', authMiddleware, requireOrgMember(), leaveOrganizationController);
@@ -192,12 +296,33 @@ router.get(
   getTeamMessagesController
 );
 
+router.get(
+  '/:id/teams/:teamId/members',
+  authMiddleware,
+  requireOrgMember(),
+  getTeamMembersController
+);
+
+router.post(
+  '/:id/teams/:teamId/leave',
+  authMiddleware,
+  requireOrgMember(),
+  leaveTeamController
+);
+
 router.post(
   '/:id/teams/:teamId/messages',
   authMiddleware,
   requireOrgMember(),
   uploadMiddleware,
   sendTeamMessageController
+);
+
+router.post(
+  '/:id/teams/:teamId/transfer-lead-and-leave',
+  authMiddleware,
+  requireOrgMember(),
+  transferLeadAndLeaveController
 );
 
 router.delete(
@@ -315,6 +440,81 @@ router.get(
   authMiddleware,
   requireOrgMember(),
   getTeamAssigneesController
+);
+
+const orgFeedWriteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: {
+    success: false,
+    statusCode: 429,
+    message: 'Too many feed requests. Please wait a minute and try again.',
+  },
+  keyGenerator: (req) => req.user?.id || req.ip || 'anonymous',
+  validate: false,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.get('/:id/feed', authMiddleware, requireOrgMember(), getOrgFeedController);
+router.post(
+  '/:id/feed',
+  authMiddleware,
+  requireOrgMember(),
+  orgFeedWriteLimiter,
+  uploadMiddleware,
+  validate(createOrgPostSchema),
+  createOrgPostController
+);
+
+router.get('/:id/feed/:postId', authMiddleware, requireOrgMember(), getOrgPostByIdController);
+router.patch(
+  '/:id/feed/:postId',
+  authMiddleware,
+  requireOrgMember(),
+  uploadMiddleware,
+  validate(updateOrgPostSchema),
+  updateOrgPostController
+);
+router.delete('/:id/feed/:postId', authMiddleware, requireOrgMember(), deleteOrgPostController);
+
+router.post(
+  '/:id/feed/:postId/pin',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  togglePinOrgPostController
+);
+
+router.post(
+  '/:id/feed/:postId/react',
+  authMiddleware,
+  requireOrgMember(),
+  orgFeedWriteLimiter,
+  validate(toggleReactionSchema),
+  toggleOrgPostReactionController
+);
+
+router.get('/:id/feed/:postId/comments', authMiddleware, requireOrgMember(), getOrgCommentsController);
+router.post(
+  '/:id/feed/:postId/comments',
+  authMiddleware,
+  requireOrgMember(),
+  orgFeedWriteLimiter,
+  validate(createOrgCommentSchema),
+  createOrgCommentController
+);
+router.patch(
+  '/:id/feed/:postId/comments/:commentId',
+  authMiddleware,
+  requireOrgMember(),
+  validate(updateOrgCommentSchema),
+  updateOrgCommentController
+);
+router.delete(
+  '/:id/feed/:postId/comments/:commentId',
+  authMiddleware,
+  requireOrgMember(),
+  deleteOrgCommentController
 );
 
 export default router;

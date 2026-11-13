@@ -33,7 +33,12 @@ export const CHAT_EVENTS = {
   MESSAGE_FORWARD: 'message:forward',
   MESSAGE_FORWARDED: 'message:forwarded',
   POLL_VOTE: 'poll:vote',
-  POLL_UPDATED: 'poll:updated'
+  POLL_UPDATED: 'poll:updated',
+  MESSAGE_PINNED: 'message:pinned',
+  MESSAGE_UNPINNED: 'message:unpinned',
+  MESSAGE_PIN: 'message:pin',
+  MESSAGE_UNPIN: 'message:unpin',
+  MESSAGE_GET_PINNED: 'message:get-pinned'
 } as const;
 
 export const COMMUNITY_EVENTS = {
@@ -61,6 +66,20 @@ export const PROJECT_EVENTS = {
   DELIVERABLE_REVIEWED: 'project:deliverable_reviewed',
 } as const;
 
+export const OFFICE_EVENTS = {
+  JOIN: 'office:join',
+  LEAVE: 'office:leave',
+  CHANGE_ZONE: 'office:change-zone',
+  ZONE_CHANGED: 'office:zone-changed',
+  KNOCK: 'office:knock',
+  KNOCKED: 'office:knocked',
+  USER_JOINED: 'office:user-joined',
+  USER_LEFT: 'office:user-left',
+  STATE_UPDATED: 'office:state-updated',
+  MEETING_STARTED: 'office:meeting-started',
+  MEETING_ENDED: 'office:meeting-ended',
+} as const;
+
 export const DOCUMENT_EVENTS = {
   DOCUMENT_JOIN: 'document:join',
   DOCUMENT_LEAVE: 'document:leave',
@@ -77,4 +96,15 @@ export const DOCUMENT_EVENTS = {
   MEETING_DOCUMENT_CLOSED: 'meeting:document_closed'
 } as const;
 
-
+export const ORG_FEED_EVENTS = {
+  ORG_JOIN: 'org:join',
+  ORG_LEAVE: 'org:leave',
+  POST_NEW: 'org:feed:post:new',
+  POST_UPDATED: 'org:feed:post:updated',
+  POST_DELETED: 'org:feed:post:deleted',
+  POST_PINNED: 'org:feed:post:pinned',
+  REACTION_UPDATED: 'org:feed:reaction:updated',
+  COMMENT_NEW: 'org:feed:comment:new',
+  COMMENT_UPDATED: 'org:feed:comment:updated',
+  COMMENT_DELETED: 'org:feed:comment:deleted',
+} as const;

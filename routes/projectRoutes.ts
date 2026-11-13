@@ -44,6 +44,12 @@ import {
 const router = Router();
 
 router.get('/', authMiddleware, getUserProjectsController);
+router.post(
+  '/',
+  authMiddleware,
+  validate(createProjectSchema),
+  createProjectController
+);
 router.get('/my-projects', authMiddleware, getUserProjectsController);
 
 router.post('/accept-invite', authMiddleware, acceptProjectInviteController);
