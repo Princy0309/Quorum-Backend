@@ -1,5 +1,5 @@
 import prisma from '../config/prisma.js';
-import { OrgRole } from '@prisma/client';
+import { OrgRole, Prisma } from '@prisma/client';
 import { ApiError } from '../utils/ApiError.js';
 import type { CreateTeamInput, UpdateTeamInput } from '../types/team.js';
 import { queueNotification } from '../queues/notificationQueue.js';
@@ -561,6 +561,28 @@ export const leaveTeam = async (
   teamId: string,
   userId: string
 ) => {
+  const membership = await prisma.teamMember.findUnique({
+    where: { teamId_userId: { teamId, userId } },
+  });
+
+  if (!membership) {
+    throw new ApiError(404, 'You are not a member of this team');
+  }
+
+  // Sole-Lead Protection: If user is LEAD, verify they aren't the ONLY lead
+  if (membership.role === 'LEAD') {
+    const totalLeads = await prisma.teamMember.count({
+      where: { teamId, role: 'LEAD' },
+    });
+
+    if (totalLeads <= 1) {
+      throw new ApiError(
+        400,
+        'You are the sole team lead of this team. You must transfer leadership to another member before leaving.'
+      );
+    }
+  }
+
   return await removeTeamMember(
     organizationId,
     teamId,
@@ -568,4 +590,164 @@ export const leaveTeam = async (
     OrgRole.MEMBER,
     userId
   );
+};
+
+export const transferLeadAndLeaveTeam = async (
+  organizationId: string,
+  teamId: string,
+  callerUserId: string,
+  successorId: string
+) => {
+  if (callerUserId === successorId) {
+    throw new ApiError(400, 'You cannot transfer leadership to yourself');
+  }
+
+  const team = await prisma.team.findFirst({
+    where: { id: teamId, organizationId },
+    select: { id: true, name: true },
+  });
+
+  if (!team) {
+    throw new ApiError(404, 'Team not found in this organization');
+  }
+
+  // Atomic Transfer & Exit in a Serializable Transaction
+  const result = await prisma.$transaction(
+    async (tx) => {
+      // 1. Verify caller is currently a LEAD of this team
+      const currentLead = await tx.teamMember.findUnique({
+        where: {
+          teamId_userId: { teamId, userId: callerUserId },
+        },
+      });
+
+      if (!currentLead || currentLead.role !== 'LEAD') {
+        throw new ApiError(403, 'Only a team lead can transfer leadership and leave');
+      }
+
+      // 2. Verify successor is currently a member of this team
+      const successor = await tx.teamMember.findUnique({
+        where: {
+          teamId_userId: { teamId, userId: successorId },
+        },
+        include: {
+          user: { select: { id: true, name: true } },
+        },
+      });
+
+      if (!successor) {
+        throw new ApiError(400, 'The designated successor must already be a member of this team');
+      }
+
+      // 3. Promote successor to LEAD
+      const promotedSuccessor = await tx.teamMember.update({
+        where: {
+          teamId_userId: { teamId, userId: successorId },
+        },
+        data: {
+          role: 'LEAD',
+        },
+      });
+
+      // 4. Remove previous lead from the team
+      await tx.teamMember.delete({
+        where: {
+          teamId_userId: { teamId, userId: callerUserId },
+        },
+      });
+
+      // 5. Clean up Team Chat participants and post notices
+      const teamConv = await tx.conversation.findUnique({
+        where: { teamId },
+      });
+
+      const callerUser = await tx.user.findUnique({
+        where: { id: callerUserId },
+        select: { name: true },
+      });
+      const leadName = callerUser?.name || 'Previous Lead';
+
+      if (teamConv) {
+        await tx.conversationParticipant.deleteMany({
+          where: {
+            conversationId: teamConv.id,
+            userId: callerUserId,
+          },
+        });
+
+        await tx.conversationParticipant.upsert({
+          where: {
+            conversationId_userId: {
+              conversationId: teamConv.id,
+              userId: successorId,
+            },
+          },
+          create: {
+            conversationId: teamConv.id,
+            userId: successorId,
+            role: 'admin',
+          },
+          update: {
+            role: 'admin',
+          },
+        });
+
+        const nextSeq1 = teamConv.lastSeq + 1;
+        await tx.message.create({
+          data: {
+            conversationId: teamConv.id,
+            senderId: callerUserId,
+            content: `${leadName} transferred leadership to ${successor.user.name}`,
+            seq: nextSeq1,
+          },
+        });
+
+        const nextSeq2 = nextSeq1 + 1;
+        await tx.message.create({
+          data: {
+            conversationId: teamConv.id,
+            senderId: callerUserId,
+            content: `${leadName} left the team`,
+            seq: nextSeq2,
+          },
+        });
+
+        await tx.conversation.update({
+          where: { id: teamConv.id },
+          data: { lastSeq: nextSeq2 },
+        });
+      }
+
+      return {
+        teamName: team.name,
+        newLeadId: promotedSuccessor.userId,
+        newLeadName: successor.user.name,
+      };
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    }
+  );
+
+  // 6. Post-transaction notification
+  try {
+    await queueNotification({
+      recipientId: successorId,
+      actorId: callerUserId,
+      type: 'TEAM_INVITE',
+      title: 'Promoted to Team Lead',
+      body: `You are now the Team Lead of team "${result.teamName}"`,
+      data: {
+        organizationId,
+        teamId,
+        role: 'LEAD',
+      },
+    });
+  } catch (err: any) {
+    logger.warn('[TeamLeadTransfer] Successor notification failed', { error: err.message });
+  }
+
+  return {
+    message: `Leadership successfully transferred to ${result.newLeadName}. You have exited the team.`,
+  };
 };

@@ -11,6 +11,7 @@ import {
   removeTeamMember,
   getTeamMembers,
   leaveTeam,
+  transferLeaveAndLeaveTeam,
 } from '../services/teamService.js';
 import prisma from '../config/prisma.js';
 import { queueNotification } from '../queues/notificationQueue.js';
@@ -189,6 +190,34 @@ export const leaveTeamController = asyncHandler(
     const teamId = getParam(req.params.teamId);
 
     const result = await leaveTeam(orgId, teamId, req.user.id);
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  }
+);
+
+export const transferLeadAndLeaveController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id || !req.orgMembership) {
+      return next(new ApiError(401, 'Unauthorized'));
+    }
+
+    const orgId = getParam(req.params.id);
+    const teamId = getParam(req.params.teamId);
+    const { successorId } = req.body;
+
+    if (!successorId) {
+      return next(new ApiError(400, 'successorId is required in request body'));
+    }
+
+    const result = await transferLeadAndLeaveTeam(
+      orgId,
+      teamId,
+      req.user.id,
+      String(successorId).trim()
+    );
 
     return res.status(200).json({
       success: true,
