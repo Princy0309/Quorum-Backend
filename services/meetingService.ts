@@ -9,7 +9,7 @@ import { stopActiveRecordingForMeeting } from './recordingService.js';
 import logger from '../utils/logger.js';
 import { getIO } from '../sockets/socketServer.js';
 import { sendPushToOfflineUsers } from './notificationService.js';
-import { scheduleEventReminder } from '../queues/reminderQueue.js';
+import { scheduleEventReminder, cancelEventReminder } from '../queues/reminderQueue.js';
 import { addScopedMeetingInviteEmailToQueue } from '../queues/emailQueue.js';
 
 
@@ -183,7 +183,8 @@ const syncMeetingCalendarAndNotifications = async (
     hostId: string;
     organizationId: string | null;
     teamId: string | null;
-  }
+  },
+  durationMinutes?: number
 ) => {
   try {
     if (meeting.scopeType === MeetingScopeType.PERSONAL) {
@@ -232,7 +233,8 @@ const syncMeetingCalendarAndNotifications = async (
 
     if (meeting.status === MeetingStatus.SCHEDULED && meeting.scheduledStartTime) {
       const start = new Date(meeting.scheduledStartTime);
-      const end = new Date(start.getTime() + 60 * 60 * 1000);
+      const durationMs = (durationMinutes && durationMinutes > 0 ? durationMinutes : 60) * 60 * 1000;
+      const end = new Date(start.getTime() + durationMs);
 
       for (const userId of memberIds) {
         try {
@@ -342,10 +344,23 @@ const syncMeetingCalendarAndNotifications = async (
       logger.warn('[MeetingService] Socket notification emission failed:', sockErr);
     }
 
-    sendPushToOfflineUsers(recipients, notifTitle, notifBody, {
-      meetingCode: meeting.code,
-      meetingLink,
-    }).catch((pushErr) => {
+    sendPushToOfflineUsers(
+      recipients,
+      notifTitle,
+      notifBody,
+      {
+        type: isScheduled ? 'EVENT_REMINDER' : 'MEETING_STARTED',
+        meetingCode: meeting.code,
+        meetingId: (meeting as any).id || meeting.code,
+        meetingLink: meetingLink || '',
+        title: meetingTitle,
+      },
+      {
+        channelId: 'quorum_chat_messages',
+        sound: 'default',
+        tag: meeting.code
+      }
+    ).catch((pushErr) => {
       logger.warn('[MeetingService] Offline push notification failed:', pushErr);
     });
 
@@ -361,6 +376,7 @@ export interface CreateScopedMeetingInput {
   organizationId?: string;
   teamId?: string;
   scheduledStartTime?: Date | string;
+  durationMinutes?: number;
 }
 
 export const createScopedMeeting = async (
@@ -415,17 +431,19 @@ export const createScopedMeeting = async (
     },
   });
 
-  syncMeetingCalendarAndNotifications(meeting).catch((err) =>
+  syncMeetingCalendarAndNotifications(meeting, input.durationMinutes).catch((err) =>
     logger.error('[MeetingService] Background calendar sync error:', err)
   );
 
 
   return {
+    id: meeting.id,
     code: meeting.code,
     title: meeting.title,
     scopeType: meeting.scopeType,
     status: meeting.status,
     scheduledStartTime: meeting.scheduledStartTime,
+    durationMinutes: input.durationMinutes,
     organizationId: meeting.organizationId,
     organization: meeting.organization,
     teamId: meeting.teamId,
@@ -520,6 +538,7 @@ export const endMeeting = async (code: string, hostId: string) => {
     data: { status: MeetingStatus.ENDED },
   });
 
+  await cleanupMeetingCalendarEventsAndReminders(code);
   stopActiveRecordingForMeeting(code).catch(() => {});
 
   try {
@@ -853,6 +872,7 @@ export const cancelMeeting = async (code: string, userId: string) => {
     data: { status: MeetingStatus.CANCELLED },
   });
 
+  await cleanupMeetingCalendarEventsAndReminders(code);
   stopActiveRecordingForMeeting(code).catch(() => {});
 
   try {
@@ -862,5 +882,39 @@ export const cancelMeeting = async (code: string, userId: string) => {
   }
 
   return { message: 'Meeting cancelled successfully' };
+};
+
+const cleanupMeetingCalendarEventsAndReminders = async (meetingCode: string) => {
+  try {
+    const meetingLink = `${env.CLIENT_URL}/meet/${meetingCode}`;
+    const events = await prisma.calendarEvent.findMany({
+      where: {
+        meetingLink,
+        eventType: 'MEETING',
+      },
+      select: { id: true },
+    });
+
+    for (const ev of events) {
+      try {
+        await cancelEventReminder(ev.id);
+      } catch (err) {
+        logger.warn(`Failed to cancel reminder job for event ${ev.id}:`, err);
+      }
+    }
+
+    await prisma.calendarEvent.updateMany({
+      where: {
+        meetingLink,
+        eventType: 'MEETING',
+      },
+      data: {
+        hasReminder: false,
+        isNotified: true,
+      },
+    });
+  } catch (cleanErr) {
+    logger.warn(`Failed to cleanup meeting calendar events for ${meetingCode}:`, cleanErr);
+  }
 };
 

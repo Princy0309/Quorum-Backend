@@ -14,6 +14,13 @@ export const createDocumentSchema = z.object({
   projectId: z.string().uuid().optional(),
   meetingId: z.string().uuid().optional(),
   whiteboardId: z.string().uuid().optional(),
+}).refine((data) => {
+  if (data.scopeType === 'ORGANIZATION' && !data.organizationId) return false;
+  if (data.scopeType === 'TEAM' && !data.teamId) return false;
+  if (data.scopeType === 'PROJECT' && !data.projectId) return false;
+  return true;
+}, {
+  message: 'Target ID is required for the specified scopeType',
 });
 
 export const updateDocumentSchema = z.object({

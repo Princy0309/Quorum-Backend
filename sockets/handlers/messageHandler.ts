@@ -1,4 +1,5 @@
 import { Server as SocketIOServer } from 'socket.io';
+import prisma from '../../config/prisma.js';
 import { AuthenticatedSocket } from '../socketAuth.js';
 import {
   saveMessage,
@@ -11,6 +12,12 @@ import {
   getMessageReactions,
   forwardMessages,
   votePoll,
+  clearConversationMessages,
+  deleteConversationForUser,
+  muteConversation,
+  unmuteConversation,
+  blockConversation,
+  unblockConversation,
   pinMessage,
   unpinMessage,
   getPinnedMessages
@@ -96,6 +103,43 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         if (resolvedId !== payload.conversationId) {
           socket.join(`conversation:${resolvedId}`);
         }
+
+        try {
+          const participants = await prisma.conversationParticipant.findMany({
+            where: { conversationId: resolvedId },
+            select: {
+              userId: true,
+              lastReadSeq: true,
+              lastReadMessageId: true
+            }
+          });
+
+          for (const p of participants) {
+            if (p.lastReadSeq > 0) {
+              socket.emit(CHAT_EVENTS.MESSAGE_READ, {
+                conversationId: resolvedId,
+                userId: p.userId,
+                lastReadSeq: p.lastReadSeq,
+                lastReadMessageId: p.lastReadMessageId,
+                messageId: p.lastReadMessageId
+              });
+            }
+          }
+
+          if (callback) {
+            callback({
+              success: true,
+              data: {
+                conversationId: resolvedId,
+                participants
+              }
+            });
+            return;
+          }
+        } catch (syncErr: any) {
+          logger.warn('Failed to sync participant read states on join', syncErr);
+        }
+
         if (callback) callback({ success: true, data: { conversationId: resolvedId } });
       } catch (err: any) {
         logger.error('Error joining conversation room', { error: err.message });
@@ -132,6 +176,193 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
       } catch (err: any) {
         logger.error('Error leaving conversation room', { error: err.message });
         if (callback) callback(formatErrorResponse('SERVER_ERROR', 'Failed to leave conversation'));
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.CONVERSATION_CLEAR,
+    async (
+      payload: { conversationId: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+          return;
+        }
+
+        if (!payload?.conversationId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId is required'));
+          return;
+        }
+
+        const result = await clearConversationMessages(userId, payload.conversationId);
+        if (callback) callback({ success: true, data: result });
+      } catch (err: any) {
+        logger.error('Error clearing conversation via socket', { error: err.message });
+        if (callback) {
+          const code = err instanceof ApiError && err.statusCode === 404 ? 'NOT_FOUND' : 'SERVER_ERROR';
+          callback(formatErrorResponse(code, err.message || 'Failed to clear conversation'));
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.CONVERSATION_DELETE,
+    async (
+      payload: { conversationId: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+          return;
+        }
+
+        if (!payload?.conversationId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId is required'));
+          return;
+        }
+
+        const result = await deleteConversationForUser(userId, payload.conversationId);
+        if (callback) callback({ success: true, data: result });
+      } catch (err: any) {
+        logger.error('Error deleting conversation via socket', { error: err.message });
+        if (callback) {
+          const code = err instanceof ApiError && err.statusCode === 404 ? 'NOT_FOUND' : 'SERVER_ERROR';
+          callback(formatErrorResponse(code, err.message || 'Failed to delete conversation'));
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.CONVERSATION_MUTE,
+    async (
+      payload: { conversationId: string; mutedUntil?: string; duration?: number },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+          return;
+        }
+
+        if (!payload?.conversationId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId is required'));
+          return;
+        }
+
+        let mutedUntil: Date | undefined;
+        if (payload.mutedUntil) {
+          mutedUntil = new Date(payload.mutedUntil);
+        } else if (typeof payload.duration === 'number' && payload.duration > 0) {
+          mutedUntil = new Date(Date.now() + payload.duration * 1000);
+        }
+
+        const result = await muteConversation(userId, payload.conversationId, mutedUntil);
+        if (callback) callback({ success: true, data: result });
+      } catch (err: any) {
+        logger.error('Error muting conversation via socket', { error: err.message });
+        if (callback) {
+          const code = err instanceof ApiError && err.statusCode === 404 ? 'NOT_FOUND' : 'SERVER_ERROR';
+          callback(formatErrorResponse(code, err.message || 'Failed to mute conversation'));
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.CONVERSATION_UNMUTE,
+    async (
+      payload: { conversationId: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+          return;
+        }
+
+        if (!payload?.conversationId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId is required'));
+          return;
+        }
+
+        const result = await unmuteConversation(userId, payload.conversationId);
+        if (callback) callback({ success: true, data: result });
+      } catch (err: any) {
+        logger.error('Error unmuting conversation via socket', { error: err.message });
+        if (callback) {
+          const code = err instanceof ApiError && err.statusCode === 404 ? 'NOT_FOUND' : 'SERVER_ERROR';
+          callback(formatErrorResponse(code, err.message || 'Failed to unmute conversation'));
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.CONVERSATION_BLOCK,
+    async (
+      payload: { conversationId: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+          return;
+        }
+
+        if (!payload?.conversationId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId is required'));
+          return;
+        }
+
+        const result = await blockConversation(userId, payload.conversationId);
+        if (callback) callback({ success: true, data: result });
+      } catch (err: any) {
+        logger.error('Error blocking conversation via socket', { error: err.message });
+        if (callback) {
+          const code = err instanceof ApiError && err.statusCode === 404 ? 'NOT_FOUND' : 'SERVER_ERROR';
+          callback(formatErrorResponse(code, err.message || 'Failed to block conversation'));
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.CONVERSATION_UNBLOCK,
+    async (
+      payload: { conversationId: string },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket'));
+          return;
+        }
+
+        if (!payload?.conversationId) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId is required'));
+          return;
+        }
+
+        const result = await unblockConversation(userId, payload.conversationId);
+        if (callback) callback({ success: true, data: result });
+      } catch (err: any) {
+        logger.error('Error unblocking conversation via socket', { error: err.message });
+        if (callback) {
+          const code = err instanceof ApiError && err.statusCode === 404 ? 'NOT_FOUND' : 'SERVER_ERROR';
+          callback(formatErrorResponse(code, err.message || 'Failed to unblock conversation'));
+        }
       }
     }
   );
@@ -224,7 +455,15 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           }
         });
 
-        const recipientUserIds = participants.map((p) => p.userId).filter((id) => id !== senderId);
+        const now = new Date();
+        const recipientUserIds = participants
+          .filter((p) => p.userId !== senderId)
+          .filter((p: any) => {
+            if (!p.isMuted) return true;
+            if (p.mutedUntil && new Date(p.mutedUntil) < now) return true;
+            return false;
+          })
+          .map((p) => p.userId);
         const mentionedRecipientIds = recipientUserIds.filter((id) =>
           ((message as any).mentionedUserIds || []).includes(id)
         );
@@ -235,19 +474,44 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         const senderName = (message as any).sender?.name || 'Someone';
         const senderAvatar = (message as any).sender?.avatar || undefined;
 
+        const conversationRecord = await prisma.conversation.findUnique({
+          where: { id: message.conversationId },
+          select: { teamId: true }
+        });
+        const teamId = conversationRecord?.teamId || undefined;
+        let organizationId: string | undefined;
+        if (teamId) {
+          const team = await prisma.team.findUnique({
+            where: { id: teamId },
+            select: { organizationId: true }
+          });
+          organizationId = team?.organizationId;
+        }
+
+        const basePushData: Record<string, string> = {
+          conversationId: message.conversationId,
+          messageId: message.id,
+          payload: JSON.stringify({
+            conversationId: message.conversationId,
+            messageId: message.id
+          }),
+          ...(teamId ? { teamId } : {}),
+          ...(organizationId ? { organizationId } : {})
+        };
+
         if (mentionedRecipientIds.length > 0) {
           sendPushToOfflineUsers(
             mentionedRecipientIds,
             `${senderName} mentioned you`,
             rawContent || 'Mentioned you in a message',
             {
-              conversationId: message.conversationId,
-              messageId: message.id,
-              isMention: 'true',
-              type: 'MENTION'
+              ...basePushData,
+              type: 'CHAT_MESSAGE',
+              isMention: 'true'
             },
             {
               conversationId: message.conversationId,
+              tag: message.conversationId,
               category: 'MESSAGE_REPLY',
               imageUrl: senderAvatar,
               channelId: 'quorum_chat_messages',
@@ -264,12 +528,12 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
             `New message from ${senderName}`,
             rawContent || 'Sent an attachment',
             {
-              conversationId: message.conversationId,
-              messageId: message.id,
+              ...basePushData,
               type: 'CHAT_MESSAGE'
             },
             {
               conversationId: message.conversationId,
+              tag: message.conversationId,
               category: 'MESSAGE_REPLY',
               imageUrl: senderAvatar,
               channelId: 'quorum_chat_messages',

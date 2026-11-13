@@ -22,8 +22,8 @@ import whiteboardRoutes from './whiteboardRoutes.js';
 import officeRoutes from './officeRoutes.js';
 import projectRoutes from './projectRoutes.js';
 import documentRoutes from './documentRoutes.js';
+import workflowRoutes from './workflowRoutes.js';
 import recordingRoutes from './recordingRoutes.js';
-
 
 const router = Router();
 
@@ -55,7 +55,6 @@ router.use('/v1/notifications', notificationRoutes);
 router.use('/ai', aiRoutes);
 router.use('/v1/ai', aiRoutes);
 
-// Meeting & Organization routes (supports both /api/* and /api/v1/* for mobile compatibility)
 router.use('/meetings', meetingRoutes);
 router.use('/v1/meetings', meetingRoutes);
 router.use('/organizations', organizationRoutes);
@@ -119,8 +118,11 @@ router.use('/projects', projectRoutes);
 router.use('/v1/projects', projectRoutes);
 router.use('/documents', documentRoutes);
 router.use('/v1/documents', documentRoutes);
+router.use('/ai/workflows', workflowRoutes);
+router.use('/v1/ai/workflows', workflowRoutes);
+router.use('/workflows', workflowRoutes);
+router.use('/v1/workflows', workflowRoutes);
 router.use('/recordings', recordingRoutes);
 router.use('/v1/recordings', recordingRoutes);
-
 
 export default router;

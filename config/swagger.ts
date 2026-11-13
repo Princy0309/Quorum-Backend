@@ -9179,6 +9179,86 @@ export const swaggerDocument = {
           }
         }
       }
+    },
+    "/api/ai/workflows/plan": {
+      "post": {
+        "tags": [
+          "AI Workflows"
+        ],
+        "summary": "Plan a multi-step workplace workflow from natural language",
+        "description": "Parses a natural language instruction into ordered, validated workplace actions (team creation, meeting scheduling, document sharing, member notifications) with entity resolution.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "prompt"
+                ],
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "example": "Create a Mobile Dev team with Alice and Bob, schedule a kickoff meeting for tomorrow at 10:00 AM, share Product Roadmap, and notify them."
+                  },
+                  "autoExecute": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workflow plan generated successfully"
+          }
+        }
+      }
+    },
+    "/api/ai/workflows/execute": {
+      "post": {
+        "tags": [
+          "AI Workflows"
+        ],
+        "summary": "Execute a confirmed workflow plan",
+        "description": "Executes the planned actions sequentially with dynamic variable resolution and returns an audit trail.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "planId"
+                ],
+                "properties": {
+                  "planId": {
+                    "type": "string",
+                    "example": "wf_plan_abc123"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workflow executed successfully"
+          }
+        }
+      }
     }
   },
   "tags": [

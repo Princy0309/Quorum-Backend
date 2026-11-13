@@ -39,6 +39,13 @@ import {
   forwardMessagesController,
   createPollController,
   votePollController,
+  markMessageAsReadController,
+  clearConversationMessagesController,
+  deleteConversationController,
+  muteConversationController,
+  unmuteConversationController,
+  blockConversationController,
+  unblockConversationController,
   pinMessageController,
   unpinMessageController,
   getPinnedMessagesController
@@ -62,6 +69,23 @@ router.post('/:id/polls/:pollId/vote', authMiddleware, validate(votePollSchema),
 router.get('/:id/presence', authMiddleware, getConversationPresenceController);
 router.get('/:id', authMiddleware, getConversationDetailsController);
 router.get('/:id/messages', authMiddleware, getConversationMessagesController);
+router.post('/:id/read', authMiddleware, markMessageAsReadController);
+router.patch('/:id/read', authMiddleware, markMessageAsReadController);
+router.post('/:id/messages/read', authMiddleware, markMessageAsReadController);
+router.post('/:id/messages/:messageId/read', authMiddleware, markMessageAsReadController);
+router.patch('/:id/messages/:messageId/read', authMiddleware, markMessageAsReadController);
+router.delete('/:id/messages', authMiddleware, clearConversationMessagesController);
+router.post('/:id/clear', authMiddleware, clearConversationMessagesController);
+router.delete('/:id/clear', authMiddleware, clearConversationMessagesController);
+router.delete('/:id', authMiddleware, deleteConversationController);
+router.post('/:id/mute', authMiddleware, muteConversationController);
+router.patch('/:id/mute', authMiddleware, muteConversationController);
+router.post('/:id/unmute', authMiddleware, unmuteConversationController);
+router.delete('/:id/mute', authMiddleware, unmuteConversationController);
+router.post('/:id/block', authMiddleware, blockConversationController);
+router.patch('/:id/block', authMiddleware, blockConversationController);
+router.post('/:id/unblock', authMiddleware, unblockConversationController);
+router.delete('/:id/block', authMiddleware, unblockConversationController);
 router.patch('/:id/messages/:messageId', authMiddleware, validate(editMessageSchema), editMessageController);
 router.delete('/:id/messages/:messageId', authMiddleware, validate(deleteMessageSchema), deleteMessageController);
 router.post('/:id/messages/:messageId/pin', authMiddleware, pinMessageController);

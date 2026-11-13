@@ -52,12 +52,27 @@ export const ensureChatSchema = async (): Promise<void> => {
     `CREATE UNIQUE INDEX IF NOT EXISTS "Conversation_directKey_key" ON "Conversation"("directKey");`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "Conversation_teamId_key" ON "Conversation"("teamId");`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "Conversation_projectId_key" ON "Conversation"("projectId");`,
+    `ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "blockedByUserIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];`,
     `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "role" TEXT NOT NULL DEFAULT 'member';`,
     `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "joinedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;`,
     `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "lastReadMessageId" TEXT;`,
     `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "lastReadSeq" INTEGER NOT NULL DEFAULT 0;`,
+    `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "isMuted" BOOLEAN NOT NULL DEFAULT false;`,
+    `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "mutedUntil" TIMESTAMP(3);`,
+    `ALTER TABLE "ConversationParticipant" ADD COLUMN IF NOT EXISTS "isBlocked" BOOLEAN NOT NULL DEFAULT false;`,
+    `UPDATE "Conversation" SET "blockedByUserIds" = ARRAY[]::TEXT[] WHERE "blockedByUserIds" IS NULL;`,
     `CREATE INDEX IF NOT EXISTS "ConversationParticipant_userId_idx" ON "ConversationParticipant"("userId");`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "ConversationParticipant_conversationId_userId_key" ON "ConversationParticipant"("conversationId", "userId");`,
+    `CREATE TABLE IF NOT EXISTS "BlockedUser" (
+        "id" TEXT NOT NULL,
+        "userId" TEXT NOT NULL,
+        "blockedUserId" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "BlockedUser_pkey" PRIMARY KEY ("id")
+    );`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "BlockedUser_userId_blockedUserId_key" ON "BlockedUser"("userId", "blockedUserId");`,
+    `CREATE INDEX IF NOT EXISTS "BlockedUser_userId_idx" ON "BlockedUser"("userId");`,
+    `CREATE INDEX IF NOT EXISTS "BlockedUser_blockedUserId_idx" ON "BlockedUser"("blockedUserId");`,
     `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "fileUrl" TEXT;`,
     `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "fileType" TEXT;`,
     `ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "fileName" TEXT;`,
@@ -268,6 +283,44 @@ export const getOrCreateDirectConversation = async (userId: string, targetUserId
     }
   }
 
+  if (conversation) {
+    const existingIds = new Set(conversation.participants.map((p: any) => p.userId));
+    const missingIds = [userId, targetUserId].filter((id) => !existingIds.has(id));
+    if (missingIds.length > 0) {
+      await prisma.conversationParticipant.createMany({
+        data: missingIds.map((id) => ({
+          conversationId: conversation!.id,
+          userId: id
+        })),
+        skipDuplicates: true
+      });
+      const reloaded = await prisma.conversation.findUnique({
+        where: { id: conversation.id },
+        include: {
+          participants: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  avatar: true
+                }
+              }
+            }
+          },
+          messages: {
+            take: 1,
+            orderBy: [{ seq: 'desc' }, { id: 'desc' }]
+          }
+        }
+      });
+      if (reloaded) {
+        conversation = reloaded;
+      }
+    }
+  }
+
   return conversation;
 };
 
@@ -334,6 +387,13 @@ export const getConversationById = async (userId: string, conversationIdOrUserId
         }
       },
       messages: {
+        where: {
+          NOT: {
+            deletedForUserIds: {
+              has: userId
+            }
+          }
+        },
         take: 1,
         orderBy: [{ seq: 'desc' }, { id: 'desc' }]
       }
@@ -344,7 +404,19 @@ export const getConversationById = async (userId: string, conversationIdOrUserId
     throw new ApiError(404, 'Conversation not found');
   }
 
-  return conversation;
+  const myParticipant = (conversation.participants || []).find((p: any) => p.userId === userId);
+  const isMuted = myParticipant?.isMuted ?? false;
+  const mutedUntil = myParticipant?.mutedUntil ?? null;
+  const isBlocked = ((conversation as any).blockedByUserIds || []).includes(userId) || (myParticipant?.isBlocked ?? false);
+  const isBlockedByOther = ((conversation as any).blockedByUserIds || []).some((id: string) => id !== userId);
+
+  return {
+    ...conversation,
+    isMuted,
+    mutedUntil,
+    isBlocked,
+    isBlockedByOther
+  };
 };
 
 export const getCoParticipantUserIds = async (userId: string): Promise<string[]> => {
@@ -637,10 +709,27 @@ export const saveMessage = async (
       throw new ApiError(403, 'User is not a participant in this conversation');
     }
 
+    const convData = await tx.conversation.findUnique({
+      where: { id: resolvedConversationId },
+      select: { blockedByUserIds: true, type: true }
+    });
+
+    if (convData && Array.isArray((convData as any).blockedByUserIds)) {
+      const blockedByOthers = (convData as any).blockedByUserIds.filter((id: string) => id !== senderId);
+      if (blockedByOthers.length > 0) {
+        throw new ApiError(403, 'Cannot send message: You have been blocked in this conversation');
+      }
+      if ((convData as any).blockedByUserIds.includes(senderId)) {
+        throw new ApiError(403, 'Cannot send message: You have blocked this conversation. Please unblock to send messages.');
+      }
+    }
+
     const participants = await tx.conversationParticipant.findMany({
       where: { conversationId: resolvedConversationId },
       select: {
         userId: true,
+        isMuted: true,
+        mutedUntil: true,
         user: {
           select: {
             id: true,
@@ -860,6 +949,11 @@ export const getConversationMessages = async (
       messages = await prisma.message.findMany({
         where: {
           conversationId: targetConversationId,
+          NOT: {
+            deletedForUserIds: {
+              has: userId
+            }
+          },
           ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
         },
         take: queryLimit + 1,
@@ -906,19 +1000,42 @@ export const getConversationMessages = async (
     mentionedUserMap = new Map(mentionedUsersList.map((u) => [u.id, u]));
   }
 
-  const enrichedMessages = messages.map((msg: any) => ({
-    ...msg,
-    reactions: formatReactions(msg.reactions || [], userId),
-    poll: formatPoll(msg.poll, userId),
-    mentionedUsers: (msg.mentionedUserIds || [])
-      .map((mId: string) => mentionedUserMap.get(mId))
-      .filter(Boolean)
-  }));
+  const participants = await prisma.conversationParticipant.findMany({
+    where: { conversationId: targetConversationId },
+    select: {
+      userId: true,
+      lastReadSeq: true,
+      lastReadMessageId: true
+    }
+  });
+
+  const enrichedMessages = messages.map((msg: any) => {
+    const otherParticipants = participants.filter((p) => p.userId !== msg.senderId);
+    const readByUserIds = otherParticipants
+      .filter((p) => p.lastReadSeq >= msg.seq)
+      .map((p) => p.userId);
+    const isRead = otherParticipants.length > 0 && readByUserIds.length > 0;
+
+    return {
+      ...msg,
+      isRead,
+      read: isRead,
+      status: isRead ? 'read' : 'sent',
+      readBy: readByUserIds,
+      readCount: readByUserIds.length,
+      reactions: formatReactions(msg.reactions || [], userId),
+      poll: formatPoll(msg.poll, userId),
+      mentionedUsers: (msg.mentionedUserIds || [])
+        .map((mId: string) => mentionedUserMap.get(mId))
+        .filter(Boolean)
+    };
+  });
 
   return {
     messages: enrichedMessages,
     nextCursor,
-    hasNextPage
+    hasNextPage,
+    participants
   };
 };
 
@@ -1051,6 +1168,13 @@ export const getUserConversations = async (userId: string, query?: string) => {
             }
           },
           messages: {
+            where: {
+              NOT: {
+                deletedForUserIds: {
+                  has: userId
+                }
+              }
+            },
             take: 1,
             orderBy: [{ id: 'desc' }],
             include: {
@@ -1086,6 +1210,7 @@ export const getUserConversations = async (userId: string, query?: string) => {
       LEFT JOIN "Message" m ON m."conversationId" = cp."conversationId"
         AND m."senderId" != cp."userId"
         AND m."seq" > cp."lastReadSeq"
+        AND (m."isDeleted" IS FALSE OR m."isDeleted" IS NULL)
         AND NOT (${userId} = ANY(COALESCE(m."deletedForUserIds", ARRAY[]::TEXT[])))
       WHERE cp."userId" = ${userId}
       GROUP BY cp."conversationId"
@@ -1098,19 +1223,45 @@ export const getUserConversations = async (userId: string, query?: string) => {
     logger.warn('Failed to calculate unread counts with raw query:', rawErr);
   }
 
-  return conversations.map((conv) => ({
-    ...conv,
-    lastMessage: conv.messages[0] || null,
-    unreadCount: unreadMap.get(conv.id) || 0,
-    pinnedCount: conv._count?.messages || 0
-  }));
+  return conversations.map((conv) => {
+    const rawLastMsg = conv.messages[0] || null;
+    let lastMessage: any = rawLastMsg;
+    if (rawLastMsg) {
+      const otherParticipants = (conv.participants || []).filter((p: any) => p.userId !== rawLastMsg.senderId);
+      const isRead = otherParticipants.length > 0 && otherParticipants.every((p: any) => (p.lastReadSeq ?? 0) >= rawLastMsg.seq);
+      const readBy = otherParticipants.filter((p: any) => (p.lastReadSeq ?? 0) >= rawLastMsg.seq).map((p: any) => p.userId);
+      lastMessage = {
+        ...rawLastMsg,
+        isRead,
+        read: isRead,
+        status: isRead ? 'read' : 'sent',
+        readBy,
+        readCount: readBy.length
+      };
+    }
+    const myParticipant = (conv.participants || []).find((p: any) => p.userId === userId);
+    const isMuted = myParticipant?.isMuted ?? false;
+    const mutedUntil = myParticipant?.mutedUntil ?? null;
+    const isBlocked = ((conv as any).blockedByUserIds || []).includes(userId) || (myParticipant?.isBlocked ?? false);
+    const isBlockedByOther = ((conv as any).blockedByUserIds || []).some((id: string) => id !== userId);
 
+    return {
+      ...conv,
+      isMuted,
+      mutedUntil,
+      isBlocked,
+      isBlockedByOther,
+      lastMessage,
+      unreadCount: unreadMap.get(conv.id) || 0,
+      pinnedCount: conv._count?.messages || 0
+    };
+  });
 };
 
 export const markMessageAsRead = async (
   userId: string,
   conversationId: string,
-  messageId: string
+  messageId?: string
 ) => {
   return await prisma.$transaction(async (tx) => {
     let targetConversationId = conversationId;
@@ -1151,15 +1302,39 @@ export const markMessageAsRead = async (
       throw new ApiError(403, 'User is not a participant in this conversation');
     }
 
-    const targetMessage = await tx.message.findFirst({
-      where: {
-        id: messageId,
-        conversationId: targetConversationId
+    let targetMessage = null;
+    if (messageId) {
+      targetMessage = await tx.message.findFirst({
+        where: {
+          id: messageId,
+          conversationId: targetConversationId
+        }
+      });
+      if (!targetMessage) {
+        throw new ApiError(404, 'Message not found in this conversation');
       }
-    });
+    } else {
+      targetMessage = await tx.message.findFirst({
+        where: {
+          conversationId: targetConversationId
+        },
+        orderBy: [{ seq: 'desc' }, { id: 'desc' }]
+      });
+    }
 
     if (!targetMessage) {
-      throw new ApiError(404, 'Message not found in this conversation');
+      return {
+        conversationId: targetConversationId,
+        userId,
+        lastReadSeq: participant.lastReadSeq,
+        lastReadMessageId: participant.lastReadMessageId,
+        messageId: participant.lastReadMessageId || '',
+        updated: false,
+        participants: await tx.conversationParticipant.findMany({
+          where: { conversationId: targetConversationId },
+          select: { userId: true }
+        })
+      };
     }
 
     const updateResult = await tx.conversationParticipant.updateMany({
@@ -1169,7 +1344,7 @@ export const markMessageAsRead = async (
         lastReadSeq: { lt: targetMessage.seq }
       },
       data: {
-        lastReadMessageId: messageId,
+        lastReadMessageId: targetMessage.id,
         lastReadSeq: targetMessage.seq
       }
     });
@@ -1177,7 +1352,7 @@ export const markMessageAsRead = async (
     const isUpdated = updateResult.count > 0;
 
     const currentParticipant = isUpdated
-      ? { lastReadSeq: targetMessage.seq, lastReadMessageId: messageId }
+      ? { lastReadSeq: targetMessage.seq, lastReadMessageId: targetMessage.id }
       : (await tx.conversationParticipant.findUnique({
         where: {
           conversationId_userId: {
@@ -2650,6 +2825,359 @@ export const votePoll = async (
     messageId: poll.message.id,
     pollId: poll.id,
     poll: formattedForRequester
+  };
+};
+
+export const clearConversationMessages = async (userId: string, conversationIdOrUserId: string) => {
+  const resolvedId = await resolveConversationId(userId, conversationIdOrUserId);
+  if (!resolvedId) {
+    throw new ApiError(404, 'Conversation not found or user is not a participant');
+  }
+
+  await prisma.$executeRaw`
+    UPDATE "Message"
+    SET "deletedForUserIds" = array_append("deletedForUserIds", ${userId})
+    WHERE "conversationId" = ${resolvedId}
+      AND NOT (${userId} = ANY(COALESCE("deletedForUserIds", ARRAY[]::TEXT[])))
+  `;
+
+  const latestMsg = await prisma.message.findFirst({
+    where: { conversationId: resolvedId },
+    orderBy: [{ seq: 'desc' }, { id: 'desc' }],
+    select: { id: true, seq: true }
+  });
+
+  if (latestMsg) {
+    await prisma.conversationParticipant.updateMany({
+      where: { conversationId: resolvedId, userId },
+      data: {
+        lastReadSeq: latestMsg.seq,
+        lastReadMessageId: latestMsg.id
+      }
+    });
+  }
+
+  try {
+    const io = getIO();
+    io.to(`user:${userId}`).emit(CHAT_EVENTS.CONVERSATION_CLEARED, {
+      conversationId: resolvedId,
+      userId
+    });
+  } catch (ioErr: any) {
+    logger.warn('Failed to emit conversation:cleared event', ioErr);
+  }
+
+  return {
+    success: true,
+    conversationId: resolvedId,
+    cleared: true
+  };
+};
+
+export const deleteConversationForUser = async (userId: string, conversationIdOrUserId: string) => {
+  const resolvedId = await resolveConversationId(userId, conversationIdOrUserId);
+  if (!resolvedId) {
+    throw new ApiError(404, 'Conversation not found or user is not a participant');
+  }
+
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: resolvedId },
+    include: {
+      participants: true
+    }
+  });
+
+  if (!conversation) {
+    throw new ApiError(404, 'Conversation not found');
+  }
+
+  await prisma.$executeRaw`
+    UPDATE "Message"
+    SET "deletedForUserIds" = array_append("deletedForUserIds", ${userId})
+    WHERE "conversationId" = ${resolvedId}
+      AND NOT (${userId} = ANY(COALESCE("deletedForUserIds", ARRAY[]::TEXT[])))
+  `;
+
+  if (conversation.type === 'direct') {
+    await prisma.conversationParticipant.deleteMany({
+      where: {
+        conversationId: resolvedId,
+        userId
+      }
+    });
+
+    const remaining = await prisma.conversationParticipant.findMany({
+      where: { conversationId: resolvedId },
+      select: { userId: true }
+    });
+
+    if (remaining.length === 0) {
+      await prisma.conversation.delete({
+        where: { id: resolvedId }
+      });
+    }
+  } else {
+    try {
+      await removeGroupParticipant(userId, resolvedId, userId);
+    } catch (removeErr: any) {
+      await prisma.conversationParticipant.deleteMany({
+        where: {
+          conversationId: resolvedId,
+          userId
+        }
+      });
+    }
+  }
+
+  try {
+    const io = getIO();
+    io.in(`user:${userId}`).socketsLeave(`conversation:${resolvedId}`);
+    io.to(`user:${userId}`).emit(CHAT_EVENTS.CONVERSATION_DELETED, {
+      conversationId: resolvedId,
+      userId
+    });
+  } catch (ioErr: any) {
+    logger.warn('Failed to emit conversation:deleted event', ioErr);
+  }
+
+  return {
+    success: true,
+    conversationId: resolvedId,
+    deleted: true
+  };
+};
+
+export const muteConversation = async (
+  userId: string,
+  conversationIdOrUserId: string,
+  mutedUntil?: Date | string | null
+) => {
+  const resolvedId = await resolveConversationId(userId, conversationIdOrUserId);
+  if (!resolvedId) {
+    throw new ApiError(404, 'Conversation not found or user is not a participant');
+  }
+
+  const parsedMutedUntil = mutedUntil ? new Date(mutedUntil) : null;
+
+  await prisma.conversationParticipant.updateMany({
+    where: {
+      conversationId: resolvedId,
+      userId
+    },
+    data: {
+      isMuted: true,
+      mutedUntil: parsedMutedUntil
+    }
+  });
+
+  try {
+    const io = getIO();
+    io.to(`user:${userId}`).emit(CHAT_EVENTS.CONVERSATION_MUTED, {
+      conversationId: resolvedId,
+      userId,
+      isMuted: true,
+      mutedUntil: parsedMutedUntil
+    });
+  } catch (ioErr: any) {
+    logger.warn('Failed to emit conversation:muted event', ioErr);
+  }
+
+  return {
+    success: true,
+    conversationId: resolvedId,
+    userId,
+    isMuted: true,
+    mutedUntil: parsedMutedUntil
+  };
+};
+
+export const unmuteConversation = async (
+  userId: string,
+  conversationIdOrUserId: string
+) => {
+  const resolvedId = await resolveConversationId(userId, conversationIdOrUserId);
+  if (!resolvedId) {
+    throw new ApiError(404, 'Conversation not found or user is not a participant');
+  }
+
+  await prisma.conversationParticipant.updateMany({
+    where: {
+      conversationId: resolvedId,
+      userId
+    },
+    data: {
+      isMuted: false,
+      mutedUntil: null
+    }
+  });
+
+  try {
+    const io = getIO();
+    io.to(`user:${userId}`).emit(CHAT_EVENTS.CONVERSATION_UNMUTED, {
+      conversationId: resolvedId,
+      userId,
+      isMuted: false,
+      mutedUntil: null
+    });
+  } catch (ioErr: any) {
+    logger.warn('Failed to emit conversation:unmuted event', ioErr);
+  }
+
+  return {
+    success: true,
+    conversationId: resolvedId,
+    userId,
+    isMuted: false,
+    mutedUntil: null
+  };
+};
+
+export const blockConversation = async (
+  userId: string,
+  conversationIdOrUserId: string
+) => {
+  const resolvedId = await resolveConversationId(userId, conversationIdOrUserId);
+  if (!resolvedId) {
+    throw new ApiError(404, 'Conversation not found or user is not a participant');
+  }
+
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: resolvedId },
+    include: {
+      participants: true
+    }
+  });
+
+  if (!conversation) {
+    throw new ApiError(404, 'Conversation not found');
+  }
+
+  const currentBlocked = (conversation as any).blockedByUserIds || [];
+  const updatedBlocked = Array.from(new Set([...currentBlocked, userId]));
+
+  await prisma.conversation.update({
+    where: { id: resolvedId },
+    data: {
+      blockedByUserIds: updatedBlocked
+    }
+  });
+
+  await prisma.conversationParticipant.updateMany({
+    where: {
+      conversationId: resolvedId,
+      userId
+    },
+    data: {
+      isBlocked: true
+    }
+  });
+
+  if (conversation.type === 'direct') {
+    const otherParticipant = conversation.participants.find((p) => p.userId !== userId);
+    if (otherParticipant) {
+      await (prisma as any).blockedUser.upsert({
+        where: {
+          userId_blockedUserId: {
+            userId,
+            blockedUserId: otherParticipant.userId
+          }
+        },
+        create: {
+          userId,
+          blockedUserId: otherParticipant.userId
+        },
+        update: {}
+      });
+    }
+  }
+
+  try {
+    const io = getIO();
+    io.to(`user:${userId}`).emit(CHAT_EVENTS.CONVERSATION_BLOCKED, {
+      conversationId: resolvedId,
+      userId,
+      isBlocked: true
+    });
+  } catch (ioErr: any) {
+    logger.warn('Failed to emit conversation:blocked event', ioErr);
+  }
+
+  return {
+    success: true,
+    conversationId: resolvedId,
+    userId,
+    isBlocked: true
+  };
+};
+
+export const unblockConversation = async (
+  userId: string,
+  conversationIdOrUserId: string
+) => {
+  const resolvedId = await resolveConversationId(userId, conversationIdOrUserId);
+  if (!resolvedId) {
+    throw new ApiError(404, 'Conversation not found or user is not a participant');
+  }
+
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: resolvedId },
+    include: {
+      participants: true
+    }
+  });
+
+  if (!conversation) {
+    throw new ApiError(404, 'Conversation not found');
+  }
+
+  const currentBlocked = (conversation as any).blockedByUserIds || [];
+  const updatedBlocked = currentBlocked.filter((id: string) => id !== userId);
+
+  await prisma.conversation.update({
+    where: { id: resolvedId },
+    data: {
+      blockedByUserIds: updatedBlocked
+    }
+  });
+
+  await prisma.conversationParticipant.updateMany({
+    where: {
+      conversationId: resolvedId,
+      userId
+    },
+    data: {
+      isBlocked: false
+    }
+  });
+
+  if (conversation.type === 'direct') {
+    const otherParticipant = conversation.participants.find((p) => p.userId !== userId);
+    if (otherParticipant) {
+      await (prisma as any).blockedUser.deleteMany({
+        where: {
+          userId,
+          blockedUserId: otherParticipant.userId
+        }
+      });
+    }
+  }
+
+  try {
+    const io = getIO();
+    io.to(`user:${userId}`).emit(CHAT_EVENTS.CONVERSATION_UNBLOCKED, {
+      conversationId: resolvedId,
+      userId,
+      isBlocked: false
+    });
+  } catch (ioErr: any) {
+    logger.warn('Failed to emit conversation:unblocked event', ioErr);
+  }
+
+  return {
+    success: true,
+    conversationId: resolvedId,
+    userId,
+    isBlocked: false
   };
 };
 

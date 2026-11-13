@@ -1,4 +1,4 @@
-﻿# Logs
+# Logs
 logs
 *.log
 npm-debug.log*
@@ -155,5 +155,9 @@ vite.config.ts.timestamp-*
 
 test-client.html
 jira-creds.txt
+firebase-service-account.json
+*service-account*.json
+serviceAccountKey.json
 
 docs/
+

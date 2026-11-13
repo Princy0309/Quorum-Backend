@@ -1,6 +1,7 @@
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import { getIO } from '../sockets/socketServer.js';
+import { sendPushToOfflineUsers } from './notificationService.js';
 import logger from '../utils/logger.js';
 import type { CreateEventInput, UpdateEventInput } from '../types/index.js';
 import { scheduleEventReminder, cancelEventReminder } from '../queues/reminderQueue.js';
@@ -92,21 +93,48 @@ export const createCalendarEvent = async (userId: string, input: CreateEventInpu
                         const msg = socketErr instanceof Error ? socketErr.message : String(socketErr);
                         logger.warn(`Could not emit real-time socket notification for event ${event.id} to user ${attendee.id}: ${msg}`);
                     }
+
+                    sendPushToOfflineUsers(
+                        [attendee.id],
+                        `Meeting Scheduled: ${input.title}`,
+                        `${creator.name} scheduled a meeting for ${start.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })} at ${start.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`,
+                        {
+                            type: 'EVENT_REMINDER',
+                            meetingLink: input.meetingLink || '',
+                            title: input.title,
+                            eventId: event.id,
+                            startDate: start.toISOString()
+                        },
+                        {
+                            channelId: 'quorum_chat_messages',
+                            sound: 'default',
+                            tag: event.id
+                        }
+                    ).catch((pushErr) => {
+                        logger.warn('Failed to send calendar attendee push notification', pushErr);
+                    });
                 } catch (notifErr: unknown) {
                     const msg = notifErr instanceof Error ? notifErr.message : String(notifErr);
                     logger.warn(`Could not create notification in DB for event ${event.id} and attendee ${attendee.id}: ${msg}`);
                 }
+            }
+
+            const creatorEmail = creator.email?.toLowerCase();
+            const formattedDate = `${start.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })} at ${start.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`;
+            const uniqueEmails = Array.from(new Set(input.attendeeEmails.map((e) => e.trim().toLowerCase())));
+
+            for (const email of uniqueEmails) {
+                if (creatorEmail && email === creatorEmail) continue;
                 addMeetingInviteEmailToQueue({
-                    email: attendee.email,
+                    email,
                     inviterName: creator.name,
                     meetingTitle: input.title,
-                    formattedDate: `${start.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })} at ${start.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`,
+                    formattedDate,
                     meetingLink: input.meetingLink,
                 }).catch((mailErr: unknown) => {
                     const msg = mailErr instanceof Error ? mailErr.message : String(mailErr);
-                    logger.warn(`Could not queue meeting invite email for ${attendee.email}: ${msg}`);
+                    logger.warn(`Could not queue meeting invite email for ${email}: ${msg}`);
                 });
-
             }
         } catch (lookupErr: unknown) {
             const msg = lookupErr instanceof Error ? lookupErr.message : String(lookupErr);
@@ -360,6 +388,26 @@ export const updateCalendarEvent = async (userId: string, eventId: string, input
                         const msg = socketErr instanceof Error ? socketErr.message : String(socketErr);
                         logger.warn(`Could not emit update socket notification for event ${updated.id} to user ${attendee.id}: ${msg}`);
                     }
+
+                    sendPushToOfflineUsers(
+                        [attendee.id],
+                        `Meeting Updated: ${updated.title}`,
+                        `${creator?.name || 'Organizer'} updated the meeting scheduled for ${effectiveStart.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })} at ${effectiveStart.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`,
+                        {
+                            type: 'EVENT_REMINDER',
+                            meetingLink: updated.meetingLink || '',
+                            title: updated.title,
+                            eventId: updated.id,
+                            startDate: effectiveStart.toISOString()
+                        },
+                        {
+                            channelId: 'quorum_chat_messages',
+                            sound: 'default',
+                            tag: updated.id
+                        }
+                    ).catch((pushErr) => {
+                        logger.warn('Failed to send meeting update push notification', pushErr);
+                    });
                 } catch (notifErr: unknown) {
                     const msg = notifErr instanceof Error ? notifErr.message : String(notifErr);
                     logger.warn(`Could not create update notification for event ${updated.id} and attendee ${attendee.id}: ${msg}`);

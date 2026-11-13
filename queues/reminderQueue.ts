@@ -2,6 +2,7 @@ import { Queue, Worker, Job } from 'bullmq';
 import { Redis as IORedis } from 'ioredis';
 import prisma from '../config/prisma.js';
 import { getIO } from '../sockets/socketServer.js';
+import { sendPushToOfflineUsers } from '../services/notificationService.js';
 import logger from '../utils/logger.js';
 
 export const reminderRedisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
@@ -25,6 +26,7 @@ export const scheduleEventReminder = async (event: {
   reminderMinutes: number;
 }) => {
   if (!event.hasReminder) {
+    await cancelEventReminder(event.id);
     return;
   }
 
@@ -32,6 +34,7 @@ export const scheduleEventReminder = async (event: {
   const delay = reminderTime.getTime() - Date.now();
 
   if (delay <= 0) {
+    await cancelEventReminder(event.id);
     return;
   }
 
@@ -77,46 +80,86 @@ export const reminderWorker = new Worker(
   async (job: Job<ReminderJobData>) => {
     const { eventId, userId } = job.data;
 
-    const event = await prisma.calendarEvent.findUnique({
-      where: { id: eventId },
-    });
+    const notif = await prisma.$transaction(async (tx) => {
+      const currentEvent = await tx.calendarEvent.findUnique({
+        where: { id: eventId },
+      });
 
-    if (!event || !event.hasReminder || event.isNotified) {
-      return;
-    }
+      if (!currentEvent || !currentEvent.hasReminder || currentEvent.isNotified) {
+        return null;
+      }
 
-    await prisma.calendarEvent.update({
-      where: { id: eventId },
-      data: { isNotified: true },
-    });
+      if (currentEvent.eventType === 'MEETING' && currentEvent.meetingLink) {
+        const match = currentEvent.meetingLink.match(/\/meet\/([^\/?#]+)/);
+        if (match && match[1]) {
+          const meeting = await tx.meeting.findFirst({
+            where: { code: match[1] },
+            select: { status: true }
+          });
+          if (meeting && (meeting.status === 'ENDED' || meeting.status === 'CANCELLED')) {
+            await tx.calendarEvent.update({
+              where: { id: eventId },
+              data: { hasReminder: false, isNotified: true }
+            });
+            return null;
+          }
+        }
+      }
 
-    try {
-      const notif = await prisma.notification.create({
+      await tx.calendarEvent.update({
+        where: { id: eventId },
+        data: { isNotified: true },
+      });
+
+      return await tx.notification.create({
         data: {
           recipientId: userId,
           actorId: userId,
           type: 'EVENT_REMINDER',
-          title: `Upcoming Event: ${event.title}`,
-          body: `Starts in ${event.reminderMinutes} minutes`,
+          title: `Upcoming Event: ${currentEvent.title}`,
+          body: `Starts in ${currentEvent.reminderMinutes} minutes`,
           data: {
-            eventId: event.id,
-            meetingLink: event.meetingLink || '',
-            startDate: event.startDate.toISOString(),
+            eventId: currentEvent.id,
+            meetingLink: currentEvent.meetingLink || '',
+            startDate: currentEvent.startDate.toISOString(),
           },
         },
       });
+    });
 
-      try {
-        const io = getIO();
-        io.to(`user:${userId}`).emit('notification:new', notif);
-      } catch (socketErr: unknown) {
-        const msg = socketErr instanceof Error ? socketErr.message : String(socketErr);
-        logger.warn(`Could not emit real-time reminder socket event: ${msg}`);
-      }
-    } catch (notifErr: unknown) {
-      const msg = notifErr instanceof Error ? notifErr.message : String(notifErr);
-      logger.warn(`Could not persist reminder notification for event ${eventId}: ${msg}`);
+    if (!notif) {
+      return;
     }
+
+    const notifData = (notif.data as any) || {};
+
+    try {
+      const io = getIO();
+      io.to(`user:${userId}`).emit('notification:new', notif);
+    } catch (socketErr: unknown) {
+      const msg = socketErr instanceof Error ? socketErr.message : String(socketErr);
+      logger.warn(`Could not emit real-time reminder socket event: ${msg}`);
+    }
+
+    sendPushToOfflineUsers(
+      [userId],
+      notif.title,
+      notif.body,
+      {
+        type: 'EVENT_REMINDER',
+        meetingLink: notifData.meetingLink || '',
+        title: notif.title,
+        eventId: eventId,
+        startDate: notifData.startDate || ''
+      },
+      {
+        channelId: 'quorum_chat_messages',
+        sound: 'default',
+        tag: eventId
+      }
+    ).catch((pushErr) => {
+      logger.warn('Failed to send reminder push notification', pushErr);
+    });
   },
   {
     connection: reminderRedisConnection,

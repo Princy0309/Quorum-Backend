@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { getApps, initializeApp, cert } from 'firebase-admin/app';
 import { getMessaging, Messaging } from 'firebase-admin/messaging';
 import logger from '../utils/logger.js';
@@ -9,15 +11,48 @@ const initFirebaseAdmin = () => {
     return getMessaging();
   }
 
+  let serviceAccount: any = null;
   const serviceAccountRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (!serviceAccountRaw) {
+  if (serviceAccountRaw) {
+    try {
+      serviceAccount = JSON.parse(serviceAccountRaw);
+    } catch {
+      if (fs.existsSync(serviceAccountRaw)) {
+        try {
+          serviceAccount = JSON.parse(fs.readFileSync(serviceAccountRaw, 'utf-8'));
+        } catch {}
+      }
+    }
+  }
+
+  if (!serviceAccount) {
+    const candidatePaths = [
+      path.resolve(process.cwd(), 'firebase-service-account.json'),
+      path.resolve(process.cwd(), 'serviceAccountKey.json'),
+      path.resolve(process.cwd(), 'config', 'firebase-service-account.json')
+    ];
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        try {
+          serviceAccount = JSON.parse(fs.readFileSync(p, 'utf-8'));
+          break;
+        } catch {}
+      }
+    }
+  }
+
+  if (!serviceAccount) {
     return null;
   }
 
+  if (serviceAccount.private_key && typeof serviceAccount.private_key === 'string') {
+    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+  }
+
   try {
-    const serviceAccount = JSON.parse(serviceAccountRaw);
     initializeApp({
-      credential: cert(serviceAccount)
+      credential: cert(serviceAccount),
+      projectId: serviceAccount.project_id || process.env.FIREBASE_PROJECT_ID || 'quorum-4d54b'
     });
     return getMessaging();
   } catch (err: any) {
@@ -37,6 +72,7 @@ export interface PushPayload {
   sound?: string;
   channelId?: string;
   conversationId?: string;
+  tag?: string;
   category?: string;
   imageUrl?: string;
   priority?: 'high' | 'normal';
@@ -73,6 +109,23 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
     const batchTokens = tokens.slice(i, i + FCM_BATCH_SIZE);
 
     try {
+      const formattedData: Record<string, string> = {};
+      if (data && typeof data === 'object') {
+        for (const [key, value] of Object.entries(data)) {
+          if (value !== undefined && value !== null) {
+            formattedData[key] = typeof value === 'string' ? value : (typeof value === 'object' ? JSON.stringify(value) : String(value));
+          }
+        }
+      }
+      if (!formattedData.payload && (formattedData.conversationId || formattedData.messageId)) {
+        formattedData.payload = JSON.stringify({
+          conversationId: formattedData.conversationId || '',
+          messageId: formattedData.messageId || ''
+        });
+      }
+
+      const stableTag = payload.tag || payload.conversationId || formattedData.conversationId || formattedData.meetingCode || formattedData.meetingId || formattedData.notificationId || formattedData.id || 'quorum_notification';
+
       const messagePayload: any = {
         tokens: batchTokens,
         notification: {
@@ -80,19 +133,19 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
           body,
           ...(payload.imageUrl ? { imageUrl: payload.imageUrl } : {})
         },
-        data: data || {},
+        data: formattedData,
         android: {
-          priority: payload.priority || 'high',
-          collapseKey: payload.conversationId,
+          priority: 'high',
+          collapseKey: stableTag,
           notification: {
             title,
             body,
-            channelId: payload.channelId || 'quorum_chat_messages',
+            channelId: 'quorum_chat_messages',
             sound: payload.sound || 'default',
             defaultSound: true,
             defaultVibrateTimings: true,
-            priority: 'max',
-            tag: payload.conversationId,
+            priority: 'high',
+            tag: stableTag,
             clickAction: 'FLUTTER_NOTIFICATION_CLICK',
             ...(payload.badge !== undefined ? { notificationCount: payload.badge } : {}),
             ...(payload.imageUrl ? { imageUrl: payload.imageUrl } : {})
@@ -111,8 +164,8 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
               },
               sound: payload.sound || 'default',
               badge: payload.badge !== undefined ? payload.badge : 1,
-              ...(payload.conversationId ? { 'thread-id': payload.conversationId } : {}),
-              category: payload.category || 'MESSAGE_REPLY',
+              'thread-id': stableTag,
+              category: payload.category || (formattedData.type === 'CHAT_MESSAGE' ? 'MESSAGE_REPLY' : undefined),
               mutableContent: true
             }
           }
@@ -123,8 +176,8 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
             body,
             icon: payload.imageUrl || '/icon-192.png',
             badge: '/badge-72.png',
-            tag: payload.conversationId,
-            data: data || {}
+            tag: stableTag,
+            data: formattedData
           }
         }
       };

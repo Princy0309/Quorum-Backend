@@ -3,6 +3,11 @@ import { ApiError } from '../utils/ApiError.js';
 import logger from '../utils/logger.js';
 import { getIO } from '../sockets/socketServer.js';
 import { generateRawCompletion } from './aiService.js';
+import { DocumentScopeType, OrgRole } from '@prisma/client';
+import { canUserJoinMeeting } from './meetingPermissionService.js';
+import { meetingRooms } from '../sockets/meetingPresence.js';
+import { verifyProjectMemberAccess } from './projectService.js';
+import { getWhiteboardById } from './whiteboardService.js';
 import {
   CreateDocumentInput,
   UpdateDocumentInput,
@@ -129,9 +134,17 @@ export const checkDocumentAccess = async (
     return { doc, permission: 'EDIT' as const, isCreator: true };
   }
 
+  const permissionRank: Record<'VIEW' | 'COMMENT' | 'EDIT', number> = {
+    VIEW: 1,
+    COMMENT: 2,
+    EDIT: 3,
+  };
+
   const directCollab = doc.collaborators.find((c) => c.userId === userId);
   if (directCollab) {
-    if (requiredPermission === 'EDIT' && directCollab.permission !== 'EDIT') {
+    const userRank = permissionRank[directCollab.permission as 'VIEW' | 'COMMENT' | 'EDIT'] || 0;
+    const requiredRank = permissionRank[requiredPermission];
+    if (userRank < requiredRank) {
       throw new ApiError(403, 'You only have view/comment permissions for this document');
     }
     return { doc, permission: directCollab.permission, isCreator: false };
@@ -146,18 +159,87 @@ export const checkDocumentAccess = async (
     });
 
     if (meeting) {
-      const isLinkedToMeeting = doc.meetings.some((dm) => dm.meetingId === meeting.id) || doc.meetingId === meeting.id;
-      if (isLinkedToMeeting) {
-        const effectivePerm = (doc as any).defaultPermission || 'EDIT';
-        if (requiredPermission === 'EDIT' && effectivePerm !== 'EDIT') {
-          throw new ApiError(403, 'You only have view permissions for this document');
+      const isDocPersonal = !doc.organizationId && doc.scopeType === 'PERSONAL' && !doc.teamId && !doc.projectId;
+      const isMeetingPersonal = !meeting.organizationId;
+      const isOrgCompatible = isDocPersonal ? isMeetingPersonal : (!!doc.organizationId && doc.organizationId === meeting.organizationId);
+      if (isOrgCompatible) {
+        const isLinkedToMeeting = doc.meetings.some((dm) => dm.meetingId === meeting.id) || doc.meetingId === meeting.id;
+        if (isLinkedToMeeting) {
+          const permCheck = await canUserJoinMeeting(userId, meeting.code);
+          if (permCheck.allowed) {
+            const roomState = meetingRooms.get(meeting.code.toLowerCase());
+            const isParticipant =
+              meeting.hostId === userId ||
+              (Array.isArray(meeting.admitted) && meeting.admitted.includes(userId)) ||
+              (roomState && roomState.participants.has(userId));
+
+            if (isParticipant) {
+              const effectivePerm = (doc as any).defaultPermission || 'EDIT';
+              if (requiredPermission === 'EDIT' && effectivePerm !== 'EDIT') {
+                throw new ApiError(403, 'You only have view permissions for this document');
+              }
+              return { doc, permission: effectivePerm as 'VIEW' | 'COMMENT' | 'EDIT', isCreator: false, isMeetingParticipant: true };
+            }
+          }
         }
-        return { doc, permission: effectivePerm as 'VIEW' | 'COMMENT' | 'EDIT', isCreator: false, isMeetingParticipant: true };
       }
     }
   }
 
-  if (doc.organizationId) {
+  if (doc.projectId || doc.scopeType === 'PROJECT') {
+    if (doc.projectId) {
+      const projectMember = await prisma.projectMember.findFirst({
+        where: {
+          projectId: doc.projectId,
+          userId
+        }
+      });
+      if (projectMember) {
+        const effectivePerm = (doc as any).defaultPermission || 'EDIT';
+        if (requiredPermission === 'EDIT' && effectivePerm !== 'EDIT') {
+          throw new ApiError(403, 'You only have view permissions for this document');
+        }
+        return { doc, permission: effectivePerm as 'VIEW' | 'COMMENT' | 'EDIT', isCreator: false };
+      }
+    }
+  }
+
+  if (doc.teamId || doc.scopeType === 'TEAM') {
+    if (doc.teamId) {
+      const isTeamMember = await prisma.teamMember.findFirst({
+        where: { teamId: doc.teamId, userId }
+      });
+      if (isTeamMember) {
+        const effectivePerm = (doc as any).defaultPermission || 'EDIT';
+        if (requiredPermission === 'EDIT' && effectivePerm !== 'EDIT') {
+          throw new ApiError(403, 'You only have view permissions for this document');
+        }
+        return { doc, permission: effectivePerm as 'VIEW' | 'COMMENT' | 'EDIT', isCreator: false };
+      }
+    }
+  }
+
+  if (doc.organizationId && (doc.scopeType === 'TEAM' || doc.scopeType === 'PROJECT')) {
+    const org = await prisma.organization.findUnique({
+      where: { id: doc.organizationId },
+      select: { ownerId: true }
+    });
+    if (org?.ownerId === userId) {
+      return { doc, permission: 'EDIT' as const, isCreator: false };
+    }
+
+    const orgMembership = await prisma.organizationMember.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId: doc.organizationId,
+          userId
+        }
+      }
+    });
+    if (orgMembership && orgMembership.role === 'ORG_ADMIN') {
+      return { doc, permission: 'EDIT' as const, isCreator: false };
+    }
+  } else if (doc.scopeType === 'ORGANIZATION' && doc.organizationId) {
     const orgMembership = await prisma.organizationMember.findUnique({
       where: {
         organizationId_userId: {
@@ -168,42 +250,6 @@ export const checkDocumentAccess = async (
     });
 
     if (orgMembership) {
-      const effectivePerm = (doc as any).defaultPermission || 'EDIT';
-      if (requiredPermission === 'EDIT' && effectivePerm !== 'EDIT') {
-        throw new ApiError(403, 'You only have view permissions for this document');
-      }
-      return { doc, permission: effectivePerm as 'VIEW' | 'COMMENT' | 'EDIT', isCreator: false };
-    }
-  }
-
-  if (doc.projectId) {
-    const projectMember = await prisma.projectMember.findFirst({
-      where: {
-        projectId: doc.projectId,
-        userId
-      }
-    });
-
-    if (projectMember) {
-      const effectivePerm = (doc as any).defaultPermission || 'EDIT';
-      if (requiredPermission === 'EDIT' && effectivePerm !== 'EDIT') {
-        throw new ApiError(403, 'You only have view permissions for this document');
-      }
-      return { doc, permission: effectivePerm as 'VIEW' | 'COMMENT' | 'EDIT', isCreator: false };
-    }
-  }
-
-  if (doc.teamId) {
-    const teamMember = await prisma.teamMember.findUnique({
-      where: {
-        teamId_userId: {
-          teamId: doc.teamId,
-          userId
-        }
-      }
-    });
-
-    if (teamMember) {
       const effectivePerm = (doc as any).defaultPermission || 'EDIT';
       if (requiredPermission === 'EDIT' && effectivePerm !== 'EDIT') {
         throw new ApiError(403, 'You only have view permissions for this document');
@@ -224,14 +270,148 @@ export const createDocument = async (userId: string, input: CreateDocumentInput)
     content: [{ type: 'paragraph' }]
   };
 
-  let resolvedMeetingId = input.meetingId;
-  if (!resolvedMeetingId && input.organizationId) {
+  if (!input.scopeType || input.scopeType === 'PERSONAL') {
+    if (input.organizationId) {
+      throw new ApiError(400, 'Personal documents cannot be linked to an organization');
+    }
+    if (input.teamId) {
+      throw new ApiError(400, 'Personal documents cannot be linked to a team');
+    }
+    if (input.projectId) {
+      throw new ApiError(400, 'Personal documents cannot be linked to a project');
+    }
+    input.organizationId = undefined;
+    input.teamId = undefined;
+    input.projectId = undefined;
+  }
+  if (input.scopeType === 'ORGANIZATION' && !input.organizationId) {
+    throw new ApiError(400, 'organizationId is required for ORGANIZATION scope');
+  }
+  if (input.scopeType === 'TEAM' && !input.teamId) {
+    throw new ApiError(400, 'teamId is required for TEAM scope');
+  }
+  if (input.scopeType === 'PROJECT' && !input.projectId) {
+    throw new ApiError(400, 'projectId is required for PROJECT scope');
+  }
+
+  if (input.organizationId) {
     const org = await prisma.organization.findUnique({
-      where: { id: input.organizationId }
+      where: { id: input.organizationId },
+      select: { id: true, ownerId: true }
     });
     if (!org) {
       throw new ApiError(404, 'Organization not found');
     }
+    const isOwner = org.ownerId === userId;
+    const orgMember = await prisma.organizationMember.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId: input.organizationId,
+          userId
+        }
+      }
+    });
+    if (!isOwner && !orgMember) {
+      throw new ApiError(403, 'You do not belong to this organization');
+    }
+  }
+
+  if (input.teamId) {
+    const team = await prisma.team.findUnique({
+      where: { id: input.teamId },
+      select: {
+        id: true,
+        organizationId: true,
+        organization: { select: { ownerId: true } }
+      }
+    });
+    if (!team) {
+      throw new ApiError(404, 'Team not found');
+    }
+    if (input.organizationId && team.organizationId !== input.organizationId) {
+      throw new ApiError(400, 'Team does not belong to the specified organization');
+    }
+    if (team.organizationId && !input.organizationId) {
+      input.organizationId = team.organizationId;
+    }
+    const isOwner = team.organization?.ownerId === userId;
+    const teamMember = await prisma.teamMember.findFirst({
+      where: { teamId: input.teamId, userId }
+    });
+    const orgAdmin = await prisma.organizationMember.findFirst({
+      where: {
+        organizationId: team.organizationId,
+        userId,
+        role: OrgRole.ORG_ADMIN
+      }
+    });
+    if (!isOwner && !teamMember && !orgAdmin) {
+      throw new ApiError(403, 'You do not belong to this team');
+    }
+  }
+
+  if (input.projectId) {
+    await verifyProjectMemberAccess(userId, input.projectId);
+    const project = await prisma.project.findUnique({
+      where: { id: input.projectId },
+      select: { organizationId: true }
+    });
+    if (project?.organizationId) {
+      if (input.organizationId && input.organizationId !== project.organizationId) {
+        throw new ApiError(400, 'Project does not belong to the specified organization');
+      }
+      if (!input.organizationId) {
+        input.organizationId = project.organizationId;
+      }
+    }
+  }
+
+  if (input.whiteboardId) {
+    const whiteboard = await getWhiteboardById(userId, input.whiteboardId);
+    if (input.scopeType === 'PERSONAL' && whiteboard?.organizationId) {
+      throw new ApiError(400, 'Whiteboard and document must belong to the same organization');
+    }
+    if (input.organizationId && whiteboard?.organizationId && input.organizationId !== whiteboard.organizationId) {
+      throw new ApiError(400, 'Whiteboard and document must belong to the same organization');
+    }
+    if (!input.organizationId && whiteboard?.organizationId && input.scopeType !== 'PERSONAL') {
+      input.organizationId = whiteboard.organizationId;
+    }
+  }
+
+  let resolvedMeetingId = input.meetingId;
+  if (resolvedMeetingId) {
+    const meeting = await prisma.meeting.findFirst({
+      where: {
+        OR: [
+          { id: resolvedMeetingId },
+          { code: resolvedMeetingId }
+        ]
+      },
+      select: { id: true, code: true, hostId: true, organizationId: true }
+    });
+    if (!meeting) {
+      throw new ApiError(404, 'Meeting not found');
+    }
+    const docOrg = input.organizationId || null;
+    const meetingOrg = meeting.organizationId || null;
+    if (input.scopeType === 'PERSONAL' && meetingOrg) {
+      throw new ApiError(400, 'Meeting and document must belong to the same organization');
+    }
+    if (docOrg && docOrg !== meetingOrg) {
+      throw new ApiError(400, 'Meeting and document must belong to the same organization');
+    }
+    if (!docOrg && meetingOrg) {
+      if (input.scopeType === 'PERSONAL') {
+        throw new ApiError(400, 'Meeting and document must belong to the same organization');
+      }
+      input.organizationId = meetingOrg;
+    }
+    const permCheck = await canUserJoinMeeting(userId, meeting.code);
+    if (!permCheck.allowed) {
+      throw new ApiError(permCheck.statusCode || 403, permCheck.reason || 'You are not authorized to attach documents to this meeting');
+    }
+    resolvedMeetingId = meeting.id;
   }
 
   const initialCollaboratorsData = [
@@ -250,9 +430,9 @@ export const createDocument = async (userId: string, input: CreateDocumentInput)
         scopeType: input.scopeType ?? 'PERSONAL',
         defaultPermission: input.defaultPermission ?? 'EDIT',
         createdById: userId,
-        organizationId: input.organizationId,
-        teamId: input.teamId,
-        projectId: input.projectId,
+        organizationId: (!input.scopeType || input.scopeType === 'PERSONAL') ? null : input.organizationId,
+        teamId: (!input.scopeType || input.scopeType === 'PERSONAL') ? null : input.teamId,
+        projectId: (!input.scopeType || input.scopeType === 'PERSONAL') ? null : input.projectId,
         meetingId: resolvedMeetingId,
         collaborators: {
           create: initialCollaboratorsData
@@ -358,14 +538,75 @@ export const listUserDocuments = async (
 ) => {
   await ensureDocumentSchema();
 
+  if (query?.projectId) {
+    await verifyProjectMemberAccess(userId, query.projectId);
+  }
+
+  const userProjectMemberships = await prisma.projectMember.findMany({
+    where: { userId },
+    select: { projectId: true }
+  });
+  const userProjectIds = userProjectMemberships.map((pm) => pm.projectId);
+
+  const userTeamMemberships = await prisma.teamMember.findMany({
+    where: { userId },
+    select: { teamId: true }
+  });
+  const userTeamIds = userTeamMemberships.map((tm) => tm.teamId);
+
+  let isOrgAdminOrOwner = false;
+  if (query?.organizationId) {
+    const org = await prisma.organization.findUnique({
+      where: { id: query.organizationId },
+      select: { ownerId: true }
+    });
+    if (org?.ownerId === userId) {
+      isOrgAdminOrOwner = true;
+    } else {
+      const orgMember = await prisma.organizationMember.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId: query.organizationId,
+            userId
+          }
+        },
+        select: { role: true }
+      });
+      if (orgMember?.role === 'ORG_ADMIN') {
+        isOrgAdminOrOwner = true;
+      }
+    }
+  }
+
+  const orgCondition = query?.organizationId
+    ? (isOrgAdminOrOwner
+        ? { organizationId: query.organizationId, scopeType: { not: DocumentScopeType.PERSONAL } }
+        : {
+            organizationId: query.organizationId,
+            scopeType: DocumentScopeType.ORGANIZATION,
+            teamId: null,
+            projectId: null
+          })
+    : null;
+
+  const teamCondition = userTeamIds.length > 0
+    ? (query?.organizationId
+        ? { organizationId: query.organizationId, teamId: { in: userTeamIds } }
+        : { teamId: { in: userTeamIds } })
+    : null;
+
+  const projectCondition = query?.projectId
+    ? { projectId: query.projectId }
+    : (userProjectIds.length > 0 ? { projectId: { in: userProjectIds } } : null);
+
   const whereClause: any = {
     isArchived: false,
     OR: [
       { createdById: userId },
       { collaborators: { some: { userId } } },
-      ...(query?.organizationId ? [{ organizationId: query.organizationId }] : []),
-      ...(query?.projectId ? [{ projectId: query.projectId }] : []),
-      ...(query?.teamId ? [{ teamId: query.teamId }] : [])
+      ...(orgCondition ? [orgCondition] : []),
+      ...(teamCondition ? [teamCondition] : []),
+      ...(projectCondition ? [projectCondition] : [])
     ]
   };
 
@@ -543,17 +784,30 @@ export const removeCollaborator = async (userId: string, documentId: string, tar
 };
 
 export const openDocumentInMeeting = async (userId: string, documentId: string, meetingCode: string) => {
-  const { doc } = await checkDocumentAccess(userId, documentId, 'VIEW');
+  const { doc } = await checkDocumentAccess(userId, documentId, 'EDIT');
 
   const meeting = await prisma.meeting.findFirst({
     where: {
       code: meetingCode.trim().toLowerCase(),
       status: { in: ['ACTIVE', 'SCHEDULED'] }
-    }
+    },
+    select: { id: true, code: true, organizationId: true }
   });
 
   if (!meeting) {
     throw new ApiError(404, 'Active meeting not found');
+  }
+
+  const isDocPersonal = !doc.organizationId && doc.scopeType === 'PERSONAL' && !doc.teamId && !doc.projectId;
+  const isMeetingPersonal = !meeting.organizationId;
+  const isScopeCompatible = isDocPersonal ? isMeetingPersonal : (!!doc.organizationId && doc.organizationId === meeting.organizationId);
+  if (!isScopeCompatible) {
+    throw new ApiError(400, 'Meeting and document must belong to the same organization');
+  }
+
+  const permCheck = await canUserJoinMeeting(userId, meeting.code);
+  if (!permCheck.allowed) {
+    throw new ApiError(permCheck.statusCode || 403, permCheck.reason || 'You are not authorized to join this meeting');
   }
 
   await prisma.documentMeeting.upsert({
@@ -590,14 +844,14 @@ export const openDocumentInMeeting = async (userId: string, documentId: string, 
 };
 
 export const embedWhiteboardInDocument = async (userId: string, documentId: string, whiteboardId: string) => {
-  await checkDocumentAccess(userId, documentId, 'EDIT');
+  const { doc } = await checkDocumentAccess(userId, documentId, 'EDIT');
 
-  const whiteboard = await prisma.whiteboard.findUnique({
-    where: { id: whiteboardId }
-  });
-
-  if (!whiteboard) {
-    throw new ApiError(404, 'Whiteboard not found');
+  const whiteboard = await getWhiteboardById(userId, whiteboardId);
+  const isDocPersonal = !doc.organizationId && doc.scopeType === 'PERSONAL' && !doc.teamId && !doc.projectId;
+  const isWbPersonal = !whiteboard?.organizationId;
+  const isWbScopeCompatible = isDocPersonal ? isWbPersonal : (!!doc.organizationId && doc.organizationId === whiteboard?.organizationId);
+  if (!isWbScopeCompatible) {
+    throw new ApiError(400, 'Whiteboard and document must belong to the same organization');
   }
 
   const link = await prisma.documentWhiteboard.upsert({

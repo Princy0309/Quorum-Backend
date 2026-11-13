@@ -117,18 +117,23 @@ export const notificationWorker = new Worker(
 
     if (allowPush) {
       try {
-        const stringifiedData: Record<string, string> = { type };
+        const resolvedType = (data as any)?.type || type;
+        const stringifiedData: Record<string, string> = { type: resolvedType };
         if (data && typeof data === 'object') {
           for (const [key, value] of Object.entries(data)) {
-            stringifiedData[key] = typeof value === 'string' ? value : JSON.stringify(value);
+            if (value !== undefined && value !== null) {
+              stringifiedData[key] = typeof value === 'string' ? value : (typeof value === 'object' ? JSON.stringify(value) : String(value));
+            }
           }
         }
 
         const conversationId = (data as any)?.conversationId || (data as any)?.communityId;
+        const tag = conversationId || (data as any)?.meetingCode || (data as any)?.meetingId || (notification ? notification.id : undefined);
         await sendPushNotification([recipientId], title, body, {
           payloadData: stringifiedData,
           conversationId,
-          channelId: type.includes('CHAT') ? 'quorum_chat_messages' : 'quorum_general_notifications',
+          tag,
+          channelId: 'quorum_chat_messages',
           category: type.includes('CHAT') ? 'MESSAGE_REPLY' : undefined,
           sound: 'default'
         });

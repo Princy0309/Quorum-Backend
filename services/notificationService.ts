@@ -1,7 +1,9 @@
 import prisma from '../config/prisma.js';
 import redis from '../config/redis.js';
+import { NotificationType } from '@prisma/client';
 import { sendFCMNotification, PushPayload } from '../config/firebase.js';
 import { getMultipleUserPresences } from './presenceService.js';
+import { getIO } from '../sockets/socketServer.js';
 import logger from '../utils/logger.js';
 import type {
   GetNotificationsOptions,
@@ -106,15 +108,19 @@ export const registerDeviceToken = async (userId: string, token: string, platfor
   });
 };
 
-export const unregisterDeviceToken = async (userId: string, token: string) => {
+export const unregisterDeviceToken = async (userId: string | undefined, token: string) => {
   return await prisma.deviceToken.deleteMany({
-    where: { userId, token },
+    where: {
+      token,
+      ...(userId ? { userId } : {})
+    },
   });
 };
 
 export interface SendPushOptions {
   payloadData?: Record<string, string>;
   conversationId?: string;
+  tag?: string;
   badge?: number;
   sound?: string;
   channelId?: string;
@@ -134,21 +140,25 @@ export const sendPushNotification = async (
   let targetUserIds = recipientUserIds;
 
   if (!options?.forcePush) {
-    const presenceMap = await getMultipleUserPresences(recipientUserIds);
-    const appStateKeys = recipientUserIds.map((id) => `user_app_state:${id}`);
-    const appStates = await redis.mget(...appStateKeys);
+    try {
+      const presenceMap = await getMultipleUserPresences(recipientUserIds);
+      const appStateKeys = recipientUserIds.map((id) => `user_app_state:${id}`);
+      const appStates = await redis.mget(...appStateKeys);
 
-    targetUserIds = recipientUserIds.filter((id, idx) => {
-      const userPresence = presenceMap.get(id);
-     
-      if (userPresence?.status === 'DO_NOT_DISTURB') {
-        return false;
-      }
-      const isOnline = !!userPresence?.isOnline;
-      const appState = appStates[idx];
-      return !isOnline || appState === 'background';
-    });
-
+      targetUserIds = recipientUserIds.filter((id, idx) => {
+        const userPresence = presenceMap.get(id);
+       
+        if (userPresence?.status === 'DO_NOT_DISTURB') {
+          return false;
+        }
+        const isOnline = !!userPresence?.isOnline;
+        const appState = appStates[idx];
+        return !isOnline || appState === 'background' || !appState;
+      });
+    } catch (presenceErr: any) {
+      logger.warn('Failed to check presence for push targets, falling back to all targets', presenceErr);
+      targetUserIds = recipientUserIds;
+    }
   }
 
   if (targetUserIds.length === 0) return;
@@ -176,6 +186,7 @@ export const sendPushNotification = async (
     sound: options?.sound || 'default',
     channelId: options?.channelId || 'quorum_chat_messages',
     conversationId: options?.conversationId,
+    tag: options?.tag,
     category: options?.category || 'MESSAGE_REPLY',
     imageUrl: options?.imageUrl,
     priority: 'high',
@@ -233,4 +244,101 @@ export const upsertUserPreference = async (
       email: email ?? true,
     },
   });
+};
+
+export interface InAppNotificationInput {
+  recipientId: string;
+  type: NotificationType | string;
+  title: string;
+  body: string;
+  actorId?: string | null;
+  data?: Record<string, any>;
+  skipPush?: boolean;
+}
+
+export const createAndDispatchNotification = async (input: InAppNotificationInput) => {
+  const { recipientId, actorId, type, title, body, data, skipPush } = input;
+
+  if (actorId && actorId === recipientId) {
+    return null;
+  }
+
+  const resolvedNotificationType: NotificationType = Object.values(NotificationType).includes(type as NotificationType)
+    ? (type as NotificationType)
+    : (type === 'CHAT_MESSAGE' ? NotificationType.DIRECT_MESSAGE : NotificationType.SYSTEM);
+
+  const preference = await prisma.userNotificationPreference.findUnique({
+    where: {
+      userId_notificationType: {
+        userId: recipientId,
+        notificationType: resolvedNotificationType,
+      },
+    },
+  });
+
+  const allowInApp = preference ? preference.inApp : true;
+  const allowPush = preference ? preference.push : true;
+
+  let notification = null;
+  if (allowInApp) {
+    try {
+      notification = await prisma.notification.create({
+        data: {
+          recipientId,
+          actorId: actorId || null,
+          type: resolvedNotificationType,
+          title,
+          body,
+          data: data ? data : undefined,
+        },
+        include: {
+          actor: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+            },
+          },
+        },
+      });
+
+      try {
+        const io = getIO();
+        io.to(`user:${recipientId}`).emit('notification:new', notification);
+      } catch (socketErr: any) {
+        logger.debug('Socket broadcast skipped in createAndDispatchNotification', socketErr);
+      }
+    } catch (dbErr: any) {
+      logger.error('Failed to create in-app notification', dbErr);
+    }
+  }
+
+  if (allowPush && !skipPush) {
+    try {
+      const stringifiedData: Record<string, string> = { type };
+      if (data && typeof data === 'object') {
+        for (const [key, value] of Object.entries(data)) {
+          if (value !== undefined && value !== null) {
+            stringifiedData[key] = typeof value === 'string' ? value : (typeof value === 'object' ? JSON.stringify(value) : String(value));
+          }
+        }
+      }
+
+      const conversationId = stringifiedData.conversationId || stringifiedData.communityId;
+      const tag = conversationId || stringifiedData.meetingCode || stringifiedData.meetingId || stringifiedData.eventId || (notification ? notification.id : undefined);
+
+      await sendPushNotification([recipientId], title, body, {
+        payloadData: stringifiedData,
+        conversationId,
+        tag,
+        channelId: 'quorum_chat_messages',
+        category: type.includes('CHAT') ? 'MESSAGE_REPLY' : undefined,
+        sound: 'default',
+      });
+    } catch (pushErr: any) {
+      logger.warn('Failed to dispatch push notification for in-app notification', pushErr);
+    }
+  }
+
+  return notification;
 };
