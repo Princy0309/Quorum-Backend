@@ -20,6 +20,7 @@ import {
   getOrganizationInvites,
   revokeOrganizationInvite,
   deleteOrganization,
+  transferOrganizationOwnership,
 } from '../services/organizationService.js';
 
 export const createOrganizationController = asyncHandler(
@@ -28,7 +29,7 @@ export const createOrganizationController = asyncHandler(
       return next(new ApiError(401, 'Unauthorized, login required'));
     }
 
-    const { name, description, logo, email, industry, teamSize} = req.body;
+    const { name, description, logo, email, industry, teamSize } = req.body;
 
     const organization = await createOrganization(req.user.id, {
       name,
@@ -370,6 +371,39 @@ export const leaveOrganizationController = asyncHandler(
   }
 );
 
+export const transferOrganizationOwnershipController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id) {
+      return next(new ApiError(401, 'Unauthorized, login required'));
+    }
+
+    const rawOrgId = req.params.orgId || req.params.id;
+    const orgId = typeof rawOrgId === 'string' ? rawOrgId.trim() : undefined;
+
+    if (!orgId) {
+      return next(new ApiError(400, 'Valid Organization ID is required'));
+    }
+
+    const { newOwnerId, leaveOrganization } = req.body;
+
+    if (!newOwnerId) {
+      return next(new ApiError(400, 'newOwnerId is required in request body'));
+    }
+
+    const result = await transferOrganizationOwnership(
+      orgId,
+      req.user.id,
+      String(newOwnerId).trim(),
+      Boolean(leaveOrganization)
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  }
+);
+
 export const createInviteController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user?.id) {
@@ -487,6 +521,4 @@ export const revokeInviteController = asyncHandler(
     });
   }
 );
-
-
 

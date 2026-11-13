@@ -12,6 +12,7 @@ import {
   updateMemberRoleController,
   removeMemberController,
   leaveOrganizationController,
+  transferOrganizationOwnershipController,
   createInviteController,
   getInvitePreviewController,
   acceptInviteController,
@@ -203,6 +204,13 @@ router.delete(
   authMiddleware,
   requireOrgMember([OrgRole.ORG_ADMIN]),
   removeMemberController
+);
+
+router.post(
+  '/:id/transfer-ownership',
+  authMiddleware,
+  requireOrgMember(),
+  transferOrganizationOwnershipController
 );
 
 router.post('/:id/leave', authMiddleware, requireOrgMember(), leaveOrganizationController);

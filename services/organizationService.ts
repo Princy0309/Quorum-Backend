@@ -365,9 +365,9 @@ export const getOrganizationMembers = async (
   orgId: string,
   options?: { search?: string; role?: OrgRole }
 ) => {
-  const org = await prisma.organization.findUnique({
+   const org = await prisma.organization.findUnique({
     where: { id: orgId },
-    select: { id: true },
+    select: { id: true, ownerId: true },
   });
 
   if (!org) {
@@ -409,13 +409,17 @@ export const getOrganizationMembers = async (
     },
   });
 
-  return members.map((m) => ({
-    id: m.id,
-    userId: m.userId,
-    role: m.role,
-    joinedAt: m.joinedAt,
-    user: m.user,
-  }));
+  return members.map((m) => {
+    const isOwner = org.ownerId === m.userId;
+    return {
+      id: m.id,
+      userId: m.userId,
+      role: isOwner ? 'OWNER' : m.role,
+      isOwner,
+      joinedAt: m.joinedAt,
+      user: m.user,
+    };
+  });
 };
 
 export const updateMemberRole = async (
@@ -587,6 +591,120 @@ export const leaveOrganization = async (orgId: string, userId: string) => {
   });
 
   return { message: 'Left organization successfully' };
+};
+
+export const transferOrganizationOwnership = async (
+  orgId: string,
+  callerUserId: string,
+  newOwnerId: string,
+  leaveOrganization: boolean = false
+) => {
+  if (callerUserId === newOwnerId) {
+    throw new ApiError(400, 'You cannot transfer ownership to yourself');
+  }
+
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { id: true, name: true, ownerId: true },
+  });
+
+  if (!org) {
+    throw new ApiError(404, 'Organization not found');
+  }
+
+  if (org.ownerId !== callerUserId) {
+    throw new ApiError(403, 'Only the organization owner can transfer ownership');
+  }
+
+  const newOwnerMember = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId: newOwnerId,
+      },
+    },
+    include: {
+      user: { select: { id: true, name: true } },
+    },
+  });
+
+  if (!newOwnerMember) {
+    throw new ApiError(400, 'Successor must be an active member of this organization');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // 1. Update Primary Owner on Organization
+    await tx.organization.update({
+      where: { id: orgId },
+      data: { ownerId: newOwnerId },
+    });
+
+    // 2. Ensure new owner has ORG_ADMIN role
+    await tx.organizationMember.update({
+      where: { id: newOwnerMember.id },
+      data: { role: OrgRole.ORG_ADMIN },
+    });
+
+    // 3. If previous owner requested to leave the organization immediately
+    if (leaveOrganization) {
+      await tx.organizationMember.delete({
+        where: {
+          organizationId_userId: {
+            organizationId: orgId,
+            userId: callerUserId,
+          },
+        },
+      });
+
+      // Remove from all teams in this organization
+      const orgTeams = await tx.team.findMany({
+        where: { organizationId: orgId },
+        select: { id: true },
+      });
+      const teamIds = orgTeams.map((t) => t.id);
+
+      if (teamIds.length > 0) {
+        await tx.teamMember.deleteMany({
+          where: { teamId: { in: teamIds }, userId: callerUserId },
+        });
+
+        const teamConvs = await tx.conversation.findMany({
+          where: { teamId: { in: teamIds } },
+          select: { id: true },
+        });
+        const convIds = teamConvs.map((c) => c.id);
+
+        if (convIds.length > 0) {
+          await tx.conversationParticipant.deleteMany({
+            where: { conversationId: { in: convIds }, userId: callerUserId },
+          });
+        }
+      }
+    }
+  });
+
+  // 4. Send push notification to new owner
+  try {
+    await queueNotification({
+      recipientId: newOwnerId,
+      actorId: callerUserId,
+      type: 'ORG_INVITE',
+      title: 'Organization Ownership Transferred',
+      body: `You are now the Primary Owner of organization "${org.name}"`,
+      data: {
+        organizationId: orgId,
+        role: OrgRole.ORG_ADMIN,
+      },
+    });
+  } catch (err: any) {
+    logger.warn('[OrgOwnershipTransfer] Notification failed', { error: err.message });
+  }
+
+  return {
+    message: leaveOrganization
+      ? `Ownership transferred to ${newOwnerMember.user.name}. You have left the organization.`
+      : `Ownership transferred to ${newOwnerMember.user.name}. You are now an Organization Admin.`,
+  };
 };
 
 

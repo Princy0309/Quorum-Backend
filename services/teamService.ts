@@ -486,7 +486,7 @@ export const getTeamMembers = async (
 ) => {
   const team = await prisma.team.findFirst({
     where: { id: teamId, organizationId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, organization: { select: { ownerId: true } }, },
   });
 
   if (!team) {
@@ -538,11 +538,13 @@ export const getTeamMembers = async (
     totalCount: members.length,
     members: members.map((m) => {
       const orgMember = m.user.memberships[0];
+      const isOrgOwner = team.organization?.ownerId === m.userId;
       return {
         id: m.id,
         userId: m.userId,
         teamRole: m.role,
-        organizationRole: orgMember?.role || OrgRole.MEMBER,
+        organizationRole: isOrgOwner ? 'OWNER' : (orgMember?.role || OrgRole.MEMBER),
+        isOrgOwner,
         joinedAt: m.joinedAt,
         user: {
           id: m.user.id,
