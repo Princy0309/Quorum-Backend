@@ -18,6 +18,7 @@ import {
     getUserPresence,
     setUserCustomStatus,
     clearUserCustomStatus,
+    setMeetingPresence,
     PresenceStatus,
 } from './presenceService.js';
 
@@ -290,6 +291,11 @@ export async function changeOfficeZone(
         }
     }
 
+    // If moving out of War Room back to open workspace, clear meeting presence
+    if (previousZoneId === 'WAR_ROOM' && newZoneId !== 'WAR_ROOM') {
+        await setMeetingPresence(userId, false).catch(() => { });
+    }
+
     // Bidirectional Presence synchronization:
     if (newZoneId === 'FOCUS_POD') {
         await setUserCustomStatus(userId, {
@@ -398,7 +404,7 @@ export async function leaveOffice(teamId: string, userId: string): Promise<void>
 
 
 
- //6. Start an active video meeting in the War Room with host role tracking
+//6. Start an active video meeting in the War Room with host role tracking
 
 export async function startWarRoomMeeting(
     teamId: string,
@@ -468,8 +474,8 @@ export async function startWarRoomMeeting(
 }
 
 
- // 7. End active video meeting in War Room with strict RBAC protection
- 
+// 7. End active video meeting in War Room with strict RBAC protection
+
 export async function endWarRoomMeeting(
     teamId: string,
     callerUserId: string
@@ -556,6 +562,11 @@ export async function endWarRoomMeeting(
         redis.del(meetingKey),
         redis.del(meetingMetaKey),
     ]);
+
+    await setMeetingPresence(callerUserId, false).catch(() => { });
+    if (meta?.startedById && meta.startedById !== callerUserId) {
+        await setMeetingPresence(meta.startedById, false).catch(() => { });
+    }
 
     // Mark meeting as ENDED in database if present
     await prisma.meeting.updateMany({
