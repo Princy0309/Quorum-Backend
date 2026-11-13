@@ -598,6 +598,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
         continue;
       }
       results = results.filter((r) => r.step !== step.step);
+      let createdTeamId: string | undefined;
 
       try {
         const resolvedParams = resolveVariables(step.params, variables);
@@ -672,10 +673,12 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
 
           const hasMemberFailures = failedMemberIds.length > 0;
           if (hasMemberFailures) {
-            try {
-              await prisma.team.delete({ where: { id: team.id } });
-            } catch (delErr) {
-              logger.warn(`Failed to clean up team ${team.id} after member failure`, delErr);
+            if (createdTeamId) {
+              try {
+                await prisma.team.delete({ where: { id: createdTeamId } });
+              } catch (delErr) {
+                logger.warn(`Failed to clean up team ${createdTeamId} after member failure`, delErr);
+              }
             }
             variables.delete(`$step${step.step}.teamId`);
             variables.delete(`$step${step.step}.id`);
@@ -1069,16 +1072,13 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
         }
       } catch (err: any) {
         logger.error(`Error executing workflow step ${step.step} (${step.action})`, err);
-        if (step.action === 'CREATE_TEAM') {
-          const failedTeamId = variables.get(`$step${step.step}.teamId`);
-          if (failedTeamId) {
-            try {
-              await prisma.team.delete({ where: { id: failedTeamId } });
-            } catch {}
-            variables.delete(`$step${step.step}.teamId`);
-            variables.delete(`$step${step.step}.id`);
-            variables.delete(`$step${step.step}.name`);
-          }
+        if (step.action === 'CREATE_TEAM' && createdTeamId) {
+          try {
+            await prisma.team.delete({ where: { id: createdTeamId } });
+          } catch {}
+          variables.delete(`$step${step.step}.teamId`);
+          variables.delete(`$step${step.step}.id`);
+          variables.delete(`$step${step.step}.name`);
         }
         results.push({
           step: step.step,

@@ -386,6 +386,13 @@ export const getConversationById = async (userId: string, conversationIdOrUserId
         }
       },
       messages: {
+        where: {
+          NOT: {
+            deletedForUserIds: {
+              has: userId
+            }
+          }
+        },
         take: 1,
         orderBy: [{ seq: 'desc' }, { id: 'desc' }]
       }
@@ -941,6 +948,11 @@ export const getConversationMessages = async (
       messages = await prisma.message.findMany({
         where: {
           conversationId: targetConversationId,
+          NOT: {
+            deletedForUserIds: {
+              has: userId
+            }
+          },
           ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
         },
         take: queryLimit + 1,
@@ -1141,6 +1153,13 @@ export const getUserConversations = async (userId: string, query?: string) => {
             }
           },
           messages: {
+            where: {
+              NOT: {
+                deletedForUserIds: {
+                  has: userId
+                }
+              }
+            },
             take: 1,
             orderBy: [{ id: 'desc' }],
             include: {

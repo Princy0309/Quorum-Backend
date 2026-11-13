@@ -246,7 +246,7 @@ export const checkDocumentAccess = async (
         return { doc, permission: 'EDIT' as const, isCreator: false };
       }
     }
-  } else if (doc.organizationId) {
+  } else if (doc.scopeType === 'ORGANIZATION' && doc.organizationId) {
     const orgMembership = await prisma.organizationMember.findUnique({
       where: {
         organizationId_userId: {
@@ -273,6 +273,20 @@ export const createDocument = async (userId: string, input: CreateDocumentInput)
     content: [{ type: 'paragraph' }]
   };
 
+  if (!input.scopeType || input.scopeType === 'PERSONAL') {
+    if (input.organizationId) {
+      throw new ApiError(400, 'Personal documents cannot be linked to an organization');
+    }
+    if (input.teamId) {
+      throw new ApiError(400, 'Personal documents cannot be linked to a team');
+    }
+    if (input.projectId) {
+      throw new ApiError(400, 'Personal documents cannot be linked to a project');
+    }
+    input.organizationId = undefined;
+    input.teamId = undefined;
+    input.projectId = undefined;
+  }
   if (input.scopeType === 'ORGANIZATION' && !input.organizationId) {
     throw new ApiError(400, 'organizationId is required for ORGANIZATION scope');
   }
@@ -410,9 +424,9 @@ export const createDocument = async (userId: string, input: CreateDocumentInput)
         content: initialContent,
         scopeType: input.scopeType ?? 'PERSONAL',
         createdById: userId,
-        organizationId: input.organizationId,
-        teamId: input.teamId,
-        projectId: input.projectId,
+        organizationId: (!input.scopeType || input.scopeType === 'PERSONAL') ? null : input.organizationId,
+        teamId: (!input.scopeType || input.scopeType === 'PERSONAL') ? null : input.teamId,
+        projectId: (!input.scopeType || input.scopeType === 'PERSONAL') ? null : input.projectId,
         meetingId: resolvedMeetingId,
         collaborators: {
           create: {
@@ -563,10 +577,10 @@ export const listUserDocuments = async (
 
   const orgCondition = query?.organizationId
     ? (isOrgAdminOrOwner
-        ? { organizationId: query.organizationId }
+        ? { organizationId: query.organizationId, scopeType: { not: DocumentScopeType.PERSONAL } }
         : {
             organizationId: query.organizationId,
-            scopeType: { notIn: [DocumentScopeType.TEAM, DocumentScopeType.PROJECT] },
+            scopeType: DocumentScopeType.ORGANIZATION,
             teamId: null,
             projectId: null
           })
