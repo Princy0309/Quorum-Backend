@@ -1195,6 +1195,7 @@ export const getUserConversations = async (userId: string, query?: string) => {
       LEFT JOIN "Message" m ON m."conversationId" = cp."conversationId"
         AND m."senderId" != cp."userId"
         AND m."seq" > cp."lastReadSeq"
+        AND (m."isDeleted" IS FALSE OR m."isDeleted" IS NULL)
         AND NOT (${userId} = ANY(COALESCE(m."deletedForUserIds", ARRAY[]::TEXT[])))
       WHERE cp."userId" = ${userId}
       GROUP BY cp."conversationId"
@@ -1293,9 +1294,10 @@ export const markMessageAsRead = async (
           conversationId: targetConversationId
         }
       });
-    }
-
-    if (!targetMessage) {
+      if (!targetMessage) {
+        throw new ApiError(404, 'Message not found in this conversation');
+      }
+    } else {
       targetMessage = await tx.message.findFirst({
         where: {
           conversationId: targetConversationId

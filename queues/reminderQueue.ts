@@ -26,6 +26,7 @@ export const scheduleEventReminder = async (event: {
   reminderMinutes: number;
 }) => {
   if (!event.hasReminder) {
+    await cancelEventReminder(event.id);
     return;
   }
 
@@ -33,6 +34,7 @@ export const scheduleEventReminder = async (event: {
   const delay = reminderTime.getTime() - Date.now();
 
   if (delay <= 0) {
+    await cancelEventReminder(event.id);
     return;
   }
 
@@ -78,33 +80,41 @@ export const reminderWorker = new Worker(
   async (job: Job<ReminderJobData>) => {
     const { eventId, userId } = job.data;
 
-    const event = await prisma.calendarEvent.findUnique({
-      where: { id: eventId },
+    const notif = await prisma.$transaction(async (tx) => {
+      const currentEvent = await tx.calendarEvent.findUnique({
+        where: { id: eventId },
+      });
+
+      if (!currentEvent || !currentEvent.hasReminder || currentEvent.isNotified) {
+        return null;
+      }
+
+      await tx.calendarEvent.update({
+        where: { id: eventId },
+        data: { isNotified: true },
+      });
+
+      return await tx.notification.create({
+        data: {
+          recipientId: userId,
+          actorId: userId,
+          type: 'EVENT_REMINDER',
+          title: `Upcoming Event: ${currentEvent.title}`,
+          body: `Starts in ${currentEvent.reminderMinutes} minutes`,
+          data: {
+            eventId: currentEvent.id,
+            meetingLink: currentEvent.meetingLink || '',
+            startDate: currentEvent.startDate.toISOString(),
+          },
+        },
+      });
     });
 
-    if (!event || !event.hasReminder || event.isNotified) {
+    if (!notif) {
       return;
     }
 
-    const notif = await prisma.notification.create({
-      data: {
-        recipientId: userId,
-        actorId: userId,
-        type: 'EVENT_REMINDER',
-        title: `Upcoming Event: ${event.title}`,
-        body: `Starts in ${event.reminderMinutes} minutes`,
-        data: {
-          eventId: event.id,
-          meetingLink: event.meetingLink || '',
-          startDate: event.startDate.toISOString(),
-        },
-      },
-    });
-
-    await prisma.calendarEvent.update({
-      where: { id: eventId },
-      data: { isNotified: true },
-    });
+    const notifData = (notif.data as any) || {};
 
     try {
       const io = getIO();
@@ -116,19 +126,19 @@ export const reminderWorker = new Worker(
 
     sendPushToOfflineUsers(
       [userId],
-      `Upcoming Event: ${event.title}`,
-      `Starts in ${event.reminderMinutes} minutes`,
+      notif.title,
+      notif.body,
       {
         type: 'EVENT_REMINDER',
-        meetingLink: event.meetingLink || '',
-        title: event.title,
-        eventId: event.id,
-        startDate: event.startDate.toISOString()
+        meetingLink: notifData.meetingLink || '',
+        title: notif.title,
+        eventId: eventId,
+        startDate: notifData.startDate || ''
       },
       {
         channelId: 'quorum_chat_messages',
         sound: 'default',
-        tag: event.id
+        tag: eventId
       }
     ).catch((pushErr) => {
       logger.warn('Failed to send reminder push notification', pushErr);

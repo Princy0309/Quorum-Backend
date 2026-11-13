@@ -117,17 +117,24 @@ export const createCalendarEvent = async (userId: string, input: CreateEventInpu
                     const msg = notifErr instanceof Error ? notifErr.message : String(notifErr);
                     logger.warn(`Could not create notification in DB for event ${event.id} and attendee ${attendee.id}: ${msg}`);
                 }
+            }
+
+            const creatorEmail = creator.email?.toLowerCase();
+            const formattedDate = `${start.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })} at ${start.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`;
+            const uniqueEmails = Array.from(new Set(input.attendeeEmails.map((e) => e.trim().toLowerCase())));
+
+            for (const email of uniqueEmails) {
+                if (creatorEmail && email === creatorEmail) continue;
                 addMeetingInviteEmailToQueue({
-                    email: attendee.email,
+                    email,
                     inviterName: creator.name,
                     meetingTitle: input.title,
-                    formattedDate: `${start.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })} at ${start.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`,
+                    formattedDate,
                     meetingLink: input.meetingLink,
                 }).catch((mailErr: unknown) => {
                     const msg = mailErr instanceof Error ? mailErr.message : String(mailErr);
-                    logger.warn(`Could not queue meeting invite email for ${attendee.email}: ${msg}`);
+                    logger.warn(`Could not queue meeting invite email for ${email}: ${msg}`);
                 });
-
             }
         } catch (lookupErr: unknown) {
             const msg = lookupErr instanceof Error ? lookupErr.message : String(lookupErr);
