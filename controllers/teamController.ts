@@ -11,7 +11,7 @@ import {
   removeTeamMember,
   getTeamMembers,
   leaveTeam,
-  transferLeaveAndLeaveTeam,
+  transferLeadAndLeaveTeam,
 } from '../services/teamService.js';
 import prisma from '../config/prisma.js';
 import { queueNotification } from '../queues/notificationQueue.js';

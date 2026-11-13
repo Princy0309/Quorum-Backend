@@ -35,7 +35,7 @@ const startMeetingSchema = z.object({
 });
 
 const claimDeskSchema = z.object({
-  deskId: z.string().min(1, 'deskId is required (e.g. "desk_1")'),
+  deskId: z.union([z.string(), z.number()]),
 });
 
 export const getOfficeFloorController = asyncHandler(async (req: Request, res: Response) => {
@@ -266,7 +266,7 @@ export const endWarRoomMeetingController = asyncHandler(async (req: Request, res
     throw new ApiError(400, 'Team ID is required');
   }
 
-  const result = await endWarRoomMeeting(teamId);
+  const result = await endWarRoomMeeting(teamId, userId);
 
   // Broadcast that the War Room meeting has concluded
   try {

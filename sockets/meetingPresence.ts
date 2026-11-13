@@ -7,6 +7,8 @@ import { peerConnectionManager } from '../sfu/peerConnection.js';
 import { endMeeting } from '../services/meetingService.js';
 import logger from '../utils/logger.js';
 import { canUserJoinMeeting } from '../services/meetingPermissionService.js';
+import { setMeetingPresence, setScreenSharePresence } from '../services/presenceService.js';
+import { broadcastUserPresenceUpdate } from './handlers/presenceHandler.js';
 
 export interface Participant {
     userId: string;
@@ -393,7 +395,7 @@ export const handleLeaveMeeting = (
     ack?.({ success: true });
 };
 
-export const closeMeetingRoom = (meetingCode: string) => {
+export const closeMeetingRoom = async (meetingCode: string) => {
     const normalizedCode = normalizeMeetingCode(meetingCode);
     if (!normalizedCode) return;
 
@@ -406,6 +408,21 @@ export const closeMeetingRoom = (meetingCode: string) => {
                 message: 'The meeting has been ended by the host',
             });
             io.in(normalizedCode).socketsLeave(normalizedCode);
+
+            const allParticipantIds = new Set<string>(roomState.participants.keys());
+            if (roomState.hostUserId) {
+                allParticipantIds.add(roomState.hostUserId);
+            }
+
+            for (const pUserId of allParticipantIds) {
+                try {
+                    await setScreenSharePresence(pUserId, false);
+                    const updatedPresence = await setMeetingPresence(pUserId, false);
+                    await broadcastUserPresenceUpdate(io, pUserId, updatedPresence);
+                } catch (err: any) {
+                    logger.warn(`Failed to clear presence for user ${pUserId} on meeting end: ${err.message}`);
+                }
+            }
         } catch (err) {
             console.error('Failed to broadcast meeting ended event:', err);
         }
@@ -422,7 +439,6 @@ export const closeMeetingRoom = (meetingCode: string) => {
         }
     }
 };
-
 export const handleEndMeeting = async (
     io: Server,
     socket: Socket,

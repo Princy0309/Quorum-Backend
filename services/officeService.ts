@@ -2,6 +2,8 @@ import redis from '../config/redis.js';
 import prisma from '../config/prisma.js';
 import logger from '../utils/logger.js';
 import { ApiError } from '../utils/ApiError.js';
+import { OrgRole, MeetingStatus } from '@prisma/client';
+import { closeMeetingRoom } from '../sockets/meetingPresence.js';
 import {
     OfficeZoneId,
     OfficeDesk,
@@ -16,22 +18,24 @@ import {
     getUserPresence,
     setUserCustomStatus,
     clearUserCustomStatus,
+    setMeetingPresence,
+    getMultipleUserPresences,
     PresenceStatus,
 } from './presenceService.js';
 
 const TOTAL_OFFICE_DESKS = 12;
 const KNOCK_COOLDOWN_SECONDS = 30;
 
-// Redis Key Generators
+/// Redis Key Generators
+const getOfficeMeetingKey = (teamId: string) => `office:team:${teamId}:meeting`;
+const getOfficeMeetingMetaKey = (teamId: string) => `office:team:${teamId}:meeting:meta`;
 const getOfficeMembersKey = (teamId: string) => `office:team:${teamId}:members`;
 const getOfficeDesksKey = (teamId: string) => `office:team:${teamId}:desks`;
-const getOfficeMeetingKey = (teamId: string) => `office:team:${teamId}:meeting`;
 const getKnockCooldownKey = (senderId: string, targetId: string) =>
     `office:knock:${senderId}:${targetId}`;
 
-/**
- * Generate a clean default 12-desk layout
- */
+//Generate a clean default 12-desk layout
+
 function createDefaultDesks(): OfficeDesk[] {
     return Array.from({ length: TOTAL_OFFICE_DESKS }, (_, i) => ({
         deskId: `desk_${i + 1}`,
@@ -59,7 +63,16 @@ function mapPresenceToDeskStatus(status: PresenceStatus): DeskOccupancyStatus {
 export async function getOfficeFloorState(teamId: string): Promise<OfficeState> {
     const team = await prisma.team.findUnique({
         where: { id: teamId },
-        select: { id: true, organizationId: true },
+        select: {
+            id: true,
+            organizationId: true,
+            members: {
+                select: {
+                    userId: true,
+                    user: { select: { id: true, name: true, avatar: true } },
+                },
+            },
+        },
     });
 
     if (!team) {
@@ -77,6 +90,7 @@ export async function getOfficeFloorState(teamId: string): Promise<OfficeState> 
         redis.get(meetingKey).catch(() => null),
     ]);
 
+    const rawMembersMap = (rawMembers || {}) as Record<string, string>;
     const rawDesks = (rawDesksObj || {}) as Record<string, string>;
     const members: Record<string, OfficeMember> = {};
     const counts = {
@@ -86,14 +100,12 @@ export async function getOfficeFloorState(teamId: string): Promise<OfficeState> 
         focusPods: 0,
         totalActive: 0,
     };
-
-    const memberEntries = Object.entries(rawMembers || {});
-    for (const [userId, memberJson] of memberEntries) {
+    for (const tm of team.members) {
+        const userId = tm.userId;
+        const memberJson = rawMembersMap[userId];
         try {
-            if (typeof memberJson !== 'string') continue;
-            const parsed = JSON.parse(memberJson as string);
+            const parsed = memberJson ? JSON.parse(memberJson) : null;
             const presence = await getUserPresence(userId);
-
             // If user went completely offline, skip them
             if (!presence.isOnline) {
                 await redis.hdel(membersKey, userId).catch(() => { });
@@ -107,25 +119,31 @@ export async function getOfficeFloorState(teamId: string): Promise<OfficeState> 
             );
 
             // If in another team's call, keep them at their Open Workspace desk
-            let resolvedZoneId = parsed.zoneId || 'OPEN_WORKSPACE';
-            if (resolvedZoneId === 'WAR_ROOM' && !isUserInThisMeeting) {
-                resolvedZoneId = 'OPEN_WORKSPACE';
-            } else if (isUserInThisMeeting) {
+            let resolvedZoneId: OfficeZoneId = 'OPEN_WORKSPACE';
+            let resolvedStatusMsg = presence.statusMessage || null;
+            if (isUserInThisMeeting) {
                 resolvedZoneId = 'WAR_ROOM';
+            } else if (presence.isInMeeting) {
+                resolvedZoneId = 'OPEN_WORKSPACE';
+                resolvedStatusMsg = 'In another meeting';
+            } else if (presence.status === 'DO_NOT_DISTURB') {
+                resolvedZoneId = 'FOCUS_POD';
+            } else if (presence.status === 'BE_RIGHT_BACK') {
+                resolvedZoneId = 'COFFEE_LOUNGE';
+            } else if (parsed?.zoneId && parsed.zoneId !== 'WAR_ROOM') {
+                resolvedZoneId = parsed.zoneId;
             }
 
             const member: OfficeMember = {
                 userId,
-                name: parsed.name,
-                avatarUrl: parsed.avatarUrl || null,
+                name: tm.user.name,
+                avatarUrl: tm.user.avatar || null,
                 presenceStatus: presence.status,
                 zoneId: resolvedZoneId,
-                deskId: parsed.deskId || null,
+                deskId: parsed?.deskId || null,
                 isInMeeting: Boolean(presence.isInMeeting),
-                statusMessage: !isUserInThisMeeting && presence.isInMeeting
-                    ? 'In another meeting'
-                    : (presence.statusMessage || null),
-                joinedOfficeAt: parsed.joinedOfficeAt || new Date().toISOString(),
+                statusMessage: resolvedStatusMsg,
+                joinedOfficeAt: parsed?.joinedOfficeAt || new Date().toISOString(),
             };
 
             members[userId] = member;
@@ -138,6 +156,20 @@ export async function getOfficeFloorState(teamId: string): Promise<OfficeState> 
             else if (member.zoneId === 'FOCUS_POD') counts.focusPods++;
         } catch {
             // Ignore corrupted entries
+        }
+    }
+
+    // Auto-seat any online open workspace member at first available desk
+    for (const member of Object.values(members)) {
+        if (member.zoneId === 'OPEN_WORKSPACE' && !member.deskId) {
+            for (let i = 1; i <= TOTAL_OFFICE_DESKS; i++) {
+                const dId = `desk_${i}`;
+                if (!rawDesks[dId]) {
+                    rawDesks[dId] = member.userId;
+                    member.deskId = dId;
+                    break;
+                }
+            }
         }
     }
 
@@ -240,18 +272,30 @@ export async function changeOfficeZone(
     teamId: string,
     userId: string,
     newZoneId: OfficeZoneId,
-    targetDeskId?: string | null,
+    targetDeskId?: string | number | null,
     durationMinutes?: number | null
 ): Promise<OfficeZoneChangedEvent> {
     const membersKey = getOfficeMembersKey(teamId);
     const desksKey = getOfficeDesksKey(teamId);
 
-    const rawMember = await redis.hget(membersKey, userId);
-    if (!rawMember) {
-        throw new ApiError(404, 'User is not currently in this virtual office');
+    if (targetDeskId !== undefined && targetDeskId !== null) {
+        const str = String(targetDeskId).trim();
+        targetDeskId = /^\d+$/.test(str) ? `desk_${str}` : str;
     }
 
-    const currentMember = JSON.parse(rawMember as string) as OfficeMember;
+    let rawMember = await redis.hget(membersKey, userId);
+    let currentMember: OfficeMember;
+    if (!rawMember) {
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, name: true, avatar: true },
+        });
+        if (!user) throw new ApiError(404, 'User not found');
+        const joinResult = await joinOffice(teamId, { id: userId, name: user.name, avatarUrl: user.avatar });
+        currentMember = joinResult.member;
+    } else {
+        currentMember = JSON.parse(rawMember as string) as OfficeMember;
+    }
     const previousZoneId = currentMember.zoneId;
 
     // Free previous desk if moving away from open workspace
@@ -268,7 +312,11 @@ export async function changeOfficeZone(
             // Check if target desk is taken
             const occupiedBy = rawDesks[targetDeskId];
             if (occupiedBy && occupiedBy !== userId) {
-                throw new ApiError(409, 'This desk is already occupied by a teammate');
+                const isOccupantActive = await redis.hexists(membersKey, occupiedBy);
+                if (isOccupantActive) {
+                    throw new ApiError(409, 'This desk is already occupied by a teammate');
+                }
+                await redis.hdel(desksKey, targetDeskId).catch(() => { });
             }
             if (currentMember.deskId && currentMember.deskId !== targetDeskId) {
                 await redis.hdel(desksKey, currentMember.deskId).catch(() => { });
@@ -288,12 +336,18 @@ export async function changeOfficeZone(
         }
     }
 
+    // If moving out of War Room back to open workspace, clear meeting presence
+    if (previousZoneId === 'WAR_ROOM' && newZoneId !== 'WAR_ROOM') {
+        await setMeetingPresence(userId, false).catch(() => { });
+    }
+
     // Bidirectional Presence synchronization:
     if (newZoneId === 'FOCUS_POD') {
-        await setUserCustomStatus(userId, { status: 'DO_NOT_DISTURB', 
-            statusMessage: durationMinutes ? `Focus Pod (${durationMinutes}m)`: 'In Focus Pod',
+        await setUserCustomStatus(userId, {
+            status: 'DO_NOT_DISTURB',
+            statusMessage: durationMinutes ? `Focus Pod (${durationMinutes}m)` : 'In Focus Pod',
             clearAfterMinutes: durationMinutes || null,
-         });
+        });
     } else if (newZoneId === 'COFFEE_LOUNGE') {
         await setUserCustomStatus(userId, { status: 'BE_RIGHT_BACK', statusMessage: 'Coffee Break' });
     } else if (newZoneId === 'OPEN_WORKSPACE' && (previousZoneId === 'FOCUS_POD' || previousZoneId === 'COFFEE_LOUNGE')) {
@@ -394,34 +448,185 @@ export async function leaveOffice(teamId: string, userId: string): Promise<void>
 }
 
 
-// 6 Start an active video meeting in the War Room
+
+//6. Start an active video meeting in the War Room with host role tracking
+
 export async function startWarRoomMeeting(
-  teamId: string,
-  meetingCode: string,
-  startedBy: { id: string; name: string }
-): Promise<{ teamId: string; meetingCode: string; startedById: string; startedByName: string; startedAt: string }> {
-  const meetingKey = getOfficeMeetingKey(teamId);
-  const cleanCode = meetingCode.trim().toLowerCase();
+    teamId: string,
+    meetingCode: string,
+    startedBy: { id: string; name: string }
+): Promise<{ teamId: string; meetingCode: string; startedById: string; startedByName: string; startedByRole: string; startedAt: string }> {
+    const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        select: {
+            id: true,
+            organizationId: true,
+            organization: { select: { ownerId: true } },
+        },
+    });
 
-  await redis.set(meetingKey, cleanCode, 'EX', 86400);
+    if (!team) {
+        throw new ApiError(404, 'Team not found');
+    }
 
-  logger.info(`War Room meeting started for team ${teamId} with code ${cleanCode} by ${startedBy.name}`);
+    // Determine starter's role in the organization and team
+    let starterRole: 'OWNER' | 'ORG_ADMIN' | 'LEAD' | 'MEMBER' = 'MEMBER';
+    if (team.organization?.ownerId === startedBy.id) {
+        starterRole = 'OWNER';
+    } else {
+        const orgMember = await prisma.organizationMember.findUnique({
+            where: { organizationId_userId: { organizationId: team.organizationId, userId: startedBy.id } },
+            select: { role: true },
+        });
 
-  return {
-    teamId,
-    meetingCode: cleanCode,
-    startedById: startedBy.id,
-    startedByName: startedBy.name,
-    startedAt: new Date().toISOString(),
-  };
+        if (orgMember?.role === OrgRole.ORG_ADMIN) {
+            starterRole = 'ORG_ADMIN';
+        } else {
+            const teamMember = await prisma.teamMember.findUnique({
+                where: { teamId_userId: { teamId, userId: startedBy.id } },
+                select: { role: true },
+            });
+            if (teamMember?.role === 'LEAD') {
+                starterRole = 'LEAD';
+            }
+        }
+    }
+
+    const meetingKey = getOfficeMeetingKey(teamId);
+    const meetingMetaKey = getOfficeMeetingMetaKey(teamId);
+    const cleanCode = meetingCode.trim().toLowerCase();
+
+    const metaPayload = {
+        meetingCode: cleanCode,
+        startedById: startedBy.id,
+        startedByName: startedBy.name,
+        startedByRole: starterRole,
+        startedAt: new Date().toISOString(),
+    };
+
+    // Store active meeting code AND detailed metadata with 24hr TTL
+    await Promise.all([
+        redis.set(meetingKey, cleanCode, 'EX', 86400),
+        redis.set(meetingMetaKey, JSON.stringify(metaPayload), 'EX', 86400),
+    ]);
+
+    logger.info(`War Room meeting started for team ${teamId} by ${startedBy.name} (${starterRole})`);
+
+    return {
+        teamId,
+        ...metaPayload,
+    };
 }
 
-//end active video meeting in war room
-export async function endWarRoomMeeting(teamId: string): Promise<{ teamId: string }> {
-  const meetingKey = getOfficeMeetingKey(teamId);
-  await redis.del(meetingKey);
 
-  logger.info(`War Room meeting ended for team ${teamId}`);
+// 7. End active video meeting in War Room with strict RBAC protection
 
-  return { teamId };
+export async function endWarRoomMeeting(
+    teamId: string,
+    callerUserId: string
+): Promise<{ teamId: string; meetingCode: string }> {
+    const meetingKey = getOfficeMeetingKey(teamId);
+    const meetingMetaKey = getOfficeMeetingMetaKey(teamId);
+
+    const [cleanCode, rawMeta] = await Promise.all([
+        redis.get(meetingKey),
+        redis.get(meetingMetaKey),
+    ]);
+
+    if (!cleanCode) {
+        throw new ApiError(404, 'No active War Room meeting found for this team');
+    }
+
+    let meta: { meetingCode: string; startedById: string; startedByName: string; startedByRole: string } | null = null;
+    if (rawMeta) {
+        try {
+            meta = JSON.parse(rawMeta);
+        } catch { }
+    }
+
+    // Fetch caller's organization and team role
+    const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        select: {
+            id: true,
+            organizationId: true,
+            organization: { select: { ownerId: true } },
+        },
+    });
+
+    if (!team) {
+        throw new ApiError(404, 'Team not found');
+    }
+
+    const isOwner = team.organization?.ownerId === callerUserId;
+    let isOrgAdmin = isOwner;
+    let isTeamLead = false;
+
+    if (!isOrgAdmin) {
+        const orgMember = await prisma.organizationMember.findUnique({
+            where: { organizationId_userId: { organizationId: team.organizationId, userId: callerUserId } },
+            select: { role: true },
+        });
+        if (orgMember?.role === OrgRole.ORG_ADMIN) {
+            isOrgAdmin = true;
+        }
+    }
+
+    const teamMember = await prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId, userId: callerUserId } },
+        select: { role: true },
+    });
+    if (teamMember?.role === 'LEAD') {
+        isTeamLead = true;
+    }
+
+    const isStarter = meta?.startedById === callerUserId;
+
+    // RBAC Permission Evaluation:
+    // 1. If Org Admin started it -> ONLY Org Admin (or starter) can end it
+    if (meta?.startedByRole === 'ORG_ADMIN' || meta?.startedByRole === 'OWNER') {
+        if (!isOrgAdmin && !isStarter) {
+            throw new ApiError(403, 'This meeting was started by an Organization Admin. Only an Organization Admin can end it.');
+        }
+    }
+    // 2. If Team Lead started it -> Either Team Lead or Org Admin can end it
+    else if (meta?.startedByRole === 'LEAD') {
+        if (!isOrgAdmin && !isTeamLead && !isStarter) {
+            throw new ApiError(403, 'This meeting was started by a Team Lead. Only a Team Lead or Org Admin can end it.');
+        }
+    }
+    // 3. Regular Member protection -> Members who are NOT the host cannot end it
+    else {
+        if (!isOrgAdmin && !isTeamLead && !isStarter) {
+            throw new ApiError(403, 'Only the meeting host, team lead, or an organization admin can end this meeting.');
+        }
+    }
+
+    // Authorized: Clear Redis state
+    await Promise.all([
+        redis.del(meetingKey),
+        redis.del(meetingMetaKey),
+    ]);
+
+    await setMeetingPresence(callerUserId, false).catch(() => { });
+    if (meta?.startedById && meta.startedById !== callerUserId) {
+        await setMeetingPresence(meta.startedById, false).catch(() => { });
+    }
+
+    // Mark meeting as ENDED in database if present
+    await prisma.meeting.updateMany({
+        where: { code: cleanCode, status: { not: MeetingStatus.ENDED } },
+        data: { status: MeetingStatus.ENDED },
+    }).catch(() => { });
+
+    // Disconnect socket & WebRTC room
+    try {
+        closeMeetingRoom(cleanCode);
+    } catch (err: any) {
+        logger.warn(`[OfficeMeeting] Socket room teardown notice: ${err?.message}`);
+    }
+
+    logger.info(`War Room meeting ${cleanCode} ended for team ${teamId} by user ${callerUserId}`);
+
+    return { teamId, meetingCode: cleanCode };
 }
