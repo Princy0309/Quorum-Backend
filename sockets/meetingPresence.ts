@@ -409,7 +409,6 @@ export const closeMeetingRoom = async (meetingCode: string) => {
             });
             io.in(normalizedCode).socketsLeave(normalizedCode);
 
-            // 🎯 Clear meeting presence for ALL participants so they immediately turn GREEN
             const allParticipantIds = new Set<string>(roomState.participants.keys());
             if (roomState.hostUserId) {
                 allParticipantIds.add(roomState.hostUserId);

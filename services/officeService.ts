@@ -243,18 +243,30 @@ export async function changeOfficeZone(
     teamId: string,
     userId: string,
     newZoneId: OfficeZoneId,
-    targetDeskId?: string | null,
+    targetDeskId?: string | number | null,
     durationMinutes?: number | null
 ): Promise<OfficeZoneChangedEvent> {
     const membersKey = getOfficeMembersKey(teamId);
     const desksKey = getOfficeDesksKey(teamId);
 
-    const rawMember = await redis.hget(membersKey, userId);
-    if (!rawMember) {
-        throw new ApiError(404, 'User is not currently in this virtual office');
+    if (targetDeskId !== undefined && targetDeskId !== null) {
+        const str = String(targetDeskId).trim();
+        targetDeskId = /^\d+$/.test(str) ? `desk_${str}` : str;
     }
 
-    const currentMember = JSON.parse(rawMember as string) as OfficeMember;
+    let rawMember = await redis.hget(membersKey, userId);
+    let currentMember: OfficeMember;
+    if (!rawMember) {
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, name: true, avatar: true },
+        });
+        if (!user) throw new ApiError(404, 'User not found');
+        const joinResult = await joinOffice(teamId, { id: userId, name: user.name, avatarUrl: user.avatar });
+        currentMember = joinResult.member;
+    } else {
+        currentMember = JSON.parse(rawMember as string) as OfficeMember;
+    }
     const previousZoneId = currentMember.zoneId;
 
     // Free previous desk if moving away from open workspace
@@ -271,7 +283,11 @@ export async function changeOfficeZone(
             // Check if target desk is taken
             const occupiedBy = rawDesks[targetDeskId];
             if (occupiedBy && occupiedBy !== userId) {
-                throw new ApiError(409, 'This desk is already occupied by a teammate');
+                const isOccupantActive = await redis.hexists(membersKey, occupiedBy);
+                if (isOccupantActive) {
+                    throw new ApiError(409, 'This desk is already occupied by a teammate');
+                }
+                await redis.hdel(desksKey, targetDeskId).catch(() => { });
             }
             if (currentMember.deskId && currentMember.deskId !== targetDeskId) {
                 await redis.hdel(desksKey, currentMember.deskId).catch(() => { });
