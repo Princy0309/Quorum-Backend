@@ -19,6 +19,7 @@ import {
     setUserCustomStatus,
     clearUserCustomStatus,
     setMeetingPresence,
+    getMultipleUserPresences,
     PresenceStatus,
 } from './presenceService.js';
 
@@ -62,7 +63,16 @@ function mapPresenceToDeskStatus(status: PresenceStatus): DeskOccupancyStatus {
 export async function getOfficeFloorState(teamId: string): Promise<OfficeState> {
     const team = await prisma.team.findUnique({
         where: { id: teamId },
-        select: { id: true, organizationId: true },
+        select: {
+            id: true,
+            organizationId: true,
+            members: {
+                select: {
+                    userId: true,
+                    user: { select: { id: true, name: true, avatar: true } },
+                },
+            },
+        },
     });
 
     if (!team) {
@@ -80,6 +90,7 @@ export async function getOfficeFloorState(teamId: string): Promise<OfficeState> 
         redis.get(meetingKey).catch(() => null),
     ]);
 
+    const rawMembersMap = (rawMembers || {}) as Record<string, string>;
     const rawDesks = (rawDesksObj || {}) as Record<string, string>;
     const members: Record<string, OfficeMember> = {};
     const counts = {
@@ -89,14 +100,12 @@ export async function getOfficeFloorState(teamId: string): Promise<OfficeState> 
         focusPods: 0,
         totalActive: 0,
     };
-
-    const memberEntries = Object.entries(rawMembers || {});
-    for (const [userId, memberJson] of memberEntries) {
+    for (const tm of team.members) {
+        const userId = tm.userId;
+        const memberJson = rawMembersMap[userId];
         try {
-            if (typeof memberJson !== 'string') continue;
-            const parsed = JSON.parse(memberJson as string);
+            const parsed = memberJson ? JSON.parse(memberJson) : null;
             const presence = await getUserPresence(userId);
-
             // If user went completely offline, skip them
             if (!presence.isOnline) {
                 await redis.hdel(membersKey, userId).catch(() => { });
@@ -110,25 +119,31 @@ export async function getOfficeFloorState(teamId: string): Promise<OfficeState> 
             );
 
             // If in another team's call, keep them at their Open Workspace desk
-            let resolvedZoneId = parsed.zoneId || 'OPEN_WORKSPACE';
-            if (resolvedZoneId === 'WAR_ROOM' && !isUserInThisMeeting) {
-                resolvedZoneId = 'OPEN_WORKSPACE';
-            } else if (isUserInThisMeeting) {
+            let resolvedZoneId: OfficeZoneId = 'OPEN_WORKSPACE';
+            let resolvedStatusMsg = presence.statusMessage || null;
+            if (isUserInThisMeeting) {
                 resolvedZoneId = 'WAR_ROOM';
+            } else if (presence.isInMeeting) {
+                resolvedZoneId = 'OPEN_WORKSPACE';
+                resolvedStatusMsg = 'In another meeting';
+            } else if (presence.status === 'DO_NOT_DISTURB') {
+                resolvedZoneId = 'FOCUS_POD';
+            } else if (presence.status === 'BE_RIGHT_BACK') {
+                resolvedZoneId = 'COFFEE_LOUNGE';
+            } else if (parsed?.zoneId && parsed.zoneId !== 'WAR_ROOM') {
+                resolvedZoneId = parsed.zoneId;
             }
 
             const member: OfficeMember = {
                 userId,
-                name: parsed.name,
-                avatarUrl: parsed.avatarUrl || null,
+                name: tm.user.name,
+                avatarUrl: tm.user.avatar || null,
                 presenceStatus: presence.status,
                 zoneId: resolvedZoneId,
-                deskId: parsed.deskId || null,
+                deskId: parsed?.deskId || null,
                 isInMeeting: Boolean(presence.isInMeeting),
-                statusMessage: !isUserInThisMeeting && presence.isInMeeting
-                    ? 'In another meeting'
-                    : (presence.statusMessage || null),
-                joinedOfficeAt: parsed.joinedOfficeAt || new Date().toISOString(),
+                statusMessage: resolvedStatusMsg,
+                joinedOfficeAt: parsed?.joinedOfficeAt || new Date().toISOString(),
             };
 
             members[userId] = member;
@@ -141,6 +156,20 @@ export async function getOfficeFloorState(teamId: string): Promise<OfficeState> 
             else if (member.zoneId === 'FOCUS_POD') counts.focusPods++;
         } catch {
             // Ignore corrupted entries
+        }
+    }
+
+    // Auto-seat any online open workspace member at first available desk
+    for (const member of Object.values(members)) {
+        if (member.zoneId === 'OPEN_WORKSPACE' && !member.deskId) {
+            for (let i = 1; i <= TOTAL_OFFICE_DESKS; i++) {
+                const dId = `desk_${i}`;
+                if (!rawDesks[dId]) {
+                    rawDesks[dId] = member.userId;
+                    member.deskId = dId;
+                    break;
+                }
+            }
         }
     }
 
