@@ -471,19 +471,44 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         const senderName = (message as any).sender?.name || 'Someone';
         const senderAvatar = (message as any).sender?.avatar || undefined;
 
+        const conversationRecord = await prisma.conversation.findUnique({
+          where: { id: message.conversationId },
+          select: { teamId: true }
+        });
+        const teamId = conversationRecord?.teamId || undefined;
+        let organizationId: string | undefined;
+        if (teamId) {
+          const team = await prisma.team.findUnique({
+            where: { id: teamId },
+            select: { organizationId: true }
+          });
+          organizationId = team?.organizationId;
+        }
+
+        const basePushData: Record<string, string> = {
+          conversationId: message.conversationId,
+          messageId: message.id,
+          payload: JSON.stringify({
+            conversationId: message.conversationId,
+            messageId: message.id
+          }),
+          ...(teamId ? { teamId } : {}),
+          ...(organizationId ? { organizationId } : {})
+        };
+
         if (mentionedRecipientIds.length > 0) {
           sendPushToOfflineUsers(
             mentionedRecipientIds,
             `${senderName} mentioned you`,
             rawContent || 'Mentioned you in a message',
             {
-              conversationId: message.conversationId,
-              messageId: message.id,
-              isMention: 'true',
-              type: 'MENTION'
+              ...basePushData,
+              type: 'CHAT_MESSAGE',
+              isMention: 'true'
             },
             {
               conversationId: message.conversationId,
+              tag: message.conversationId,
               category: 'MESSAGE_REPLY',
               imageUrl: senderAvatar,
               channelId: 'quorum_chat_messages',
@@ -500,12 +525,12 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
             `New message from ${senderName}`,
             rawContent || 'Sent an attachment',
             {
-              conversationId: message.conversationId,
-              messageId: message.id,
+              ...basePushData,
               type: 'CHAT_MESSAGE'
             },
             {
               conversationId: message.conversationId,
+              tag: message.conversationId,
               category: 'MESSAGE_REPLY',
               imageUrl: senderAvatar,
               channelId: 'quorum_chat_messages',

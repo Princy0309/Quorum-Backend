@@ -343,10 +343,23 @@ const syncMeetingCalendarAndNotifications = async (
       logger.warn('[MeetingService] Socket notification emission failed:', sockErr);
     }
 
-    sendPushToOfflineUsers(recipients, notifTitle, notifBody, {
-      meetingCode: meeting.code,
-      meetingLink,
-    }).catch((pushErr) => {
+    sendPushToOfflineUsers(
+      recipients,
+      notifTitle,
+      notifBody,
+      {
+        type: isScheduled ? 'EVENT_REMINDER' : 'MEETING_STARTED',
+        meetingCode: meeting.code,
+        meetingId: (meeting as any).id || meeting.code,
+        meetingLink: meetingLink || '',
+        title: meetingTitle,
+      },
+      {
+        channelId: 'quorum_chat_messages',
+        sound: 'default',
+        tag: meeting.code
+      }
+    ).catch((pushErr) => {
       logger.warn('[MeetingService] Offline push notification failed:', pushErr);
     });
 

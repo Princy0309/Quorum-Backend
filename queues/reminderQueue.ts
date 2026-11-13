@@ -2,6 +2,7 @@ import { Queue, Worker, Job } from 'bullmq';
 import { Redis as IORedis } from 'ioredis';
 import prisma from '../config/prisma.js';
 import { getIO } from '../sockets/socketServer.js';
+import { sendPushToOfflineUsers } from '../services/notificationService.js';
 import logger from '../utils/logger.js';
 
 export const reminderRedisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
@@ -113,6 +114,26 @@ export const reminderWorker = new Worker(
         const msg = socketErr instanceof Error ? socketErr.message : String(socketErr);
         logger.warn(`Could not emit real-time reminder socket event: ${msg}`);
       }
+
+      sendPushToOfflineUsers(
+        [userId],
+        `Upcoming Event: ${event.title}`,
+        `Starts in ${event.reminderMinutes} minutes`,
+        {
+          type: 'EVENT_REMINDER',
+          meetingLink: event.meetingLink || '',
+          title: event.title,
+          eventId: event.id,
+          startDate: event.startDate.toISOString()
+        },
+        {
+          channelId: 'quorum_chat_messages',
+          sound: 'default',
+          tag: event.id
+        }
+      ).catch((pushErr) => {
+        logger.warn('Failed to send reminder push notification', pushErr);
+      });
     } catch (notifErr: unknown) {
       const msg = notifErr instanceof Error ? notifErr.message : String(notifErr);
       logger.warn(`Could not persist reminder notification for event ${eventId}: ${msg}`);

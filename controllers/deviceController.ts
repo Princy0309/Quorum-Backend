@@ -24,11 +24,11 @@ export const registerDeviceController = async (req: Request, res: Response, next
 export const unregisterDeviceController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.id;
-    if (!userId) {
-      throw new ApiError(401, 'Unauthorized');
+    const { token } = req.body;
+    if (!token) {
+      throw new ApiError(400, 'Device token is required');
     }
 
-    const { token } = req.body;
     await unregisterDeviceToken(userId, token);
 
     res.status(200).json({

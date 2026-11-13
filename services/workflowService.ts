@@ -10,6 +10,7 @@ import { createScopedMeeting } from './meetingService.js';
 import { addCollaborator, checkDocumentAccess } from './documentService.js';
 import { MeetingScopeType, NotificationType, OrgRole, DocumentScopeType } from '@prisma/client';
 import { WorkflowStep, workflowStepSchema } from '../validators/workflowValidators.js';
+import { sendPushToOfflineUsers } from './notificationService.js';
 
 interface StoredWorkflowPlan {
   planId: string;
@@ -1034,6 +1035,25 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               } catch (socketErr) {
                 logger.warn('Failed to emit live notification to user ' + u.id, socketErr);
               }
+
+              sendPushToOfflineUsers(
+                [u.id],
+                notifTitle,
+                notifMessage,
+                {
+                  type: 'SYSTEM',
+                  notificationId: notifId,
+                  planId,
+                  step: String(step.step)
+                },
+                {
+                  tag: notifId,
+                  channelId: 'quorum_chat_messages',
+                  sound: 'default'
+                }
+              ).catch((pushErr) => {
+                logger.warn('Failed to send push notification for workflow to user ' + u.id, pushErr);
+              });
             }
           }
 
