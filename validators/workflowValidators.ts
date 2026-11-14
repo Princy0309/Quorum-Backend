@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const workflowActionTypeSchema = z.enum([
   'CREATE_ORGANIZATION',
   'CREATE_TEAM',
+  'ADD_TEAM_MEMBER',
   'SCHEDULE_MEETING',
   'SHARE_DOCUMENT',
   'NOTIFY_MEMBERS',

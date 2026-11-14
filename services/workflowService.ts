@@ -88,7 +88,29 @@ const getPlan = async (planId: string): Promise<StoredWorkflowPlan | null> => {
   return null;
 };
 
-const getUserOrganizationContext = async (userId: string, targetOrgId?: string) => {
+const getUserOrganizationContext = async (userId: string, targetOrgId?: string, queryPromptOrOrgName?: string) => {
+  if (!targetOrgId && queryPromptOrOrgName) {
+    const userOrgs = await prisma.organization.findMany({
+      where: {
+        OR: [
+          { members: { some: { userId } } },
+          { ownerId: userId },
+        ],
+      },
+      select: { id: true, name: true },
+    });
+    const lowerQuery = queryPromptOrOrgName.toLowerCase();
+    for (const org of userOrgs) {
+      const orgName = org.name.toLowerCase();
+      const slugOrg = orgName.replace(/[^a-z0-9]/g, '');
+      const cleanQuery = lowerQuery.replace(/[^a-z0-9]/g, '');
+      if (lowerQuery.includes(orgName) || (slugOrg.length >= 3 && cleanQuery.includes(slugOrg))) {
+        targetOrgId = org.id;
+        break;
+      }
+    }
+  }
+
   if (!targetOrgId) {
     const memberships = await prisma.organizationMember.findMany({
       where: { userId },
@@ -227,6 +249,77 @@ const getUserOrganizationContext = async (userId: string, targetOrgId?: string) 
   return null;
 };
 
+const getAllUserOrganizationsContext = async (userId: string) => {
+  const memberships = await prisma.organizationMember.findMany({
+    where: { userId },
+    include: {
+      organization: {
+        select: {
+          id: true,
+          name: true,
+          teams: { select: { id: true, name: true } },
+          members: {
+            select: {
+              role: true,
+              user: { select: { id: true, name: true, email: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+  const owned = await prisma.organization.findMany({
+    where: { ownerId: userId },
+    select: {
+      id: true,
+      name: true,
+      teams: { select: { id: true, name: true } },
+      members: {
+        select: {
+          role: true,
+          user: { select: { id: true, name: true, email: true } },
+        },
+      },
+    },
+  });
+  const map = new Map<string, { id: string; name: string; teams: { id: string; name: string; organizationId: string; organizationName: string }[]; members: { id: string; name: string; email: string; role: string; organizationId: string; organizationName: string }[] }>();
+  for (const m of memberships) {
+    if (m.organization) {
+      map.set(m.organization.id, {
+        id: m.organization.id,
+        name: m.organization.name,
+        teams: m.organization.teams.map((t) => ({ ...t, organizationId: m.organization.id, organizationName: m.organization.name })),
+        members: m.organization.members.map((mem) => ({
+          id: mem.user.id,
+          name: mem.user.name,
+          email: mem.user.email,
+          role: mem.role,
+          organizationId: m.organization.id,
+          organizationName: m.organization.name,
+        })),
+      });
+    }
+  }
+  for (const o of owned) {
+    if (!map.has(o.id)) {
+      map.set(o.id, {
+        id: o.id,
+        name: o.name,
+        teams: o.teams.map((t) => ({ ...t, organizationId: o.id, organizationName: o.name })),
+        members: o.members.map((mem) => ({
+          id: mem.user.id,
+          name: mem.user.name,
+          email: mem.user.email,
+          role: mem.role,
+          organizationId: o.id,
+          organizationName: o.name,
+        })),
+      });
+    }
+  }
+  return Array.from(map.values());
+};
+
 const getUserAccessibleDocuments = async (userId: string, organizationId?: string) => {
   const userTeamMemberships = await prisma.teamMember.findMany({
     where: { userId },
@@ -353,10 +446,11 @@ export const generateWorkflowPlan = async (
   clientTime?: string
 ) => {
   const sanitizedPrompt = sanitizeAiInput(rawPrompt);
-  const orgContext = await getUserOrganizationContext(userId, organizationId);
+  const orgContext = await getUserOrganizationContext(userId, organizationId, sanitizedPrompt);
   if (organizationId && !orgContext) {
     throw new ApiError(403, 'You do not have access to the specified organization');
   }
+  const allUserOrgs = await getAllUserOrganizationsContext(userId);
   const accessibleDocs = await getUserAccessibleDocuments(userId, orgContext?.organizationId);
   const userCommunities = await getUserCommunities(userId);
 
@@ -382,12 +476,16 @@ export const generateWorkflowPlan = async (
     organization: orgContext
       ? { id: orgContext.organizationId, name: orgContext.organizationName }
       : null,
-    members: (orgContext?.availableMembers || []).map((m) => ({
-      id: m.id,
-      name: m.name,
-      email: m.email,
+    organizations: allUserOrgs.map((o) => ({
+      id: o.id,
+      name: o.name,
     })),
-    teams: orgContext?.availableTeams || [],
+    members: (orgContext?.availableMembers && orgContext.availableMembers.length > 0)
+      ? orgContext.availableMembers
+      : allUserOrgs.flatMap((o) => o.members),
+    teams: (orgContext?.availableTeams && orgContext.availableTeams.length > 0)
+      ? orgContext.availableTeams
+      : allUserOrgs.flatMap((o) => o.teams),
     documents: accessibleDocs.map((d) => ({
       id: d.id,
       title: d.title,
@@ -407,6 +505,7 @@ CRITICAL SECURITY & PRIVACY RULES:
 2. Only use the following allowed actions:
    - "CREATE_ORGANIZATION"
    - "CREATE_TEAM"
+   - "ADD_TEAM_MEMBER"
    - "SCHEDULE_MEETING"
    - "SHARE_DOCUMENT"
    - "NOTIFY_MEMBERS"
@@ -422,7 +521,8 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "$step1.messageId" or "$step1.id" for chat message created in step 1
 5. Parameter requirements per action:
    - "CREATE_ORGANIZATION": { "name": string, "description"?: string }
-   - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds"?: string[], "organizationId"?: string }
+   - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds"?: string[], "organizationId"?: string, "organizationName"?: string }
+   - "ADD_TEAM_MEMBER": { "teamId"?: string, "teamName"?: string, "memberId"?: string, "memberIds"?: string[], "memberName"?: string, "organizationId"?: string, "organizationName"?: string }
    - "SCHEDULE_MEETING": { "title": string, "startTime": string (ISO 8601), "durationMinutes"?: number, "teamId"?: string }
    - "SHARE_DOCUMENT": { "documentId": string, "teamId"?: string, "memberIds"?: string[] }
    - "NOTIFY_MEMBERS": { "userIds": string[], "title": string, "message": string }
@@ -431,7 +531,8 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "SEND_CHAT_MESSAGE": { "content": string, "recipientUserId"?: string, "recipientName"?: string, "groupName"?: string, "teamId"?: string, "conversationId"?: string }
 6. ACTION SELECTION RULES:
    - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". DO NOT use "CREATE_TEAM" for organizations or companies.
-   - Use "CREATE_TEAM" ONLY when creating a team, squad, department, or group within an organization.
+   - When the user asks to add or invite someone/a member to a team (e.g. "add tanvi to team dev team(frontend)", "add user to team"), you MUST use "ADD_TEAM_MEMBER". DO NOT use "CREATE_TEAM" when adding members to an existing team. Match the team from the provided "teams" list to set "teamId" and "teamName", match the organization from the user prompt or "organizations" list to set "organizationId" and "organizationName", and match the member from "members" to set "memberId" and "memberName".
+   - Use "CREATE_TEAM" ONLY when creating a NEW team, squad, department, or group within an organization.
    - When the user asks to post, share, or publish a message, announcement, or post in a community (e.g. "make a post on community named college saying hello guys", "post in community college hello guys"), you MUST use "CREATE_COMMUNITY_POST". Match the community by name against the provided "communities" list in contextData to set "communityId" and include "communityName" and "content". DO NOT use "NOTIFY_MEMBERS" or "CREATE_TEAM" for community posts.
    - When the user asks to create or make a community (e.g. "make a community named xyz", "create community"), use "CREATE_COMMUNITY".
    - When the user asks to write, send, text, or ping a message to a person or someone (e.g. "write a message to Aniket saying hello", "send message to John"), or to a group or team (e.g. "write a message in frontend group saying meeting starts now", "send a message to team dev"), you MUST use "SEND_CHAT_MESSAGE". Match the person against workspace members for "recipientUserId"/"recipientName", or match the group against "teams" for "groupName"/"teamId". DO NOT use "NOTIFY_MEMBERS" or "CREATE_COMMUNITY_POST" for direct or group chat messages.
@@ -500,6 +601,9 @@ Generate the JSON execution plan:`;
     }
     if ((rawStep as any).action === 'SEND_MESSAGE' || (rawStep as any).action === 'WRITE_MESSAGE') {
       (rawStep as any).action = 'SEND_CHAT_MESSAGE';
+    }
+    if ((rawStep as any).action === 'ADD_MEMBER' || (rawStep as any).action === 'INVITE_MEMBER') {
+      (rawStep as any).action = 'ADD_TEAM_MEMBER';
     }
 
     const originalStep = typeof (rawStep as any).step === 'number' ? (rawStep as any).step : i + 1;
@@ -704,7 +808,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
 
     let orgId = plan.organizationId;
     if (!orgId) {
-      const userOrg = await getUserOrganizationContext(userId);
+      const userOrg = await getUserOrganizationContext(userId, undefined, plan.summary);
       orgId = userOrg?.organizationId;
     }
 
@@ -753,7 +857,11 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             },
           });
         } else if (step.action === 'CREATE_TEAM') {
-          const targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
+          let targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
+          if (!targetOrgId && resolvedParams.organizationName) {
+            const orgCtx = await getUserOrganizationContext(userId, undefined, String(resolvedParams.organizationName).trim());
+            targetOrgId = orgCtx?.organizationId;
+          }
           if (!targetOrgId) {
             throw new ApiError(400, 'An active organization is required to create a team');
           }
@@ -846,6 +954,111 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               name: team.name,
               memberCount: addedCount,
               ...(failedMemberIds.length > 0 ? { failedMemberIds } : {}),
+            },
+          });
+        } else if (step.action === 'ADD_TEAM_MEMBER') {
+          let targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
+          if (!targetOrgId && resolvedParams.organizationName) {
+            const orgCtx = await getUserOrganizationContext(userId, undefined, String(resolvedParams.organizationName).trim());
+            targetOrgId = orgCtx?.organizationId;
+          }
+
+          let team: any = null;
+          if (resolvedParams.teamId) {
+            team = await prisma.team.findUnique({
+              where: { id: String(resolvedParams.teamId).trim() },
+              select: { id: true, name: true, organizationId: true },
+            });
+          }
+          if (!team && resolvedParams.teamName) {
+            const teamQuery = String(resolvedParams.teamName).trim();
+            team = await prisma.team.findFirst({
+              where: {
+                ...(targetOrgId ? { organizationId: targetOrgId } : {}),
+                name: { contains: teamQuery, mode: 'insensitive' },
+              },
+              select: { id: true, name: true, organizationId: true },
+            });
+          }
+
+          if (!team) {
+            throw new ApiError(404, `Team '${resolvedParams.teamName || 'specified'}' not found`);
+          }
+
+          const finalOrgId = String(team.organizationId || targetOrgId || '').trim();
+          if (!finalOrgId) {
+            throw new ApiError(400, 'Organization ID is required to add team members');
+          }
+          targetOrgId = finalOrgId;
+          const callerOrg = await getUserOrganizationContext(userId, finalOrgId);
+          if (!callerOrg) {
+            throw new ApiError(403, 'You are not a member of this organization');
+          }
+
+          const callerRole = callerOrg.userRole;
+          const isLeadOrAdmin = callerOrg.isOwner || callerRole === OrgRole.ORG_ADMIN;
+          let isTeamLead = false;
+          if (!isLeadOrAdmin) {
+            const callerTeamMembership = await prisma.teamMember.findUnique({
+              where: {
+                teamId_userId: {
+                  teamId: team.id,
+                  userId,
+                },
+              },
+            });
+            if (callerTeamMembership?.role === 'LEAD') {
+              isTeamLead = true;
+            }
+          }
+
+          if (!isLeadOrAdmin && !isTeamLead) {
+            throw new ApiError(403, 'You are not an admin or team head so you cannot add members to this team');
+          }
+
+          let targetMemberIds: string[] = [];
+          if (Array.isArray(resolvedParams.memberIds)) {
+            targetMemberIds = resolvedParams.memberIds.map(String);
+          } else if (resolvedParams.memberId) {
+            targetMemberIds = [String(resolvedParams.memberId).trim()];
+          }
+
+          if (targetMemberIds.length === 0 && resolvedParams.memberName) {
+            const memberQuery = String(resolvedParams.memberName).trim();
+            const matchedOrgMember = await prisma.organizationMember.findFirst({
+              where: {
+                organizationId: finalOrgId,
+                user: {
+                  name: { contains: memberQuery, mode: 'insensitive' },
+                },
+              },
+              select: { userId: true },
+            });
+            if (matchedOrgMember) {
+              targetMemberIds.push(matchedOrgMember.userId);
+            }
+          }
+
+          if (targetMemberIds.length === 0) {
+            throw new ApiError(400, 'Member to add could not be found or was not specified');
+          }
+
+          let addedCount = 0;
+          for (const targetId of targetMemberIds) {
+            await addTeamMember(finalOrgId, team.id, userId, callerRole, targetId, 'member');
+            addedCount++;
+          }
+
+          results.push({
+            step: step.step,
+            action: 'ADD_TEAM_MEMBER',
+            description: step.description,
+            success: true,
+            resource: {
+              teamId: team.id,
+              teamName: team.name,
+              organizationId: targetOrgId,
+              addedMembersCount: addedCount,
             },
           });
         } else if (step.action === 'SCHEDULE_MEETING') {
