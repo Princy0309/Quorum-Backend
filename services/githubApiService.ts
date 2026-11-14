@@ -32,7 +32,7 @@ async function callGithubApi<T>(
     throw new ApiError(504, 'GitHub API request timed out');
   });
 
-    if (
+  if (
     response.status === 429 ||
     (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')
   ) {
@@ -234,6 +234,34 @@ export async function unlinkTeamRepository(userId: string, teamId: string, repoF
   return { unlinked: true };
 }
 
+export async function invalidateTeamIssuesCache(teamId: string): Promise<void> {
+  try {
+    const states = ['open', 'closed', 'all'];
+    const pages = [1, 2, 3, 4, 5];
+    const limits = [10, 20, 25, 30, 50, 100];
+    const keysToDelete: string[] = [];
+
+    for (const state of states) {
+      for (const page of pages) {
+        for (const limit of limits) {
+          keysToDelete.push(`gh:cache:${teamId}:issues:${state}:${page}:${limit}`);
+        }
+      }
+    }
+
+    if (keysToDelete.length > 0) {
+      await redis.del(...keysToDelete).catch(() => { });
+    }
+
+    const wildcardKeys = await redis.keys(`gh:cache:${teamId}:issues:*`).catch(() => []);
+    if (wildcardKeys.length > 0) {
+      await redis.del(...wildcardKeys).catch(() => { });
+    }
+  } catch (err: any) {
+    logger.warn(`Failed to invalidate issues cache for team ${teamId}: ${err?.message}`);
+  }
+}
+
 export async function getTeamIssues(
   userId: string,
   teamId: string,
@@ -298,10 +326,7 @@ export async function createTeamIssue(
     }
   );
 
-  const keys = await redis.keys(`gh:cache:${teamId}:issues:*`).catch(() => []);
-  if (keys.length > 0) {
-    await redis.del(...keys).catch(() => { });
-  }
+  await invalidateTeamIssuesCache(teamId);
 
   logger.info(`User ${userId} created issue #${issue.number} in ${repoLink.repoFullName}`);
   return issue;
@@ -331,10 +356,7 @@ export async function updateTeamIssueStatus(
     }
   );
 
-  const keys = await redis.keys(`gh:cache:${teamId}:issues:*`).catch(() => []);
-  if (keys.length > 0) {
-    await redis.del(...keys).catch(() => { });
-  }
+  await invalidateTeamIssuesCache(teamId);
 
   return updated;
 }
