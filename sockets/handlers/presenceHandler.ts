@@ -8,6 +8,7 @@ import {
   clearUserCustomStatus,
   UserPresenceData,
   CustomStatusInput,
+  getPresenceAudienceUserIds,
 } from '../../services/presenceService.js';
 import { getCoParticipantUserIds } from '../../services/chatService.js';
 import { CHAT_EVENTS } from '../../utils/constants.js';
@@ -20,16 +21,21 @@ export const broadcastUserPresenceUpdate = async (
   presence: UserPresenceData
 ) => {
   try {
-    const contacts = await getCoParticipantUserIds(userId);
-    contacts.forEach((contactId) => {
-      io.to(`user:${contactId}`).emit(CHAT_EVENTS.PRESENCE_STATUS_UPDATED, {
-        userId,
-        isOnline: presence.isOnline,
-        status: presence.status,
-        statusMessage: presence.statusMessage || null,
-        statusExpiresAt: presence.statusExpiresAt || null,
-        lastSeen: presence.lastSeen || null,
-      });
+    const audience = await getPresenceAudienceUserIds(userId);
+
+    const payload = {
+      userId,
+      isOnline: presence.isOnline,
+      status: presence.status,
+      statusMessage: presence.statusMessage || null,
+      statusExpiresAt: presence.statusExpiresAt || null,
+      lastSeen: presence.lastSeen || null,
+    };
+
+    audience.forEach((contactId) => {
+      io.to(`user:${contactId}`).emit(CHAT_EVENTS.PRESENCE_STATUS_UPDATED, payload);
+      io.to(`user:${contactId}`).emit('presence:update', payload);
+      io.to(`user:${contactId}`).emit('presence:status_updated', payload);
     });
   } catch (err: any) {
     logger.error('Failed to broadcast user presence update', { userId, error: err.message });
@@ -43,7 +49,7 @@ export const registerPresenceHandler = async (io: SocketIOServer, socket: Authen
   try {
     const isFirstConnection = await setUserOnline(userId, socket.id);
     if (isFirstConnection) {
-      const contacts = await getCoParticipantUserIds(userId);
+      const contacts = await getPresenceAudienceUserIds(userId);
       contacts.forEach((contactId) => {
         io.to(`user:${contactId}`).emit(CHAT_EVENTS.PRESENCE_ONLINE, { userId });
       });
@@ -78,6 +84,16 @@ export const registerPresenceHandler = async (io: SocketIOServer, socket: Authen
     }
   });
 
+  socket.on('presence:update', async (data: CustomStatusInput, ack?: (res: any) => void) => {
+    try {
+      const updated = await setUserCustomStatus(userId, data);
+      await broadcastUserPresenceUpdate(io, userId, updated);
+      if (typeof ack === 'function') ack({ success: true, data: updated });
+    } catch (err: any) {
+      if (typeof ack === 'function') ack({ success: false, error: err.message });
+    }
+  });
+
   socket.on('presence:clear-status', async (_data: any, ack?: (res: any) => void) => {
     try {
       const updated = await clearUserCustomStatus(userId);
@@ -90,12 +106,12 @@ export const registerPresenceHandler = async (io: SocketIOServer, socket: Authen
 
   socket.on('disconnect', async () => {
     clearInterval(heartbeatInterval);
-    redis.del(`user_app_state:${userId}`).catch(() => {});
+    redis.del(`user_app_state:${userId}`).catch(() => { });
 
     try {
       const isLastDisconnect = await setUserOffline(userId, socket.id);
       if (isLastDisconnect) {
-        const contacts = await getCoParticipantUserIds(userId);
+        const contacts = await getPresenceAudienceUserIds(userId);
         const lastSeen = new Date();
         contacts.forEach((contactId) => {
           io.to(`user:${contactId}`).emit(CHAT_EVENTS.PRESENCE_OFFLINE, {

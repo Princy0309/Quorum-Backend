@@ -130,6 +130,14 @@ export const getUserPresence = async (userId: string): Promise<UserPresenceData>
     }
   }
 
+  if (!isOnline) {
+    const activeSockets = await pruneStaleSockets(userId);
+    if (activeSockets > 0) {
+      isOnline = true;
+      await redis.set(presenceKey, 'online', 'EX', PRESENCE_TTL_SECONDS);
+    }
+  }
+
   let status: PresenceStatus = isOnline ? 'AVAILABLE' : 'OFFLINE';
   let statusMessage: string | null = null;
   let statusExpiresAt: Date | null = null;
@@ -173,12 +181,12 @@ export const getUserPresence = async (userId: string): Promise<UserPresenceData>
     }
   }
 
-  let meetingCode: string | null=null;
+  let meetingCode: string | null = null;
   let isInMeeting = false;
 
-  if(meetingRaw){
+  if (meetingRaw) {
     isInMeeting = true;
-    if(meetingRaw.startsWith('in_meeting:')){
+    if (meetingRaw.startsWith('in_meeting:')) {
       meetingCode = meetingRaw.split(':')[1] || null;
     }
   }
@@ -276,7 +284,7 @@ export const getMultipleUserPresences = async (
         }
       }
     } catch (err: any) {
-       logger.warn(`[PresenceService] Failed to fetch lastLogin fallback for missing users: ${err.message}`);
+      logger.warn(`[PresenceService] Failed to fetch lastLogin fallback for missing users: ${err.message}`);
     }
   }
 
@@ -310,6 +318,9 @@ export const setUserCustomStatus = async (
     await redis.set(customStatusKey, JSON.stringify(payload));
   }
 
+  const presenceKey = `presence:${userId}`;
+  await redis.set(presenceKey, 'online', 'EX', PRESENCE_TTL_SECONDS);
+
   return getUserPresence(userId);
 };
 
@@ -338,4 +349,36 @@ export const setScreenSharePresence = async (userId: string, isSharing: boolean)
     await redis.del(screenShareKey);
   }
   return getUserPresence(userId);
+};
+
+export const getPresenceAudienceUserIds = async (userId: string): Promise<string[]> => {
+  try {
+    const [chatResults, teamResults] = await Promise.all([
+      prisma.$queryRaw<{ userId: string }[]>`
+        SELECT DISTINCT cp2."userId"
+        FROM "ConversationParticipant" cp1
+        JOIN "ConversationParticipant" cp2 ON cp1."conversationId" = cp2."conversationId"
+        WHERE cp1."userId" = ${userId}
+      `,
+      prisma.$queryRaw<{ userId: string }[]>`
+        SELECT DISTINCT tm2."userId"
+        FROM "TeamMember" tm1
+        JOIN "TeamMember" tm2 ON tm1."teamId" = tm2."teamId"
+        WHERE tm1."userId" = ${userId}
+      `,
+    ]);
+
+    const audienceSet = new Set<string>([userId]);
+    chatResults.forEach((row) => {
+      if (row.userId) audienceSet.add(row.userId);
+    });
+    teamResults.forEach((row) => {
+      if (row.userId) audienceSet.add(row.userId);
+    });
+
+    return Array.from(audienceSet);
+  } catch (err: any) {
+    logger.warn('Failed to query presence audience, falling back to self', { userId, error: err?.message });
+    return [userId];
+  }
 };
