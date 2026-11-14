@@ -74,6 +74,92 @@ const executeWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number, ste
   });
 };
 
+const ADVERSARIAL_PATTERNS = [
+  /ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions/i,
+  /system\s+override/i,
+  /reveal\s+(?:your\s+)?(?:system\s+prompt|instructions)/i,
+  /disregard\s+(?:all\s+)?(?:rules|safeguards)/i,
+  /bypass\s+(?:security|confirmation|safeguards|guards)/i,
+  /act\s+as\s+(?:an?\s+)?unrestricted/i,
+  /jailbreak/i,
+];
+
+const validateNoPromptInjection = (prompt: string): void => {
+  if (!prompt || typeof prompt !== 'string') return;
+  for (const pattern of ADVERSARIAL_PATTERNS) {
+    if (pattern.test(prompt)) {
+      throw new ApiError(400, 'Security violation: Prompt contains disallowed adversarial or prompt injection sequences');
+    }
+  }
+};
+
+const DISPOSABLE_EMAIL_DOMAINS = new Set([
+  'mailinator.com',
+  'tempmail.com',
+  '10minutemail.com',
+  'guerrillamail.com',
+  'throwawaymail.com',
+  'yopmail.com',
+  'trashmail.com',
+  'sharklasers.com',
+  'dispostable.com',
+  'fakeinbox.com',
+]);
+
+const SSRF_REGEX = /(?:https?:\/\/)?(?:127\.0\.0\.1|localhost|0\.0\.0\.0|169\.254\.169\.254|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(?::\d+)?(?:\/|\?|#|$)/i;
+
+const validateSafeUrlAndDomain = (input: string): void => {
+  if (!input || typeof input !== 'string') return;
+  if (SSRF_REGEX.test(input)) {
+    throw new ApiError(400, 'Security violation: Private network addresses or SSRF targets are not permitted');
+  }
+  const emailMatch = input.match(/@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+  if (emailMatch) {
+    const domain = emailMatch[1].toLowerCase();
+    if (DISPOSABLE_EMAIL_DOMAINS.has(domain)) {
+      throw new ApiError(400, 'Security violation: Disposable or temporary email domains are not allowed');
+    }
+  }
+};
+
+const enforceHourlyVelocityQuota = async (userId: string, resourceType: 'team' | 'project' | 'document', maxPerHour: number): Promise<void> => {
+  try {
+    const key = `workflow:quota:${resourceType}:${userId}`;
+    const count = await redis.incr(key);
+    if (count === 1) {
+      await redis.expire(key, 3600);
+    }
+    if (count > maxPerHour) {
+      throw new ApiError(429, `Hourly creation quota exceeded for ${resourceType}s (max ${maxPerHour}/hour). Please wait before creating more.`);
+    }
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+  }
+};
+
+const recordWorkflowAuditEvent = async (event: {
+  planId: string;
+  userId: string;
+  organizationId?: string;
+  summary: string;
+  status: string;
+  results: any[];
+  timestamp: string;
+}): Promise<void> => {
+  try {
+    const orgKey = event.organizationId || 'global';
+    const auditKey = `workflow:audit:${orgKey}`;
+    const payload = JSON.stringify({
+      auditId: 'wf_audit_' + crypto.randomBytes(6).toString('hex'),
+      ...event,
+    });
+    await redis.lpush(auditKey, payload);
+    await redis.ltrim(auditKey, 0, 999);
+  } catch (err) {
+    logger.warn('Failed to record workflow audit event', err);
+  }
+};
+
 const checkAndAdjustMeetingConflict = async (
   hostId: string,
   requestedStart: Date,
@@ -596,6 +682,7 @@ export const generateWorkflowPlan = async (
   }
 
   const sanitizedPrompt = sanitizeAiInput(rawPrompt);
+  validateNoPromptInjection(sanitizedPrompt);
 
   const promptHash = crypto.createHash('sha256').update(`${userId}:${sanitizedPrompt}:${organizationId || ''}`).digest('hex');
   const idempotencyKey = `workflow:idempotency:${userId}:${promptHash}`;
@@ -1375,6 +1462,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             if (existingTeam) {
               team = existingTeam;
             } else {
+              await enforceHourlyVelocityQuota(userId, 'team', 5);
               team = await createTeam(targetOrgId, userId, {
                 name: teamName,
                 description: teamDesc,
@@ -2296,6 +2384,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
               }
             : (rawContent || { type: 'doc', content: [{ type: 'paragraph' }] });
 
+          await enforceHourlyVelocityQuota(userId, 'document', 20);
           const document = await createDocument(userId, {
             title,
             content,
@@ -2525,6 +2614,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             }
           }
 
+          await enforceHourlyVelocityQuota(userId, 'project', 10);
           const project = await createProject(userId, targetOrgId, {
             name: projectName,
             description: resolvedParams.description ? String(resolvedParams.description).trim() : undefined,
@@ -2575,6 +2665,9 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
           }
 
           let email = resolvedParams.email ? String(resolvedParams.email).trim().toLowerCase() : undefined;
+          if (email) {
+            validateSafeUrlAndDomain(email);
+          }
           if (!email && resolvedParams.memberName) {
             const queryName = String(resolvedParams.memberName).trim();
             const matchedUser = await prisma.user.findFirst({
@@ -4410,6 +4503,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             ? resolvedParams.attendeeEmails.map((e: any) => String(e).trim().toLowerCase()).filter(Boolean)
             : undefined;
 
+          if (attendeeEmails) {
+            attendeeEmails.forEach(validateSafeUrlAndDomain);
+          }
+
           const eventType = resolvedParams.eventType ? String(resolvedParams.eventType).trim() : 'EVENT';
 
           const calendarEvent = await createCalendarEvent(userId, {
@@ -4534,6 +4631,14 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             const validRoles: ProjectRole[] = [ProjectRole.PROJECT_MANAGER, ProjectRole.INTERNAL_MEMBER, ProjectRole.FREELANCER, ProjectRole.CLIENT];
             const targetRole = validRoles.includes(rawRole as ProjectRole) ? (rawRole as ProjectRole) : ProjectRole.INTERNAL_MEMBER;
 
+            const callerMembership = await prisma.projectMember.findFirst({
+              where: { projectId: targetProjectId, userId },
+              select: { role: true },
+            });
+            if (targetUserId === userId && targetRole === ProjectRole.PROJECT_MANAGER && callerMembership?.role !== ProjectRole.PROJECT_MANAGER && project.createdById !== userId) {
+              throw new ApiError(403, 'Privilege escalation blocked: You cannot self-promote to PROJECT_MANAGER');
+            }
+
             const updatedMember = await updateProjectMember(userId, targetProjectId, targetUserId, {
               role: targetRole,
             });
@@ -4653,6 +4758,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
 
             const rawRoleStr = String(resolvedParams.teamRole || resolvedParams.role || 'member').toLowerCase();
             const assignedRole = rawRoleStr.includes('lead') || rawRoleStr.includes('admin') || rawRoleStr.includes('leader') ? 'LEAD' : 'member';
+
+            if (targetUserId === userId && assignedRole === 'LEAD' && !isTeamLead && !isOrgAdminOrOwner) {
+              throw new ApiError(403, 'Privilege escalation blocked: You cannot self-promote to team LEAD');
+            }
 
             await prisma.$transaction(async (tx) => {
               await tx.teamMember.update({
@@ -4842,6 +4951,16 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
         } catch {}
       }
     }
+
+    await recordWorkflowAuditEvent({
+      planId,
+      userId,
+      organizationId: plan.organizationId,
+      summary: plan.summary,
+      status: finalStatus,
+      results,
+      timestamp: new Date().toISOString(),
+    });
 
     return {
       planId,
