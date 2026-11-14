@@ -308,7 +308,9 @@ export const generateWorkflowPlan = async (
   userId: string,
   rawPrompt: string,
   organizationId?: string,
-  autoExecute: boolean = false
+  autoExecute: boolean = false,
+  timezone?: string,
+  clientTime?: string
 ) => {
   const sanitizedPrompt = sanitizeAiInput(rawPrompt);
   const orgContext = await getUserOrganizationContext(userId, organizationId);
@@ -317,7 +319,25 @@ export const generateWorkflowPlan = async (
   }
   const accessibleDocs = await getUserAccessibleDocuments(userId, orgContext?.organizationId);
 
+  const now = clientTime && !isNaN(Date.parse(clientTime)) ? new Date(clientTime) : new Date();
+  const userTimezone = timezone && timezone.trim() ? timezone.trim() : 'Asia/Kolkata';
+  let formattedLocalTime = '';
+  try {
+    formattedLocalTime = new Intl.DateTimeFormat('en-US', {
+      timeZone: userTimezone,
+      dateStyle: 'full',
+      timeStyle: 'long',
+    }).format(now);
+  } catch {
+    formattedLocalTime = now.toString();
+  }
+
   const contextData = {
+    currentTimeContext: {
+      currentUtcIso: now.toISOString(),
+      userTimezone,
+      currentLocalTime: formattedLocalTime,
+    },
     organization: orgContext
       ? { id: orgContext.organizationId, name: orgContext.organizationName }
       : null,
@@ -352,6 +372,14 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "SCHEDULE_MEETING": { "title": string, "startTime": string (ISO 8601), "durationMinutes"?: number, "teamId"?: string }
    - "SHARE_DOCUMENT": { "documentId": string, "teamId"?: string, "memberIds"?: string[] }
    - "NOTIFY_MEMBERS": { "userIds": string[], "title": string, "message": string }
+
+CRITICAL DATE & TIME ANCHOR FOR SCHEDULE_MEETING:
+- Current Real-World Time: ${formattedLocalTime} (${userTimezone})
+- Current UTC ISO: ${now.toISOString()}
+- All relative time references like 'today', 'tomorrow', '7:00 PM', 'in 2 hours', 'this afternoon' MUST be computed strictly relative to this real-world time.
+- If the user specifies 'today' at a time that has already passed in the current local time, schedule it for tomorrow at the same time.
+- NEVER produce dates in the past or placeholder years. The computed 'startTime' MUST be in the future (strictly greater than ${now.toISOString()}).
+- Output 'startTime' strictly in ISO 8601 format (e.g. 2026-11-14T13:30:00.000Z).
 
 Output strictly valid JSON with this exact schema:
 {
@@ -419,11 +447,28 @@ Generate the JSON execution plan:`;
     if (parseResult.success) {
       const newStepNumber = sanitizedSteps.length + 1;
       stepNumberMap.set(originalStep, newStepNumber);
-      sanitizedSteps.push({
+      const stepData = {
         ...parseResult.data,
         step: newStepNumber,
         description: parseResult.data.description || parseResult.data.action.replace('_', ' ').toLowerCase(),
-      });
+      };
+
+      if (stepData.action === 'SCHEDULE_MEETING' && stepData.params) {
+        const rawStart = stepData.params.startTime;
+        if (typeof rawStart === 'string') {
+          const parsedStart = new Date(rawStart);
+          if (!isNaN(parsedStart.getTime()) && parsedStart.getTime() < Date.now() - 60000) {
+            const adjusted = new Date();
+            adjusted.setHours(parsedStart.getHours(), parsedStart.getMinutes(), 0, 0);
+            if (adjusted.getTime() < Date.now()) {
+              adjusted.setDate(adjusted.getDate() + 1);
+            }
+            stepData.params.startTime = adjusted.toISOString();
+          }
+        }
+      }
+
+      sanitizedSteps.push(stepData);
     }
   }
 
@@ -702,12 +747,21 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           if (!resolvedParams.startTime) {
             throw new ApiError(400, 'Meeting startTime is required');
           }
-          const startTime = new Date(resolvedParams.startTime);
+          let startTime = new Date(resolvedParams.startTime);
           if (isNaN(startTime.getTime())) {
             throw new ApiError(400, 'Invalid meeting startTime format');
           }
           if (startTime.getTime() < Date.now() - 60000) {
-            throw new ApiError(400, 'Meeting startTime cannot be in the past');
+            const adjusted = new Date();
+            adjusted.setHours(startTime.getHours(), startTime.getMinutes(), 0, 0);
+            if (adjusted.getTime() < Date.now()) {
+              adjusted.setDate(adjusted.getDate() + 1);
+            }
+            if (adjusted.getTime() >= Date.now()) {
+              startTime = adjusted;
+            } else {
+              throw new ApiError(400, 'Meeting startTime cannot be in the past');
+            }
           }
 
           const meetingTitle = String(resolvedParams.title || 'Team Meeting').trim();
