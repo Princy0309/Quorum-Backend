@@ -857,10 +857,10 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "CREATE_CALENDAR_EVENT": { "title": string, "description"?: string, "startDate": string (ISO 8601), "endDate"?: string, "eventType"?: "REMINDER" | "MEETING" | "DEADLINE" | "GENERAL", "isAllDay"?: boolean, "hasReminder"?: boolean, "reminderMinutes"?: number, "attendeeEmails"?: string[] }
    - "DELETE_CALENDAR_EVENT": { "eventId"?: string, "title"?: string }
 6. ACTION SELECTION RULES:
-   - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". DO NOT use "CREATE_TEAM" for organizations or companies.
+   - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". The creator is ALWAYS the organization owner and ORG_ADMIN. Any other members added or invited default to "MEMBER". DO NOT use "CREATE_TEAM" for organizations or companies.
    - When the user asks to add or invite someone/a member to a team (e.g. "add tanvi to team dev team(frontend)", "add user to team"), you MUST use "ADD_TEAM_MEMBER". DO NOT use "CREATE_TEAM" when adding members to an existing team. Match the team from the provided "teams" list to set "teamId" and "teamName", match the organization from the user prompt or "organizations" list to set "organizationId" and "organizationName", and match the member from "members" to set "memberId" and "memberName".
    - When the user asks to remove or kick someone from a team (e.g. "remove tanvi from team frontend", "kick member from team dev"), you MUST use "REMOVE_TEAM_MEMBER". Match team from "teams" and member from "members".
-   - When the user asks to invite someone to an organization or company (e.g. "invite user@example.com to organization", "invite tanvi to company"), you MUST use "INVITE_ORG_MEMBER".
+   - When the user asks to invite someone to an organization or company (e.g. "invite user@example.com to organization", "invite tanvi to company"), you MUST use "INVITE_ORG_MEMBER". Invited users default to role "MEMBER". NEVER invite or downgrade the organization creator/owner.
    - Use "CREATE_TEAM" ONLY when creating a NEW team, squad, department, or group within an organization.
    - When the user asks to create, make, or write a document or notes (e.g. "create a document named PRD", "make team document for sprint planning"), you MUST use "CREATE_DOCUMENT".
    - When the user asks to archive a document (e.g. "archive document PRD", "archive doc sprint planning"), you MUST use "ARCHIVE_DOCUMENT". Match document from "documents".
@@ -1428,6 +1428,46 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             });
           }
 
+          if (org) {
+            await prisma.organizationMember.upsert({
+              where: {
+                organizationId_userId: {
+                  organizationId: org.id,
+                  userId,
+                },
+              },
+              update: {
+                role: OrgRole.ORG_ADMIN,
+              },
+              create: {
+                organizationId: org.id,
+                userId,
+                role: OrgRole.ORG_ADMIN,
+              },
+            });
+
+            const rawMemberIds = Array.isArray(resolvedParams.memberIds) ? resolvedParams.memberIds : [];
+            for (const mId of rawMemberIds) {
+              const cleanId = String(mId).trim();
+              if (cleanId && cleanId !== userId) {
+                await prisma.organizationMember.upsert({
+                  where: {
+                    organizationId_userId: {
+                      organizationId: org.id,
+                      userId: cleanId,
+                    },
+                  },
+                  update: {},
+                  create: {
+                    organizationId: org.id,
+                    userId: cleanId,
+                    role: OrgRole.MEMBER,
+                  },
+                });
+              }
+            }
+          }
+
           orgId = org.id;
           variables.set(`$step${step.step}.organizationId`, org.id);
           variables.set(`$step${step.step}.orgId`, org.id);
@@ -1444,6 +1484,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
               name: org.name,
               slug: org.slug,
               description: org.description,
+              userRole: OrgRole.ORG_ADMIN,
+              isOwner: true,
             },
           });
         } else if (step.action === 'CREATE_TEAM') {
@@ -2710,9 +2752,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
           if (email) {
             validateSafeUrlAndDomain(email);
           }
+          let matchedUser: { email: string; id: string } | null = null;
           if (!email && resolvedParams.memberName) {
             const queryName = String(resolvedParams.memberName).trim();
-            const matchedUser = await prisma.user.findFirst({
+            matchedUser = await prisma.user.findFirst({
               where: {
                 name: { contains: queryName, mode: 'insensitive' },
               },
@@ -2725,6 +2768,41 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
 
           if (!email) {
             throw new ApiError(400, 'Member email is required to invite to organization');
+          }
+
+          const isTargetCaller = Boolean(
+            (matchedUser && matchedUser.id === userId) ||
+            (callerOrg?.isOwner && email && callerOrg.availableMembers.some((m) => m.id === userId && m.email.toLowerCase() === email))
+          );
+
+          if (isTargetCaller) {
+            await prisma.organizationMember.upsert({
+              where: {
+                organizationId_userId: {
+                  organizationId: targetOrgId,
+                  userId,
+                },
+              },
+              update: { role: OrgRole.ORG_ADMIN },
+              create: {
+                organizationId: targetOrgId,
+                userId,
+                role: OrgRole.ORG_ADMIN,
+              },
+            });
+            results.push({
+              step: step.step,
+              action: step.action,
+              description: step.description,
+              success: true,
+              resource: {
+                organizationId: targetOrgId,
+                email,
+                role: OrgRole.ORG_ADMIN,
+                isOwner: true,
+              },
+            });
+            return;
           }
 
           const inviteResult = await createOrganizationInvite(targetOrgId, userId, {
