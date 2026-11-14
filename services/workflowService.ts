@@ -7,6 +7,8 @@ import { getIO } from '../sockets/socketServer.js';
 import { generateRawCompletion, sanitizeAiInput } from './aiService.js';
 import { createTeam, addTeamMember } from './teamService.js';
 import { createOrganization } from './organizationService.js';
+import { createCommunity } from './communityService.js';
+import { createCommunityPost } from './postService.js';
 import { createScopedMeeting } from './meetingService.js';
 import { addCollaborator, checkDocumentAccess } from './documentService.js';
 import { MeetingScopeType, NotificationType, OrgRole, DocumentScopeType } from '@prisma/client';
@@ -305,6 +307,41 @@ const getUserAccessibleDocuments = async (userId: string, organizationId?: strin
   return docs;
 };
 
+const getUserCommunities = async (userId: string) => {
+  const memberships = await prisma.communityMember.findMany({
+    where: { userId },
+    select: {
+      community: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+        },
+      },
+    },
+    take: 50,
+  });
+  const ownedCommunities = await prisma.community.findMany({
+    where: { ownerId: userId },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+    },
+    take: 50,
+  });
+  const map = new Map<string, { id: string; name: string; description?: string | null }>();
+  for (const m of memberships) {
+    if (m.community) {
+      map.set(m.community.id, m.community);
+    }
+  }
+  for (const c of ownedCommunities) {
+    map.set(c.id, c);
+  }
+  return Array.from(map.values());
+};
+
 export const generateWorkflowPlan = async (
   userId: string,
   rawPrompt: string,
@@ -319,6 +356,7 @@ export const generateWorkflowPlan = async (
     throw new ApiError(403, 'You do not have access to the specified organization');
   }
   const accessibleDocs = await getUserAccessibleDocuments(userId, orgContext?.organizationId);
+  const userCommunities = await getUserCommunities(userId);
 
   const now = clientTime && !isNaN(Date.parse(clientTime)) ? new Date(clientTime) : new Date();
   const userTimezone = timezone && timezone.trim() ? timezone.trim() : 'Asia/Kolkata';
@@ -352,6 +390,11 @@ export const generateWorkflowPlan = async (
       id: d.id,
       title: d.title,
     })),
+    communities: userCommunities.map((c) => ({
+      id: c.id,
+      name: c.name,
+      description: c.description || undefined,
+    })),
   };
 
   const systemInstruction = `You are Quorum's secure workflow orchestration engine.
@@ -365,20 +408,27 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "SCHEDULE_MEETING"
    - "SHARE_DOCUMENT"
    - "NOTIFY_MEMBERS"
-3. For entity resolution, match names and email addresses mentioned in the prompt to the provided workspace members and documents. If a member or document cannot be matched with certainty, omit or use best matched ID from the provided context.
+   - "CREATE_COMMUNITY"
+   - "CREATE_COMMUNITY_POST"
+3. For entity resolution, match names and email addresses mentioned in the prompt to the provided workspace members, communities, and documents. If a member, community, or document cannot be matched with certainty, omit or use best matched ID from the provided context.
 4. When an action relies on a resource produced in a previous step, reference it using variable syntax:
    - "$step1.organizationId" or "$step1.orgId" or "$step1.id" for organization created in step 1
    - "$step1.teamId" or "$step1.id" for team created in step 1
    - "$step2.meetingId" or "$step2.meetingCode" for meeting created in step 2
+   - "$step1.communityId" or "$step1.id" for community created in step 1
 5. Parameter requirements per action:
    - "CREATE_ORGANIZATION": { "name": string, "description"?: string }
    - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds"?: string[], "organizationId"?: string }
    - "SCHEDULE_MEETING": { "title": string, "startTime": string (ISO 8601), "durationMinutes"?: number, "teamId"?: string }
    - "SHARE_DOCUMENT": { "documentId": string, "teamId"?: string, "memberIds"?: string[] }
    - "NOTIFY_MEMBERS": { "userIds": string[], "title": string, "message": string }
+   - "CREATE_COMMUNITY": { "name": string, "description"?: string }
+   - "CREATE_COMMUNITY_POST": { "communityId"?: string, "communityName"?: string, "content": string }
 6. ACTION SELECTION RULES:
    - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". DO NOT use "CREATE_TEAM" for organizations or companies.
    - Use "CREATE_TEAM" ONLY when creating a team, squad, department, or group within an organization.
+   - When the user asks to post, share, or publish a message, announcement, or post in a community (e.g. "make a post on community named college saying hello guys", "post in community college hello guys"), you MUST use "CREATE_COMMUNITY_POST". Match the community by name against the provided "communities" list in contextData to set "communityId" and include "communityName" and "content". DO NOT use "NOTIFY_MEMBERS" or "CREATE_TEAM" for community posts.
+   - When the user asks to create or make a community (e.g. "make a community named xyz", "create community"), use "CREATE_COMMUNITY".
    - If a prompt requests creating an organization AND then creating teams or meetings in it, step 1 must be "CREATE_ORGANIZATION", and subsequent steps should reference "$step1.organizationId".
 
 CRITICAL DATE & TIME ANCHOR FOR SCHEDULE_MEETING:
@@ -437,6 +487,10 @@ Generate the JSON execution plan:`;
     const rawStep = parsedPlan.steps[i];
     if (!rawStep || typeof rawStep !== 'object') {
       continue;
+    }
+
+    if ((rawStep as any).action === 'POST_COMMUNITY' || (rawStep as any).action === 'CREATE_POST') {
+      (rawStep as any).action = 'CREATE_COMMUNITY_POST';
     }
 
     const originalStep = typeof (rawStep as any).step === 'number' ? (rawStep as any).step : i + 1;
@@ -1150,6 +1204,139 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             success: true,
             resource: {
               recipientsCount: validRecipients.length,
+            },
+          });
+        } else if (step.action === 'CREATE_COMMUNITY') {
+          const commName = String(resolvedParams.name || 'New Community').trim();
+          const commDesc = resolvedParams.description ? String(resolvedParams.description).trim() : undefined;
+
+          let community: any = null;
+          const existingCommId = variables.get(`$step${step.step}.communityId`);
+          if (existingCommId) {
+            community = await prisma.community.findUnique({ where: { id: existingCommId } });
+          }
+          if (!community) {
+            community = await createCommunity(userId, {
+              name: commName,
+              description: commDesc,
+            });
+          }
+
+          variables.set(`$step${step.step}.communityId`, community.id);
+          variables.set(`$step${step.step}.id`, community.id);
+          variables.set(`$step${step.step}.name`, community.name);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              communityId: community.id,
+              name: community.name,
+              description: community.description,
+            },
+          });
+        } else if (step.action === 'CREATE_COMMUNITY_POST' || step.action === 'POST_COMMUNITY' || step.action === 'CREATE_POST') {
+          let targetCommunityId = resolvedParams.communityId ? String(resolvedParams.communityId).trim() : undefined;
+          const postContent = String(resolvedParams.content || resolvedParams.message || '').trim();
+
+          if (!postContent) {
+            throw new ApiError(400, 'Content is required to create a community post');
+          }
+
+          if ((!targetCommunityId || targetCommunityId.startsWith('$')) && resolvedParams.communityName) {
+            const queryName = String(resolvedParams.communityName).trim();
+            const communityRecord = await prisma.community.findFirst({
+              where: {
+                name: {
+                  equals: queryName,
+                  mode: 'insensitive',
+                },
+              },
+              select: { id: true, ownerId: true },
+            });
+            if (communityRecord) {
+              const existingMember = await prisma.communityMember.findUnique({
+                where: {
+                  communityId_userId: {
+                    communityId: communityRecord.id,
+                    userId,
+                  },
+                },
+              });
+              if (!existingMember && communityRecord.ownerId === userId) {
+                await prisma.communityMember.create({
+                  data: {
+                    communityId: communityRecord.id,
+                    userId,
+                    role: 'OWNER',
+                  },
+                });
+              }
+              targetCommunityId = communityRecord.id;
+            } else {
+              const partialCommunity = await prisma.community.findFirst({
+                where: {
+                  name: {
+                    contains: queryName,
+                    mode: 'insensitive',
+                  },
+                },
+                select: { id: true, ownerId: true },
+              });
+              if (partialCommunity) {
+                const existingMember = await prisma.communityMember.findUnique({
+                  where: {
+                    communityId_userId: {
+                      communityId: partialCommunity.id,
+                      userId,
+                    },
+                  },
+                });
+                if (!existingMember && partialCommunity.ownerId === userId) {
+                  await prisma.communityMember.create({
+                    data: {
+                      communityId: partialCommunity.id,
+                      userId,
+                      role: 'OWNER',
+                    },
+                  });
+                }
+                targetCommunityId = partialCommunity.id;
+              }
+            }
+          }
+
+          if (!targetCommunityId || targetCommunityId.startsWith('$')) {
+            const userComm = await prisma.communityMember.findFirst({
+              where: { userId },
+              select: { communityId: true },
+            });
+            targetCommunityId = userComm?.communityId;
+          }
+
+          if (!targetCommunityId) {
+            throw new ApiError(404, `Target community '${resolvedParams.communityName || ''}' not found or you are not a member`);
+          }
+
+          const post = await createCommunityPost(userId, targetCommunityId, {
+            content: postContent,
+          });
+
+          variables.set(`$step${step.step}.postId`, post.id);
+          variables.set(`$step${step.step}.id`, post.id);
+
+          results.push({
+            step: step.step,
+            action: 'CREATE_COMMUNITY_POST',
+            description: step.description,
+            success: true,
+            resource: {
+              postId: post.id,
+              communityId: targetCommunityId,
+              content: post.content,
+              channelId: post.channelId,
             },
           });
         }

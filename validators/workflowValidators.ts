@@ -6,6 +6,10 @@ export const workflowActionTypeSchema = z.enum([
   'SCHEDULE_MEETING',
   'SHARE_DOCUMENT',
   'NOTIFY_MEMBERS',
+  'CREATE_COMMUNITY',
+  'CREATE_COMMUNITY_POST',
+  'POST_COMMUNITY',
+  'CREATE_POST',
 ]);
 
 export const workflowStepSchema = z.object({
