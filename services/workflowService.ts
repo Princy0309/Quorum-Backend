@@ -789,6 +789,7 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "SEND_CHAT_MESSAGE"
    - "DELETE_CHAT_MESSAGE"
    - "DELETE_COMMUNITY_POST"
+   - "CREATE_MEETING"
    - "START_VIDEO_CALL"
    - "UPDATE_TASK_STATUS"
    - "CANCEL_MEETING"
@@ -828,6 +829,7 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "INVITE_ORG_MEMBER": { "email"?: string, "memberName"?: string, "role"?: "MEMBER" | "ORG_ADMIN", "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string }
    - "SCHEDULE_MEETING": { "title": string, "startTime": string (ISO 8601), "durationMinutes"?: number, "teamId"?: string }
    - "RESCHEDULE_MEETING": { "meetingCode"?: string, "code"?: string, "meetingTitle"?: string, "startTime": string (ISO 8601), "durationMinutes"?: number }
+   - "CREATE_MEETING": { "title"?: string, "participantUserIds"?: string[], "participantNames"?: string[], "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string, "durationMinutes"?: number, "sendChatMessage"?: boolean }
    - "START_VIDEO_CALL": { "title"?: string, "participantUserIds"?: string[], "participantNames"?: string[], "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string, "durationMinutes"?: number, "sendChatMessage"?: boolean }
    - "SHARE_DOCUMENT": { "documentId": string, "teamId"?: string, "memberIds"?: string[] }
    - "CREATE_DOCUMENT": { "title": string, "scopeType"?: "PERSONAL" | "ORGANIZATION" | "TEAM" | "PROJECT", "content"?: string, "organizationId"?: string, "teamId"?: string, "projectId"?: string }
@@ -881,7 +883,8 @@ CRITICAL SECURITY & PRIVACY RULES:
    - When the user asks to unpin a message in chat (e.g. "unpin message in team dev", "unpin last message to Tanvi"), you MUST use "UNPIN_CHAT_MESSAGE".
    - When the user asks to cancel, end, or abort a meeting or call (e.g. "cancel meeting team sync", "cancel meeting code abc-def-ghi", "cancel call"), you MUST use "CANCEL_MEETING".
    - When the user asks to reschedule, move, postpone, or change the time of a meeting (e.g. "reschedule meeting team sync to 5 PM", "move meeting abc-def-ghi to tomorrow 10am"), you MUST use "RESCHEDULE_MEETING".
-   - When the user asks to start, make, or launch an instant video call or call someone/a group right now (e.g. "start a video call with Tanvi", "make a video call inviting Aniket and Tanvi", "call team dev", "instant meeting with dev team"), you MUST use "START_VIDEO_CALL". Match participants from "members" and team from "teams".
+   - When the user asks to create a meet, create a meeting, start a meeting, make a meeting, start a video call, or launch an instant meeting right now (e.g. "create a meet", "create a meeting", "create meeting with dev team", "start meeting with Tanvi", "make a video call", "instant meet", "launch video call"), you MUST use "CREATE_MEETING". This creates an active instant meeting immediately. Match participants from "members" and team from "teams".
+   - Use "SCHEDULE_MEETING" ONLY when the user explicitly provides a FUTURE date or time to schedule a meeting for (e.g. "schedule a meeting tomorrow at 3pm", "schedule team sync for Friday 10am", "schedule meeting at 7pm"). NEVER use "SCHEDULE_MEETING" when the user asks to "create a meet", "create a meeting", or "start a meeting" without a future scheduled time.
    - When the user asks to change, update, or set their status or presence (e.g. "change my status to DND", "set status to available", "set status to busy saying coding", "change status to away", "set status to be right back for 30 minutes"), you MUST use "SET_USER_STATUS". Map "DND" to "DO_NOT_DISTURB", "online" to "AVAILABLE", "brb" to "BE_RIGHT_BACK".
    - When the user asks to add an event, reminder, or calendar item (e.g. "remind me to submit timesheet on Friday 5pm", "add calendar event sprint review on Monday"), you MUST use "CREATE_CALENDAR_EVENT".
    - When the user asks to delete, cancel, or remove an event, reminder, or calendar item (e.g. "cancel calendar event sprint review", "delete reminder timesheet", "remove event sprint planning"), you MUST use "DELETE_CALENDAR_EVENT".
@@ -960,8 +963,30 @@ Generate the JSON execution plan:`;
     if ((rawStep as any).action === 'DELETE_POST' || (rawStep as any).action === 'REMOVE_COMMUNITY_POST') {
       (rawStep as any).action = 'DELETE_COMMUNITY_POST';
     }
-    if ((rawStep as any).action === 'START_CALL' || (rawStep as any).action === 'START_MEETING' || (rawStep as any).action === 'MAKE_VIDEO_CALL' || (rawStep as any).action === 'INSTANT_CALL') {
-      (rawStep as any).action = 'START_VIDEO_CALL';
+    if (
+      (rawStep as any).action === 'START_CALL' ||
+      (rawStep as any).action === 'START_MEETING' ||
+      (rawStep as any).action === 'MAKE_VIDEO_CALL' ||
+      (rawStep as any).action === 'INSTANT_CALL' ||
+      (rawStep as any).action === 'START_VIDEO_CALL' ||
+      (rawStep as any).action === 'MAKE_MEETING' ||
+      (rawStep as any).action === 'INSTANT_MEETING' ||
+      (rawStep as any).action === 'LAUNCH_MEETING' ||
+      (rawStep as any).action === 'CREATE_MEET' ||
+      (rawStep as any).action === 'START_MEET'
+    ) {
+      (rawStep as any).action = 'CREATE_MEETING';
+    }
+    if ((rawStep as any).action === 'SCHEDULE_MEETING') {
+      const promptLower = rawPrompt.toLowerCase();
+      const hasExplicitScheduleKeywords = /(?:schedule|tomorrow|next\s+week|at\s+\d|pm\b|am\b|on\s+monday|on\s+tuesday|on\s+wednesday|on\s+thursday|on\s+friday|on\s+saturday|on\s+sunday|\b\d{1,2}:\d{2}\b)/i.test(promptLower);
+      const isCreateMeetPrompt = /(?:create\s+(?:a\s+)?meet|create\s+(?:a\s+)?meeting|start\s+(?:a\s+)?meet|start\s+(?:a\s+)?meeting|instant\s+meet|make\s+(?:a\s+)?meet)/i.test(promptLower);
+      if (isCreateMeetPrompt && !hasExplicitScheduleKeywords) {
+        (rawStep as any).action = 'CREATE_MEETING';
+        if (rawStep.params) {
+          delete rawStep.params.startTime;
+        }
+      }
     }
     if ((rawStep as any).action === 'ADD_MEMBER' || (rawStep as any).action === 'INVITE_MEMBER') {
       (rawStep as any).action = 'ADD_TEAM_MEMBER';
@@ -3495,8 +3520,17 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
               result: deleteResult,
             },
           });
-        } else if (step.action === 'START_VIDEO_CALL') {
-          const callTitle = String(resolvedParams.title || 'Quick Sync Video Call').trim();
+        } else if (
+          step.action === 'CREATE_MEETING' ||
+          step.action === 'START_VIDEO_CALL' ||
+          step.action === 'START_MEETING' ||
+          step.action === 'START_CALL' ||
+          step.action === 'MAKE_VIDEO_CALL' ||
+          step.action === 'MAKE_MEETING' ||
+          step.action === 'INSTANT_MEETING' ||
+          step.action === 'LAUNCH_MEETING'
+        ) {
+          const callTitle = String(resolvedParams.title || 'Instant Meeting').trim();
           let targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
           let targetTeamId = resolvedParams.teamId ? String(resolvedParams.teamId).trim() : undefined;
 
@@ -3662,6 +3696,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
           variables.set(`$step${step.step}.meetingId`, meeting.code);
           variables.set(`$step${step.step}.meetingCode`, meeting.code);
           variables.set(`$step${step.step}.link`, meeting.link);
+          variables.set(`$step${step.step}.joinUrl`, meeting.link);
           variables.set(`$step${step.step}.id`, meeting.code);
 
           results.push({
@@ -3672,7 +3707,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             resource: {
               meetingCode: meeting.code,
               link: meeting.link,
+              joinUrl: meeting.link,
               title: meeting.title,
+              status: meeting.status,
+              scopeType: meeting.scopeType,
               invitedParticipantsCount: recipientList.length,
               recipientList,
             },
