@@ -302,7 +302,7 @@ export const setUserCustomStatus = async (
     : null;
 
   const payload = {
-    status: input.status,
+    status: (input.status || 'AVAILABLE').toString().toUpperCase().trim() as PresenceStatus,
     statusMessage: input.statusMessage ? input.statusMessage.trim().slice(0, 100) : null,
     statusExpiresAt: expiresAt ? expiresAt.toISOString() : null,
   };

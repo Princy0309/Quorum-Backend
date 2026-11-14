@@ -51,7 +51,10 @@ export const registerPresenceHandler = async (io: SocketIOServer, socket: Authen
     if (isFirstConnection) {
       const contacts = await getPresenceAudienceUserIds(userId);
       contacts.forEach((contactId) => {
-        io.to(`user:${contactId}`).emit(CHAT_EVENTS.PRESENCE_ONLINE, { userId });
+        if(contactId != userId){
+          io.to(`user:${contactId}`).emit(CHAT_EVENTS.PRESENCE_ONLINE, { userId });
+        }
+        
       });
     }
   } catch (err: any) {

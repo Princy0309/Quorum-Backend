@@ -26,14 +26,17 @@ export const updateProfileSchema = z.object({
 });
 
 export const updateStatusSchema = z.object({
-  status: z.enum([
+  status: z.preprocess(
+    (val) => (typeof val === 'string' ? val.trim().toUpperCase() : val),
+   z.enum([
     'AVAILABLE',
     'BUSY',
     'DO_NOT_DISTURB',
     'BE_RIGHT_BACK',
     'AWAY',
     'OFFLINE',
-  ]),
+  ])
+),
   statusMessage: z
     .string()
     .trim()
