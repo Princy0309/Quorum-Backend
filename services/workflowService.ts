@@ -12,15 +12,81 @@ import { createCommunityPost, deleteCommunityPost } from './postService.js';
 import { createScopedMeeting, cancelMeeting } from './meetingService.js';
 import { createDocument, addCollaborator, checkDocumentAccess, updateDocument } from './documentService.js';
 import { createTask, updateTaskStatus } from './taskService.js';
-import { createProject, inviteProjectMember } from './projectService.js';
+import { createProject, inviteProjectMember, createProjectTask, updateProjectMember } from './projectService.js';
 import { createWhiteboard } from './whiteboardService.js';
-import { getOrCreateDirectConversation, saveMessage, deleteMessage, pinMessage } from './chatService.js';
+import { getOrCreateDirectConversation, saveMessage, deleteMessage, pinMessage, unpinMessage } from './chatService.js';
+import { createCalendarEvent } from './calendarService.js';
 import { CHAT_EVENTS } from '../utils/constants.js';
-import { MeetingScopeType, NotificationType, OrgRole, DocumentScopeType, TaskStatus, ProjectRole } from '@prisma/client';
+import { MeetingScopeType, MeetingStatus, NotificationType, OrgRole, DocumentScopeType, TaskStatus, ProjectRole, TaskPriority } from '@prisma/client';
 import { WorkflowStep, workflowStepSchema } from '../validators/workflowValidators.js';
 import { sendPushToOfflineUsers } from './notificationService.js';
 import { setUserCustomStatus, PresenceStatus } from './presenceService.js';
 import { broadcastUserPresenceUpdate } from '../sockets/handlers/presenceHandler.js';
+
+const sanitizeWorkflowText = (input: string): string => {
+  if (!input || typeof input !== 'string') return '';
+  return input
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+    .replace(/javascript\s*:/gi, '')
+    .replace(/vbscript\s*:/gi, '')
+    .replace(/data\s*:\s*text\/html/gi, '')
+    .replace(/on\w+\s*=\s*(['"]).*?\1/gi, '')
+    .replace(/on\w+\s*=\s*[^>\s]+/gi, '')
+    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+    .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
+    .replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '')
+    .trim();
+};
+
+const checkAndAdjustMeetingConflict = async (
+  hostId: string,
+  requestedStart: Date,
+  durationMinutes: number = 60,
+  excludeMeetingCode?: string
+): Promise<Date> => {
+  let adjustedStart = new Date(requestedStart.getTime());
+  let iterations = 0;
+  const maxIterations = 5;
+
+  while (iterations < maxIterations) {
+    const windowStart = adjustedStart;
+    const windowEnd = new Date(windowStart.getTime() + durationMinutes * 60 * 1000);
+
+    const conflict = await prisma.meeting.findFirst({
+      where: {
+        hostId,
+        status: { in: [MeetingStatus.SCHEDULED, MeetingStatus.ACTIVE] },
+        code: excludeMeetingCode ? { not: excludeMeetingCode } : undefined,
+        scheduledStartTime: {
+          lt: windowEnd,
+        },
+      },
+      select: {
+        code: true,
+        scheduledStartTime: true,
+      },
+      orderBy: { scheduledStartTime: 'asc' },
+    });
+
+    if (!conflict || !conflict.scheduledStartTime) {
+      break;
+    }
+
+    const conflictStart = conflict.scheduledStartTime;
+    const conflictDuration = 60;
+    const conflictEnd = new Date(conflictStart.getTime() + conflictDuration * 60 * 1000);
+
+    if (conflictEnd.getTime() > windowStart.getTime() && conflictStart.getTime() < windowEnd.getTime()) {
+      adjustedStart = new Date(conflictEnd.getTime() + 5 * 60 * 1000);
+      iterations++;
+    } else {
+      break;
+    }
+  }
+
+  return adjustedStart;
+};
 
 interface StoredWorkflowPlan {
   planId: string;
@@ -470,6 +536,29 @@ export const generateWorkflowPlan = async (
   clientTime?: string
 ) => {
   const sanitizedPrompt = sanitizeAiInput(rawPrompt);
+
+  const promptHash = crypto.createHash('sha256').update(`${userId}:${sanitizedPrompt}:${organizationId || ''}`).digest('hex');
+  const idempotencyKey = `workflow:idempotency:${userId}:${promptHash}`;
+  try {
+    const existingPlanId = await redis.get(idempotencyKey);
+    if (existingPlanId) {
+      const existingPlan = await getPlan(existingPlanId);
+      if (existingPlan && (Date.now() - new Date(existingPlan.createdAt).getTime()) < 15000) {
+        if (autoExecute) {
+          return await executeWorkflowPlan(userId, existingPlanId);
+        }
+        return {
+          planId: existingPlan.planId,
+          summary: existingPlan.summary,
+          steps: existingPlan.steps,
+          requiresConfirmation: true,
+        };
+      }
+    }
+  } catch (idempErr) {
+    logger.warn('Failed to check workflow idempotency cache', idempErr);
+  }
+
   const orgContext = await getUserOrganizationContext(userId, organizationId, sanitizedPrompt);
   if (organizationId && !orgContext) {
     throw new ApiError(403, 'You do not have access to the specified organization');
@@ -560,6 +649,11 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "ADD_PROJECT_MEMBER"
    - "ARCHIVE_DOCUMENT"
    - "SET_USER_STATUS"
+   - "RESCHEDULE_MEETING"
+   - "CREATE_PROJECT_TASK"
+   - "UNPIN_CHAT_MESSAGE"
+   - "CREATE_CALENDAR_EVENT"
+   - "UPDATE_MEMBER_ROLE"
 3. For entity resolution, match names and email addresses mentioned in the prompt to the provided workspace members, communities, and documents. If a member, community, or document cannot be matched with certainty, omit or use best matched ID from the provided context.
 4. When an action relies on a resource produced in a previous step, reference it using variable syntax:
    - "$step1.organizationId" or "$step1.orgId" or "$step1.id" for organization created in step 1
@@ -568,6 +662,7 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "$step1.documentId" or "$step1.id" for document created or archived in step 1
    - "$step1.taskId" or "$step1.id" for task created or updated in step 1
    - "$step1.projectId" or "$step1.id" for project created or updated in step 1
+   - "$step1.projectTaskId" for project task created in step 1
    - "$step1.whiteboardId" or "$step1.id" for whiteboard created in step 1
    - "$step1.pollId" or "$step1.id" for poll created in step 1
    - "$step1.communityId" or "$step1.id" for community created in step 1
@@ -576,6 +671,7 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "$step1.deletedMessageId" for deleted message in step 1
    - "$step1.deletedPostId" for deleted post in step 1
    - "$step1.status" for user presence status updated in step 1
+   - "$step1.eventId" for calendar event created in step 1
 5. Parameter requirements per action:
    - "CREATE_ORGANIZATION": { "name": string, "description"?: string }
    - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds"?: string[], "organizationId"?: string, "organizationName"?: string }
@@ -583,13 +679,16 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "REMOVE_TEAM_MEMBER": { "teamId"?: string, "teamName"?: string, "memberId"?: string, "memberName"?: string, "memberEmail"?: string, "organizationId"?: string, "organizationName"?: string }
    - "INVITE_ORG_MEMBER": { "email"?: string, "memberName"?: string, "role"?: "MEMBER" | "ORG_ADMIN", "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string }
    - "SCHEDULE_MEETING": { "title": string, "startTime": string (ISO 8601), "durationMinutes"?: number, "teamId"?: string }
+   - "RESCHEDULE_MEETING": { "meetingCode"?: string, "code"?: string, "meetingTitle"?: string, "startTime": string (ISO 8601), "durationMinutes"?: number }
    - "START_VIDEO_CALL": { "title"?: string, "participantUserIds"?: string[], "participantNames"?: string[], "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string, "durationMinutes"?: number, "sendChatMessage"?: boolean }
    - "SHARE_DOCUMENT": { "documentId": string, "teamId"?: string, "memberIds"?: string[] }
    - "CREATE_DOCUMENT": { "title": string, "scopeType"?: "PERSONAL" | "ORGANIZATION" | "TEAM" | "PROJECT", "content"?: string, "organizationId"?: string, "teamId"?: string, "projectId"?: string }
    - "CREATE_TASK": { "title": string, "description"?: string, "dueDate"?: string, "teamId"?: string, "teamName"?: string, "assigneeId"?: string, "assigneeName"?: string, "organizationId"?: string, "organizationName"?: string }
    - "UPDATE_TASK_STATUS": { "taskId"?: string, "taskTitle"?: string, "status"?: "TODO" | "IN_PROGRESS" | "DONE", "teamId"?: string, "organizationId"?: string }
    - "CREATE_PROJECT": { "name": string, "description"?: string, "budget"?: number, "dueDate"?: string, "organizationId"?: string, "organizationName"?: string }
+   - "CREATE_PROJECT_TASK": { "projectId"?: string, "projectName"?: string, "title": string, "description"?: string, "dueDate"?: string, "priority"?: "LOW" | "MEDIUM" | "HIGH" | "URGENT", "assigneeId"?: string, "assigneeName"?: string }
    - "ADD_PROJECT_MEMBER": { "projectId"?: string, "projectName"?: string, "email"?: string, "memberName"?: string, "role"?: "PROJECT_MANAGER" | "INTERNAL_MEMBER" | "FREELANCER" | "CLIENT", "hourlyRate"?: number, "companyId"?: string, "companyName"?: string }
+   - "UPDATE_MEMBER_ROLE": { "teamId"?: string, "teamName"?: string, "projectId"?: string, "projectName"?: string, "memberId"?: string, "memberName"?: string, "memberEmail"?: string, "role": string }
    - "CREATE_WHITEBOARD": { "name": string, "organizationId"?: string, "organizationName"?: string, "teamId"?: string, "projectId"?: string, "meetingId"?: string }
    - "CREATE_POLL": { "question": string, "options": string[], "allowMultipleAnswers"?: boolean, "recipientUserId"?: string, "recipientName"?: string, "groupName"?: string, "teamId"?: string, "conversationId"?: string }
    - "NOTIFY_MEMBERS": { "userIds": string[], "title": string, "message": string }
@@ -601,9 +700,11 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "SEND_CHAT_MESSAGE": { "content": string, "recipientUserId"?: string, "recipientName"?: string, "groupName"?: string, "teamId"?: string, "conversationId"?: string }
    - "DELETE_CHAT_MESSAGE": { "messageId"?: string, "conversationId"?: string, "recipientName"?: string, "recipientUserId"?: string, "groupName"?: string, "teamId"?: string, "contentQuery"?: string, "deleteForEveryone"?: boolean }
    - "PIN_CHAT_MESSAGE": { "messageId"?: string, "conversationId"?: string, "recipientName"?: string, "recipientUserId"?: string, "groupName"?: string, "teamId"?: string, "contentQuery"?: string }
+   - "UNPIN_CHAT_MESSAGE": { "messageId"?: string, "conversationId"?: string, "recipientName"?: string, "recipientUserId"?: string, "groupName"?: string, "teamId"?: string, "contentQuery"?: string }
    - "CANCEL_MEETING": { "meetingCode"?: string, "code"?: string, "meetingTitle"?: string }
    - "ARCHIVE_DOCUMENT": { "documentId"?: string, "documentTitle"?: string, "title"?: string }
    - "SET_USER_STATUS": { "status": "AVAILABLE" | "DO_NOT_DISTURB" | "BUSY" | "BE_RIGHT_BACK" | "AWAY" | "OFFLINE", "statusMessage"?: string, "clearAfterMinutes"?: number }
+   - "CREATE_CALENDAR_EVENT": { "title": string, "description"?: string, "startDate": string (ISO 8601), "endDate"?: string, "eventType"?: "REMINDER" | "MEETING" | "DEADLINE" | "GENERAL", "isAllDay"?: boolean, "hasReminder"?: boolean, "reminderMinutes"?: number, "attendeeEmails"?: string[] }
 6. ACTION SELECTION RULES:
    - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". DO NOT use "CREATE_TEAM" for organizations or companies.
    - When the user asks to add or invite someone/a member to a team (e.g. "add tanvi to team dev team(frontend)", "add user to team"), you MUST use "ADD_TEAM_MEMBER". DO NOT use "CREATE_TEAM" when adding members to an existing team. Match the team from the provided "teams" list to set "teamId" and "teamName", match the organization from the user prompt or "organizations" list to set "organizationId" and "organizationName", and match the member from "members" to set "memberId" and "memberName".
@@ -615,7 +716,9 @@ CRITICAL SECURITY & PRIVACY RULES:
    - When the user asks to create or assign a task (e.g. "create task fix navbar for tanvi in team dev", "assign task deploy to tanvi"), you MUST use "CREATE_TASK".
    - When the user asks to mark a task as done, completed, in progress, todo, or update a task status (e.g. "mark task fix navbar as done", "complete task deploy", "update task status to in progress"), you MUST use "UPDATE_TASK_STATUS".
    - When the user asks to create or start a project (e.g. "create a project named Mobile App", "start website redesign project"), you MUST use "CREATE_PROJECT".
+   - When the user asks to create or add a task in a project (e.g. "create task design homepage in project Mobile App", "add project task review pr in Alpha"), you MUST use "CREATE_PROJECT_TASK". Match project from "projects".
    - When the user asks to add or invite a member or freelancer to a project (e.g. "add tanvi to project Mobile App as freelancer", "invite user@example.com to project Alpha"), you MUST use "ADD_PROJECT_MEMBER". Match project from "projects" and member from "members".
+   - When the user asks to promote, demote, or change the role of a member in a team or project (e.g. "make tanvi lead of team dev", "change tanvi role to freelancer in project Mobile App"), you MUST use "UPDATE_MEMBER_ROLE".
    - When the user asks to create a whiteboard or canvas (e.g. "create a whiteboard for architecture design", "make whiteboard"), you MUST use "CREATE_WHITEBOARD".
    - When the user asks to create a poll (e.g. "create a poll asking what time to meet with options 2pm, 4pm", "create poll in team dev"), you MUST use "CREATE_POLL".
    - When the user asks to invite or add someone to a community (e.g. "invite tanvi to community college", "add user to community developers"), you MUST use "INVITE_COMMUNITY_MEMBER". Match community from "communities" and member from "members".
@@ -626,10 +729,16 @@ CRITICAL SECURITY & PRIVACY RULES:
    - When the user asks to write, send, text, or ping a message to a person or someone (e.g. "write a message to Aniket saying hello", "send message to John"), or to a group or team (e.g. "write a message in frontend group saying meeting starts now", "send a message to team dev"), you MUST use "SEND_CHAT_MESSAGE". Match the person against workspace members for "recipientUserId"/"recipientName", or match the group against "teams" for "groupName"/"teamId". DO NOT use "NOTIFY_MEMBERS" or "CREATE_COMMUNITY_POST" for direct or group chat messages.
    - When the user asks to delete, unsend, or erase a message in chat (e.g. "delete my last message to Tanvi", "delete message saying hello in dev team", "unsend message"), you MUST use "DELETE_CHAT_MESSAGE". Match recipient or team from context.
    - When the user asks to pin a message in chat (e.g. "pin message saying meeting starts now", "pin my last message to Tanvi", "pin message in dev team"), you MUST use "PIN_CHAT_MESSAGE".
+   - When the user asks to unpin a message in chat (e.g. "unpin message in team dev", "unpin last message to Tanvi"), you MUST use "UNPIN_CHAT_MESSAGE".
    - When the user asks to cancel, end, or abort a meeting or call (e.g. "cancel meeting team sync", "cancel meeting code abc-def-ghi", "cancel call"), you MUST use "CANCEL_MEETING".
+   - When the user asks to reschedule, move, postpone, or change the time of a meeting (e.g. "reschedule meeting team sync to 5 PM", "move meeting abc-def-ghi to tomorrow 10am"), you MUST use "RESCHEDULE_MEETING".
    - When the user asks to start, make, or launch an instant video call or call someone/a group right now (e.g. "start a video call with Tanvi", "make a video call inviting Aniket and Tanvi", "call team dev", "instant meeting with dev team"), you MUST use "START_VIDEO_CALL". Match participants from "members" and team from "teams".
    - When the user asks to change, update, or set their status or presence (e.g. "change my status to DND", "set status to available", "set status to busy saying coding", "change status to away", "set status to be right back for 30 minutes"), you MUST use "SET_USER_STATUS". Map "DND" to "DO_NOT_DISTURB", "online" to "AVAILABLE", "brb" to "BE_RIGHT_BACK".
+   - When the user asks to add an event, reminder, or calendar item (e.g. "remind me to submit timesheet on Friday 5pm", "add calendar event sprint review on Monday"), you MUST use "CREATE_CALENDAR_EVENT".
    - If a prompt requests creating an organization AND then creating teams or meetings in it, step 1 must be "CREATE_ORGANIZATION", and subsequent steps should reference "$step1.organizationId".
+
+CRITICAL STEP LIMIT RULE:
+- Never generate more than 10 steps in a workflow plan. If a request is broad, focus on the first 10 most critical actionable steps.
 
 CRITICAL DATE & TIME ANCHOR FOR SCHEDULE_MEETING:
 - Current Real-World Time: ${formattedLocalTime} (${userTimezone})
@@ -752,6 +861,21 @@ Generate the JSON execution plan:`;
     if ((rawStep as any).action === 'UPDATE_USER_STATUS' || (rawStep as any).action === 'CHANGE_STATUS') {
       (rawStep as any).action = 'SET_USER_STATUS';
     }
+    if ((rawStep as any).action === 'MOVE_MEETING' || (rawStep as any).action === 'CHANGE_MEETING_TIME') {
+      (rawStep as any).action = 'RESCHEDULE_MEETING';
+    }
+    if ((rawStep as any).action === 'ADD_PROJECT_TASK') {
+      (rawStep as any).action = 'CREATE_PROJECT_TASK';
+    }
+    if ((rawStep as any).action === 'UNPIN_MESSAGE') {
+      (rawStep as any).action = 'UNPIN_CHAT_MESSAGE';
+    }
+    if ((rawStep as any).action === 'SCHEDULE_EVENT' || (rawStep as any).action === 'CREATE_EVENT' || (rawStep as any).action === 'ADD_REMINDER') {
+      (rawStep as any).action = 'CREATE_CALENDAR_EVENT';
+    }
+    if ((rawStep as any).action === 'CHANGE_MEMBER_ROLE' || (rawStep as any).action === 'SET_MEMBER_ROLE') {
+      (rawStep as any).action = 'UPDATE_MEMBER_ROLE';
+    }
 
     if ((rawStep as any).action === 'SET_USER_STATUS' && (rawStep as any).params) {
       const s = String((rawStep as any).params.status || '').toUpperCase().trim();
@@ -782,8 +906,8 @@ Generate the JSON execution plan:`;
         description: parseResult.data.description || parseResult.data.action.replace('_', ' ').toLowerCase(),
       };
 
-      if (stepData.action === 'SCHEDULE_MEETING' && stepData.params) {
-        const rawStart = stepData.params.startTime;
+      if ((stepData.action === 'SCHEDULE_MEETING' || stepData.action === 'RESCHEDULE_MEETING') && stepData.params) {
+        const rawStart = stepData.params.startTime || stepData.params.startDate;
         if (typeof rawStart === 'string') {
           const parsedStart = new Date(rawStart);
           if (!isNaN(parsedStart.getTime()) && parsedStart.getTime() < Date.now() - 60000) {
@@ -797,7 +921,22 @@ Generate the JSON execution plan:`;
         }
       }
 
-      if ((stepData.action === 'CREATE_TASK' || stepData.action === 'CREATE_PROJECT') && stepData.params) {
+      if (stepData.action === 'CREATE_CALENDAR_EVENT' && stepData.params) {
+        const rawStart = stepData.params.startDate || stepData.params.startTime;
+        if (typeof rawStart === 'string') {
+          const parsedStart = new Date(rawStart);
+          if (!isNaN(parsedStart.getTime()) && parsedStart.getTime() < Date.now() - 60000) {
+            const adjusted = new Date();
+            adjusted.setHours(parsedStart.getHours(), parsedStart.getMinutes(), 0, 0);
+            if (adjusted.getTime() < Date.now()) {
+              adjusted.setDate(adjusted.getDate() + 1);
+            }
+            stepData.params.startDate = adjusted.toISOString();
+          }
+        }
+      }
+
+      if ((stepData.action === 'CREATE_TASK' || stepData.action === 'CREATE_PROJECT' || stepData.action === 'CREATE_PROJECT_TASK') && stepData.params) {
         const rawDue = stepData.params.dueDate;
         if (typeof rawDue === 'string') {
           const parsedDue = new Date(rawDue);
@@ -814,6 +953,10 @@ Generate the JSON execution plan:`;
 
       sanitizedSteps.push(stepData);
     }
+  }
+
+  if (sanitizedSteps.length > 10) {
+    sanitizedSteps.length = 10;
   }
 
   const remapStepVariables = (val: any): any => {
@@ -857,6 +1000,10 @@ Generate the JSON execution plan:`;
 
   await savePlan(storedPlan);
 
+  try {
+    await redis.set(idempotencyKey, planId, 'EX', 15);
+  } catch {}
+
   const DESTRUCTIVE_ACTIONS = new Set([
     'DELETE_CHAT_MESSAGE',
     'DELETE_COMMUNITY_POST',
@@ -864,6 +1011,7 @@ Generate the JSON execution plan:`;
     'REMOVE_COMMUNITY_MEMBER',
     'CANCEL_MEETING',
     'ARCHIVE_DOCUMENT',
+    'UNPIN_CHAT_MESSAGE',
   ]);
   const hasDestructiveAction = sanitizedSteps.some((s) => DESTRUCTIVE_ACTIONS.has(s.action));
 
@@ -1271,6 +1419,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             throw new ApiError(400, 'durationMinutes must be a positive number between 1 and 1440');
           }
 
+          startTime = await checkAndAdjustMeetingConflict(userId, startTime, durationMinutes || 60);
+
           let meeting: any = null;
           const existingMeetingId = variables.get(`$step${step.step}.meetingId`);
           if (existingMeetingId) {
@@ -1648,7 +1798,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           });
         } else if (step.action === 'CREATE_COMMUNITY_POST' || step.action === 'POST_COMMUNITY' || step.action === 'CREATE_POST') {
           let targetCommunityId = resolvedParams.communityId ? String(resolvedParams.communityId).trim() : undefined;
-          const postContent = String(resolvedParams.content || resolvedParams.message || '').trim();
+          const postContent = sanitizeWorkflowText(String(resolvedParams.content || resolvedParams.message || '')).trim();
 
           if (!postContent) {
             throw new ApiError(400, 'Content is required to create a community post');
@@ -1749,7 +1899,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             },
           });
         } else if (step.action === 'SEND_CHAT_MESSAGE' || step.action === 'SEND_MESSAGE' || step.action === 'WRITE_MESSAGE') {
-          const content = String(resolvedParams.content || resolvedParams.message || '').trim();
+          const content = sanitizeWorkflowText(String(resolvedParams.content || resolvedParams.message || '')).trim();
           if (!content) {
             throw new ApiError(400, 'Message content is required');
           }
@@ -1903,7 +2053,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             }
           });
         } else if (step.action === 'CREATE_DOCUMENT') {
-          const title = String(resolvedParams.title || resolvedParams.documentName || resolvedParams.name || 'Untitled Document').trim();
+          const title = sanitizeWorkflowText(String(resolvedParams.title || resolvedParams.documentName || resolvedParams.name || 'Untitled Document')).trim();
           if (!title) {
             throw new ApiError(400, 'Document title is required');
           }
@@ -1973,7 +2123,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
                 content: [
                   {
                     type: 'paragraph',
-                    content: [{ type: 'text', text: rawContent }],
+                    content: [{ type: 'text', text: sanitizeWorkflowText(rawContent) }],
                   },
                 ],
               }
@@ -2007,7 +2157,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             },
           });
         } else if (step.action === 'CREATE_TASK' || step.action === 'ASSIGN_TASK') {
-          const taskTitle = String(resolvedParams.title || resolvedParams.name || '').trim();
+          const taskTitle = sanitizeWorkflowText(String(resolvedParams.title || resolvedParams.name || '')).trim();
           if (!taskTitle) {
             throw new ApiError(400, 'Task title is required');
           }
@@ -2126,7 +2276,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             callerOrg.isOwner ? OrgRole.ORG_ADMIN : callerOrg.userRole,
             {
               title: taskTitle,
-              description: resolvedParams.description ? String(resolvedParams.description).trim() : undefined,
+              description: resolvedParams.description ? sanitizeWorkflowText(String(resolvedParams.description)).trim() : undefined,
               dueDate: taskDueDate,
               assigneeId,
             }
@@ -2369,6 +2519,40 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
 
           if (!targetUserId) {
             throw new ApiError(404, `Member '${resolvedParams.memberName || resolvedParams.memberEmail || 'specified'}' not found in team '${team.name}'`);
+          }
+
+          if (targetUserId === userId) {
+            throw new ApiError(400, 'Cannot remove yourself via workflow action');
+          }
+
+          const org = await prisma.organization.findUnique({
+            where: { id: finalOrgId },
+            select: { ownerId: true },
+          });
+
+          if (org?.ownerId === targetUserId) {
+            throw new ApiError(400, 'Cannot remove the organization owner');
+          }
+
+          const targetOrgMember = await prisma.organizationMember.findUnique({
+            where: {
+              organizationId_userId: {
+                organizationId: finalOrgId,
+                userId: targetUserId,
+              },
+            },
+          });
+
+          if (targetOrgMember?.role === OrgRole.ORG_ADMIN) {
+            const adminCount = await prisma.organizationMember.count({
+              where: {
+                organizationId: finalOrgId,
+                role: OrgRole.ORG_ADMIN,
+              },
+            });
+            if (adminCount <= 1) {
+              throw new ApiError(400, 'Cannot remove the last remaining organization admin');
+            }
           }
 
           await removeTeamMember(finalOrgId, team.id, userId, callerRole, targetUserId);
@@ -2792,6 +2976,20 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
 
           if (targetUserId === userId) {
             throw new ApiError(400, 'Cannot remove yourself via this command. Use leave community instead');
+          }
+
+          const targetCommMember = await prisma.communityMember.findUnique({
+            where: {
+              communityId_userId: {
+                communityId: targetCommunityId,
+                userId: targetUserId,
+              },
+            },
+            select: { role: true },
+          });
+
+          if (targetCommMember?.role === 'OWNER') {
+            throw new ApiError(400, 'Cannot remove the community owner');
           }
 
           await removeCommunityMember(userId, targetCommunityId, targetUserId);
@@ -3665,6 +3863,655 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               isOnline: updatedPresence.isOnline,
             },
           });
+        } else if (step.action === 'RESCHEDULE_MEETING' || step.action === 'MOVE_MEETING' || step.action === 'CHANGE_MEETING_TIME') {
+          let meeting: any = null;
+          if (resolvedParams.meetingCode || resolvedParams.code) {
+            const codeQuery = String(resolvedParams.meetingCode || resolvedParams.code).trim();
+            meeting = await prisma.meeting.findUnique({
+              where: { code: codeQuery },
+            });
+          }
+          if (!meeting && resolvedParams.meetingId) {
+            const idQuery = String(resolvedParams.meetingId).trim();
+            meeting = await prisma.meeting.findUnique({
+              where: { id: idQuery },
+            });
+          }
+          if (!meeting && resolvedParams.title) {
+            const titleQuery = String(resolvedParams.title).trim();
+            meeting = await prisma.meeting.findFirst({
+              where: {
+                hostId: userId,
+                title: { contains: titleQuery, mode: 'insensitive' },
+                status: { in: [MeetingStatus.SCHEDULED, MeetingStatus.ACTIVE] },
+              },
+              orderBy: { scheduledStartTime: 'asc' },
+            });
+          }
+          if (!meeting) {
+            meeting = await prisma.meeting.findFirst({
+              where: {
+                hostId: userId,
+                status: MeetingStatus.SCHEDULED,
+              },
+              orderBy: { scheduledStartTime: 'asc' },
+            });
+          }
+
+          if (!meeting) {
+            throw new ApiError(404, 'Meeting to reschedule not found');
+          }
+
+          if (meeting.hostId !== userId) {
+            throw new ApiError(403, 'Only the meeting host can reschedule the meeting');
+          }
+
+          const rawStart = resolvedParams.startTime || resolvedParams.newStartTime;
+          if (!rawStart) {
+            throw new ApiError(400, 'New meeting startTime is required');
+          }
+
+          let newStart = new Date(rawStart);
+          if (isNaN(newStart.getTime())) {
+            throw new ApiError(400, 'Invalid meeting startTime format');
+          }
+
+          if (newStart.getTime() < Date.now() - 60000) {
+            const adjusted = new Date();
+            adjusted.setHours(newStart.getHours(), newStart.getMinutes(), 0, 0);
+            if (adjusted.getTime() < Date.now()) {
+              adjusted.setDate(adjusted.getDate() + 1);
+            }
+            if (adjusted.getTime() >= Date.now()) {
+              newStart = adjusted;
+            } else {
+              throw new ApiError(400, 'Meeting startTime cannot be in the past');
+            }
+          }
+
+          const duration = resolvedParams.durationMinutes !== undefined && resolvedParams.durationMinutes !== null
+            ? Number(resolvedParams.durationMinutes)
+            : 60;
+
+          if (isNaN(duration) || duration <= 0 || duration > 1440) {
+            throw new ApiError(400, 'durationMinutes must be a positive number between 1 and 1440');
+          }
+
+          newStart = await checkAndAdjustMeetingConflict(userId, newStart, duration, meeting.code);
+
+          const updatedMeeting = await prisma.meeting.update({
+            where: { id: meeting.id },
+            data: {
+              scheduledStartTime: newStart,
+            },
+          });
+
+          await prisma.calendarEvent.updateMany({
+            where: {
+              userId,
+              meetingLink: { contains: meeting.code },
+            },
+            data: {
+              startDate: newStart,
+              endDate: new Date(newStart.getTime() + duration * 60 * 1000),
+            },
+          });
+
+          try {
+            getIO().to(`meeting:${meeting.code}`).emit('meeting:rescheduled', {
+              meetingCode: meeting.code,
+              scheduledStartTime: newStart,
+              durationMinutes: duration,
+            });
+          } catch {}
+
+          variables.set(`$step${step.step}.meetingId`, updatedMeeting.id);
+          variables.set(`$step${step.step}.meetingCode`, updatedMeeting.code);
+          variables.set(`$step${step.step}.scheduledStartTime`, newStart.toISOString());
+
+          results.push({
+            step: step.step,
+            action: 'RESCHEDULE_MEETING',
+            description: step.description,
+            success: true,
+            resource: {
+              meetingId: updatedMeeting.id,
+              meetingCode: updatedMeeting.code,
+              title: updatedMeeting.title,
+              scheduledStartTime: updatedMeeting.scheduledStartTime,
+              durationMinutes: duration,
+            },
+          });
+        } else if (step.action === 'CREATE_PROJECT_TASK' || step.action === 'ADD_PROJECT_TASK') {
+          const taskTitle = sanitizeWorkflowText(String(resolvedParams.title || resolvedParams.name || '')).trim();
+          if (!taskTitle) {
+            throw new ApiError(400, 'Project task title is required');
+          }
+
+          const taskDescription = resolvedParams.description
+            ? sanitizeWorkflowText(String(resolvedParams.description)).trim()
+            : undefined;
+
+          let targetProjectId = resolvedParams.projectId ? String(resolvedParams.projectId).trim() : undefined;
+          if (!targetProjectId && resolvedParams.projectName) {
+            const queryName = String(resolvedParams.projectName).trim();
+            const project = await prisma.project.findFirst({
+              where: {
+                name: { contains: queryName, mode: 'insensitive' },
+                members: { some: { userId } },
+              },
+              select: { id: true },
+            });
+            if (project) {
+              targetProjectId = project.id;
+            }
+          }
+
+          if (!targetProjectId) {
+            const recentProjectMember = await prisma.projectMember.findFirst({
+              where: { userId },
+              select: { projectId: true },
+              orderBy: { joinedAt: 'desc' },
+            });
+            targetProjectId = recentProjectMember?.projectId;
+          }
+
+          if (!targetProjectId) {
+            throw new ApiError(404, `Project '${resolvedParams.projectName || 'specified'}' not found`);
+          }
+
+          let assigneeId = resolvedParams.assigneeId ? String(resolvedParams.assigneeId).trim() : undefined;
+          if (!assigneeId && resolvedParams.assigneeName) {
+            const assigneeQuery = String(resolvedParams.assigneeName).trim();
+            const matchedMember = await prisma.projectMember.findFirst({
+              where: {
+                projectId: targetProjectId,
+                user: { name: { contains: assigneeQuery, mode: 'insensitive' } },
+              },
+              select: { userId: true },
+            });
+            if (matchedMember) {
+              assigneeId = matchedMember.userId;
+            }
+          }
+
+          if (!assigneeId) {
+            assigneeId = userId;
+          }
+
+          let priority: TaskPriority = TaskPriority.MEDIUM;
+          if (resolvedParams.priority) {
+            const p = String(resolvedParams.priority).toUpperCase();
+            if (['LOW', 'MEDIUM', 'HIGH', 'URGENT'].includes(p)) {
+              priority = p as TaskPriority;
+            }
+          }
+
+          let dueDate: Date | undefined;
+          if (resolvedParams.dueDate) {
+            const parsedDue = new Date(resolvedParams.dueDate);
+            if (!isNaN(parsedDue.getTime())) {
+              dueDate = parsedDue;
+            }
+          }
+
+          const projectTask = await createProjectTask(userId, targetProjectId, {
+            title: taskTitle,
+            description: taskDescription,
+            dueDate: dueDate ? dueDate.toISOString() : undefined,
+            priority,
+            assigneeId,
+          });
+
+          variables.set(`$step${step.step}.taskId`, projectTask.id);
+          variables.set(`$step${step.step}.id`, projectTask.id);
+          variables.set(`$step${step.step}.title`, projectTask.title);
+          variables.set(`$step${step.step}.projectId`, targetProjectId);
+
+          results.push({
+            step: step.step,
+            action: 'CREATE_PROJECT_TASK',
+            description: step.description,
+            success: true,
+            resource: {
+              taskId: projectTask.id,
+              title: projectTask.title,
+              projectId: targetProjectId,
+              priority: projectTask.priority,
+              status: projectTask.status,
+              assigneeId: projectTask.assigneeId,
+              dueDate: projectTask.dueDate,
+            },
+          });
+        } else if (step.action === 'UNPIN_CHAT_MESSAGE' || step.action === 'UNPIN_MESSAGE') {
+          let targetConvId = resolvedParams.conversationId ? String(resolvedParams.conversationId).trim() : undefined;
+          if ((!targetConvId || targetConvId.startsWith('$')) && resolvedParams.teamId) {
+            const teamConv = await prisma.conversation.findFirst({
+              where: { teamId: String(resolvedParams.teamId).trim() },
+              select: { id: true },
+            });
+            if (teamConv) {
+              targetConvId = teamConv.id;
+            }
+          }
+
+          if ((!targetConvId || targetConvId.startsWith('$')) && resolvedParams.teamName) {
+            const teamQuery = String(resolvedParams.teamName).trim();
+            const team = await prisma.team.findFirst({
+              where: { name: { contains: teamQuery, mode: 'insensitive' } },
+              select: { id: true },
+            });
+            if (team) {
+              const teamConv = await prisma.conversation.findFirst({
+                where: { teamId: team.id },
+                select: { id: true },
+              });
+              if (teamConv) {
+                targetConvId = teamConv.id;
+              }
+            }
+          }
+
+          let messageId = resolvedParams.messageId ? String(resolvedParams.messageId).trim() : undefined;
+          if (!messageId && targetConvId) {
+            const pinnedMsg = await prisma.message.findFirst({
+              where: {
+                conversationId: targetConvId,
+                isPinned: true,
+              },
+              orderBy: { updatedAt: 'desc' },
+              select: { id: true },
+            });
+            if (pinnedMsg) {
+              messageId = pinnedMsg.id;
+            }
+          }
+
+          if (!messageId) {
+            const userPinned = await prisma.message.findFirst({
+              where: {
+                isPinned: true,
+                conversation: {
+                  participants: { some: { userId } },
+                },
+              },
+              orderBy: { updatedAt: 'desc' },
+              select: { id: true, conversationId: true },
+            });
+            if (userPinned) {
+              messageId = userPinned.id;
+              if (!targetConvId) {
+                targetConvId = userPinned.conversationId;
+              }
+            }
+          }
+
+          if (!messageId || !targetConvId) {
+            throw new ApiError(404, 'No pinned message found to unpin');
+          }
+
+          await unpinMessage(userId, targetConvId, messageId);
+
+          variables.set(`$step${step.step}.messageId`, messageId);
+          variables.set(`$step${step.step}.conversationId`, targetConvId);
+
+          results.push({
+            step: step.step,
+            action: 'UNPIN_CHAT_MESSAGE',
+            description: step.description,
+            success: true,
+            resource: {
+              messageId,
+              conversationId: targetConvId,
+              unpinned: true,
+            },
+          });
+        } else if (step.action === 'CREATE_CALENDAR_EVENT' || step.action === 'SCHEDULE_EVENT' || step.action === 'CREATE_EVENT' || step.action === 'ADD_REMINDER') {
+          const eventTitle = sanitizeWorkflowText(String(resolvedParams.title || resolvedParams.name || 'Calendar Event')).trim();
+          if (!eventTitle) {
+            throw new ApiError(400, 'Calendar event title is required');
+          }
+
+          const eventDescription = resolvedParams.description
+            ? sanitizeWorkflowText(String(resolvedParams.description)).trim()
+            : undefined;
+
+          const rawStart = resolvedParams.startDate || resolvedParams.startTime || resolvedParams.date;
+          if (!rawStart) {
+            throw new ApiError(400, 'Calendar event startDate is required');
+          }
+
+          let startDate = new Date(rawStart);
+          if (isNaN(startDate.getTime())) {
+            throw new ApiError(400, 'Invalid startDate format for calendar event');
+          }
+
+          if (startDate.getTime() < Date.now() - 60000) {
+            const adjusted = new Date();
+            adjusted.setHours(startDate.getHours(), startDate.getMinutes(), 0, 0);
+            if (adjusted.getTime() < Date.now()) {
+              adjusted.setDate(adjusted.getDate() + 1);
+            }
+            if (adjusted.getTime() >= Date.now()) {
+              startDate = adjusted;
+            } else {
+              throw new ApiError(400, 'Calendar event date cannot be in the past');
+            }
+          }
+
+          let endDate = resolvedParams.endDate || resolvedParams.endTime
+            ? new Date(resolvedParams.endDate || resolvedParams.endTime)
+            : new Date(startDate.getTime() + 60 * 60 * 1000);
+
+          if (isNaN(endDate.getTime()) || endDate.getTime() < startDate.getTime()) {
+            endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+          }
+
+          const isAllDay = Boolean(resolvedParams.isAllDay);
+          const hasReminder = resolvedParams.hasReminder !== undefined ? Boolean(resolvedParams.hasReminder) : true;
+          const reminderMinutes = resolvedParams.reminderMinutes !== undefined && resolvedParams.reminderMinutes !== null
+            ? Number(resolvedParams.reminderMinutes)
+            : 15;
+
+          const attendeeEmails = Array.isArray(resolvedParams.attendeeEmails)
+            ? resolvedParams.attendeeEmails.map((e: any) => String(e).trim().toLowerCase()).filter(Boolean)
+            : undefined;
+
+          const eventType = resolvedParams.eventType ? String(resolvedParams.eventType).trim() : 'EVENT';
+
+          const calendarEvent = await createCalendarEvent(userId, {
+            title: eventTitle,
+            description: eventDescription,
+            startDate: startDate.toISOString(),
+            endDate: endDate.toISOString(),
+            eventType: eventType as any,
+            isAllDay,
+            hasReminder,
+            reminderMinutes,
+            attendeeEmails,
+          });
+
+          variables.set(`$step${step.step}.eventId`, calendarEvent.id);
+          variables.set(`$step${step.step}.id`, calendarEvent.id);
+          variables.set(`$step${step.step}.title`, calendarEvent.title);
+
+          results.push({
+            step: step.step,
+            action: 'CREATE_CALENDAR_EVENT',
+            description: step.description,
+            success: true,
+            resource: {
+              eventId: calendarEvent.id,
+              title: calendarEvent.title,
+              startDate: calendarEvent.startDate,
+              endDate: calendarEvent.endDate,
+              isAllDay: calendarEvent.isAllDay,
+              hasReminder: calendarEvent.hasReminder,
+            },
+          });
+        } else if (step.action === 'UPDATE_MEMBER_ROLE' || step.action === 'CHANGE_MEMBER_ROLE' || step.action === 'SET_MEMBER_ROLE') {
+          const isProjectRole = Boolean(
+            resolvedParams.projectId ||
+            resolvedParams.projectName ||
+            resolvedParams.projectRole ||
+            (resolvedParams.role && ['PROJECT_MANAGER', 'INTERNAL_MEMBER', 'FREELANCER', 'CLIENT'].includes(String(resolvedParams.role).toUpperCase()))
+          );
+
+          if (isProjectRole) {
+            let targetProjectId = resolvedParams.projectId ? String(resolvedParams.projectId).trim() : undefined;
+            if (!targetProjectId && resolvedParams.projectName) {
+              const queryName = String(resolvedParams.projectName).trim();
+              const proj = await prisma.project.findFirst({
+                where: {
+                  name: { contains: queryName, mode: 'insensitive' },
+                  members: { some: { userId } },
+                },
+                select: { id: true },
+              });
+              if (proj) {
+                targetProjectId = proj.id;
+              }
+            }
+
+            if (!targetProjectId) {
+              const recentProj = await prisma.projectMember.findFirst({
+                where: { userId },
+                select: { projectId: true },
+                orderBy: { joinedAt: 'desc' },
+              });
+              targetProjectId = recentProj?.projectId;
+            }
+
+            if (!targetProjectId) {
+              throw new ApiError(404, `Project '${resolvedParams.projectName || 'specified'}' not found`);
+            }
+
+            const project = await prisma.project.findUnique({
+              where: { id: targetProjectId },
+              select: { id: true, createdById: true, organizationId: true },
+            });
+
+            if (!project) {
+              throw new ApiError(404, 'Project not found');
+            }
+
+            let targetUserId = resolvedParams.targetUserId || resolvedParams.memberId || resolvedParams.userId
+              ? String(resolvedParams.targetUserId || resolvedParams.memberId || resolvedParams.userId).trim()
+              : undefined;
+
+            if (!targetUserId && resolvedParams.memberName) {
+              const mQuery = String(resolvedParams.memberName).trim();
+              const matchedProjUser = await prisma.projectMember.findFirst({
+                where: {
+                  projectId: targetProjectId,
+                  user: { name: { contains: mQuery, mode: 'insensitive' } },
+                },
+                select: { userId: true },
+              });
+              if (matchedProjUser) {
+                targetUserId = matchedProjUser.userId;
+              }
+            }
+
+            if (!targetUserId && resolvedParams.memberEmail) {
+              const eQuery = String(resolvedParams.memberEmail).trim().toLowerCase();
+              const matchedProjUser = await prisma.projectMember.findFirst({
+                where: {
+                  projectId: targetProjectId,
+                  user: { email: { equals: eQuery, mode: 'insensitive' } },
+                },
+                select: { userId: true },
+              });
+              if (matchedProjUser) {
+                targetUserId = matchedProjUser.userId;
+              }
+            }
+
+            if (!targetUserId) {
+              throw new ApiError(404, `Project member '${resolvedParams.memberName || resolvedParams.memberEmail || 'specified'}' not found`);
+            }
+
+            if (project.createdById === targetUserId && targetUserId !== userId) {
+              throw new ApiError(403, 'Cannot change the role of the project creator');
+            }
+
+            const rawRole = String(resolvedParams.projectRole || resolvedParams.role || 'INTERNAL_MEMBER').toUpperCase();
+            const validRoles: ProjectRole[] = [ProjectRole.PROJECT_MANAGER, ProjectRole.INTERNAL_MEMBER, ProjectRole.FREELANCER, ProjectRole.CLIENT];
+            const targetRole = validRoles.includes(rawRole as ProjectRole) ? (rawRole as ProjectRole) : ProjectRole.INTERNAL_MEMBER;
+
+            const updatedMember = await updateProjectMember(userId, targetProjectId, targetUserId, {
+              role: targetRole,
+            });
+
+            variables.set(`$step${step.step}.projectId`, targetProjectId);
+            variables.set(`$step${step.step}.targetUserId`, targetUserId);
+            variables.set(`$step${step.step}.role`, targetRole);
+
+            results.push({
+              step: step.step,
+              action: 'UPDATE_MEMBER_ROLE',
+              description: step.description,
+              success: true,
+              resource: {
+                projectId: targetProjectId,
+                targetUserId,
+                role: targetRole,
+                member: updatedMember,
+              },
+            });
+          } else {
+            let targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
+            let team: any = null;
+            if (resolvedParams.teamId) {
+              team = await prisma.team.findUnique({
+                where: { id: String(resolvedParams.teamId).trim() },
+                select: { id: true, name: true, organizationId: true },
+              });
+            }
+            if (!team && resolvedParams.teamName) {
+              const teamQuery = String(resolvedParams.teamName).trim();
+              team = await prisma.team.findFirst({
+                where: {
+                  ...(targetOrgId ? { organizationId: targetOrgId } : {}),
+                  name: { contains: teamQuery, mode: 'insensitive' },
+                },
+                select: { id: true, name: true, organizationId: true },
+              });
+            }
+
+            if (!team) {
+              const userTeam = await prisma.teamMember.findFirst({
+                where: { userId },
+                select: {
+                  team: { select: { id: true, name: true, organizationId: true } },
+                },
+              });
+              team = userTeam?.team;
+            }
+
+            if (!team) {
+              throw new ApiError(404, `Team '${resolvedParams.teamName || 'specified'}' not found`);
+            }
+
+            const finalOrgId = String(team.organizationId || targetOrgId || '').trim();
+            const callerOrg = await getUserOrganizationContext(userId, finalOrgId);
+            const callerTeamMember = await prisma.teamMember.findUnique({
+              where: {
+                teamId_userId: {
+                  teamId: team.id,
+                  userId,
+                },
+              },
+            });
+
+            const isOrgAdminOrOwner = callerOrg?.isOwner || callerOrg?.userRole === OrgRole.ORG_ADMIN;
+            const isTeamLead = callerTeamMember?.role === 'LEAD';
+
+            if (!isOrgAdminOrOwner && !isTeamLead) {
+              throw new ApiError(403, 'Only team leads or organization admins can update team member roles');
+            }
+
+            let targetUserId = resolvedParams.targetUserId || resolvedParams.memberId || resolvedParams.userId
+              ? String(resolvedParams.targetUserId || resolvedParams.memberId || resolvedParams.userId).trim()
+              : undefined;
+
+            if (!targetUserId && resolvedParams.memberName) {
+              const mQuery = String(resolvedParams.memberName).trim();
+              const matchedMember = await prisma.teamMember.findFirst({
+                where: {
+                  teamId: team.id,
+                  user: { name: { contains: mQuery, mode: 'insensitive' } },
+                },
+                select: { userId: true },
+              });
+              if (matchedMember) {
+                targetUserId = matchedMember.userId;
+              }
+            }
+
+            if (!targetUserId && resolvedParams.memberEmail) {
+              const eQuery = String(resolvedParams.memberEmail).trim().toLowerCase();
+              const matchedMember = await prisma.teamMember.findFirst({
+                where: {
+                  teamId: team.id,
+                  user: { email: { equals: eQuery, mode: 'insensitive' } },
+                },
+                select: { userId: true },
+              });
+              if (matchedMember) {
+                targetUserId = matchedMember.userId;
+              }
+            }
+
+            if (!targetUserId) {
+              throw new ApiError(404, `Team member '${resolvedParams.memberName || resolvedParams.memberEmail || 'specified'}' not found in team '${team.name}'`);
+            }
+
+            const org = await prisma.organization.findUnique({
+              where: { id: finalOrgId },
+              select: { ownerId: true },
+            });
+
+            if (org?.ownerId === targetUserId && targetUserId !== userId) {
+              throw new ApiError(403, 'Cannot change the role of the organization owner');
+            }
+
+            const rawRoleStr = String(resolvedParams.teamRole || resolvedParams.role || 'member').toLowerCase();
+            const assignedRole = rawRoleStr.includes('lead') || rawRoleStr.includes('admin') || rawRoleStr.includes('leader') ? 'LEAD' : 'member';
+
+            await prisma.$transaction(async (tx) => {
+              await tx.teamMember.update({
+                where: {
+                  teamId_userId: {
+                    teamId: team.id,
+                    userId: targetUserId,
+                  },
+                },
+                data: { role: assignedRole },
+              });
+
+              const teamConv = await tx.conversation.findFirst({
+                where: { teamId: team.id },
+                select: { id: true },
+              });
+
+              if (teamConv) {
+                await tx.conversationParticipant.upsert({
+                  where: {
+                    conversationId_userId: {
+                      conversationId: teamConv.id,
+                      userId: targetUserId,
+                    },
+                  },
+                  create: {
+                    conversationId: teamConv.id,
+                    userId: targetUserId,
+                    role: assignedRole === 'LEAD' ? 'admin' : 'member',
+                  },
+                  update: {
+                    role: assignedRole === 'LEAD' ? 'admin' : 'member',
+                  },
+                });
+              }
+            });
+
+            variables.set(`$step${step.step}.teamId`, team.id);
+            variables.set(`$step${step.step}.targetUserId`, targetUserId);
+            variables.set(`$step${step.step}.role`, assignedRole);
+
+            results.push({
+              step: step.step,
+              action: 'UPDATE_MEMBER_ROLE',
+              description: step.description,
+              success: true,
+              resource: {
+                teamId: team.id,
+                teamName: team.name,
+                targetUserId,
+                role: assignedRole,
+              },
+            });
+          }
         }
       } catch (err: any) {
         logger.error(`Error executing workflow step ${step.step} (${step.action})`, err);
