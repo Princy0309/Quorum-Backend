@@ -19,7 +19,7 @@ export const planWorkflowController = async (req: Request, res: Response, next: 
     const parsed = workflowPlanSchema.parse(req.body);
     const timezone = parsed.timezone || (typeof req.headers['x-timezone'] === 'string' ? req.headers['x-timezone'] : undefined);
     const clientTime = parsed.clientTime || (typeof req.headers['x-client-time'] === 'string' ? req.headers['x-client-time'] : undefined);
-    const result = await generateWorkflowPlan(userId, parsed.prompt, parsed.organizationId, parsed.autoExecute, timezone, clientTime);
+    const result = await generateWorkflowPlan(userId, parsed.prompt, parsed.organizationId, parsed.autoExecute, timezone, clientTime, parsed.confirmed);
 
     res.status(200).json({
       success: true,
@@ -38,7 +38,7 @@ export const executeWorkflowController = async (req: Request, res: Response, nex
     }
 
     const parsed = workflowExecuteSchema.parse(req.body);
-    const result = await executeWorkflowPlan(userId, parsed.planId);
+    const result = await executeWorkflowPlan(userId, parsed.planId, parsed.confirmed);
 
     res.status(200).json({
       success: true,

@@ -56,6 +56,10 @@ export const workflowActionTypeSchema = z.enum([
   'UPDATE_MEMBER_ROLE',
   'CHANGE_MEMBER_ROLE',
   'SET_MEMBER_ROLE',
+  'DELETE_CALENDAR_EVENT',
+  'CANCEL_EVENT',
+  'REMOVE_EVENT',
+  'DELETE_EVENT',
 ]);
 
 export const workflowStepSchema = z.object({
@@ -69,12 +73,14 @@ export const workflowPlanSchema = z.object({
   prompt: z.string().trim().min(5, 'Prompt must be at least 5 characters long').max(4000),
   organizationId: z.string().trim().max(100).optional(),
   autoExecute: z.boolean().optional().default(false),
+  confirmed: z.boolean().optional().default(false),
   timezone: z.string().trim().optional(),
   clientTime: z.string().trim().optional(),
 });
 
 export const workflowExecuteSchema = z.object({
   planId: z.string().trim().min(1, 'Plan ID is required'),
+  confirmed: z.boolean().optional().default(false),
 });
 
 export type WorkflowActionType = z.infer<typeof workflowActionTypeSchema>;

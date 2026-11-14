@@ -15,7 +15,7 @@ import { createTask, updateTaskStatus } from './taskService.js';
 import { createProject, inviteProjectMember, createProjectTask, updateProjectMember } from './projectService.js';
 import { createWhiteboard } from './whiteboardService.js';
 import { getOrCreateDirectConversation, saveMessage, deleteMessage, pinMessage, unpinMessage } from './chatService.js';
-import { createCalendarEvent } from './calendarService.js';
+import { createCalendarEvent, deleteCalendarEvent } from './calendarService.js';
 import { CHAT_EVENTS } from '../utils/constants.js';
 import { MeetingScopeType, MeetingStatus, NotificationType, OrgRole, DocumentScopeType, TaskStatus, ProjectRole, TaskPriority } from '@prisma/client';
 import { WorkflowStep, workflowStepSchema } from '../validators/workflowValidators.js';
@@ -87,6 +87,17 @@ const checkAndAdjustMeetingConflict = async (
 
   return adjustedStart;
 };
+
+const DESTRUCTIVE_ACTIONS = new Set([
+  'DELETE_CHAT_MESSAGE',
+  'DELETE_COMMUNITY_POST',
+  'REMOVE_TEAM_MEMBER',
+  'REMOVE_COMMUNITY_MEMBER',
+  'CANCEL_MEETING',
+  'ARCHIVE_DOCUMENT',
+  'UNPIN_CHAT_MESSAGE',
+  'DELETE_CALENDAR_EVENT',
+]);
 
 interface StoredWorkflowPlan {
   planId: string;
@@ -533,8 +544,22 @@ export const generateWorkflowPlan = async (
   organizationId?: string,
   autoExecute: boolean = false,
   timezone?: string,
-  clientTime?: string
+  clientTime?: string,
+  confirmed: boolean = false
 ) => {
+  try {
+    const genRateKey = `workflow:ratelimit:generate:${userId}`;
+    const genCount = await redis.incr(genRateKey);
+    if (genCount === 1) {
+      await redis.expire(genRateKey, 60);
+    }
+    if (genCount > 5) {
+      throw new ApiError(429, 'Rate limit exceeded: You can only generate up to 5 workflows per minute. Please try again shortly.');
+    }
+  } catch (rateErr) {
+    if (rateErr instanceof ApiError) throw rateErr;
+  }
+
   const sanitizedPrompt = sanitizeAiInput(rawPrompt);
 
   const promptHash = crypto.createHash('sha256').update(`${userId}:${sanitizedPrompt}:${organizationId || ''}`).digest('hex');
@@ -545,7 +570,7 @@ export const generateWorkflowPlan = async (
       const existingPlan = await getPlan(existingPlanId);
       if (existingPlan && (Date.now() - new Date(existingPlan.createdAt).getTime()) < 15000) {
         if (autoExecute) {
-          return await executeWorkflowPlan(userId, existingPlanId);
+          return await executeWorkflowPlan(userId, existingPlanId, confirmed);
         }
         return {
           planId: existingPlan.planId,
@@ -654,6 +679,7 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "UNPIN_CHAT_MESSAGE"
    - "CREATE_CALENDAR_EVENT"
    - "UPDATE_MEMBER_ROLE"
+   - "DELETE_CALENDAR_EVENT"
 3. For entity resolution, match names and email addresses mentioned in the prompt to the provided workspace members, communities, and documents. If a member, community, or document cannot be matched with certainty, omit or use best matched ID from the provided context.
 4. When an action relies on a resource produced in a previous step, reference it using variable syntax:
    - "$step1.organizationId" or "$step1.orgId" or "$step1.id" for organization created in step 1
@@ -705,6 +731,7 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "ARCHIVE_DOCUMENT": { "documentId"?: string, "documentTitle"?: string, "title"?: string }
    - "SET_USER_STATUS": { "status": "AVAILABLE" | "DO_NOT_DISTURB" | "BUSY" | "BE_RIGHT_BACK" | "AWAY" | "OFFLINE", "statusMessage"?: string, "clearAfterMinutes"?: number }
    - "CREATE_CALENDAR_EVENT": { "title": string, "description"?: string, "startDate": string (ISO 8601), "endDate"?: string, "eventType"?: "REMINDER" | "MEETING" | "DEADLINE" | "GENERAL", "isAllDay"?: boolean, "hasReminder"?: boolean, "reminderMinutes"?: number, "attendeeEmails"?: string[] }
+   - "DELETE_CALENDAR_EVENT": { "eventId"?: string, "title"?: string }
 6. ACTION SELECTION RULES:
    - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". DO NOT use "CREATE_TEAM" for organizations or companies.
    - When the user asks to add or invite someone/a member to a team (e.g. "add tanvi to team dev team(frontend)", "add user to team"), you MUST use "ADD_TEAM_MEMBER". DO NOT use "CREATE_TEAM" when adding members to an existing team. Match the team from the provided "teams" list to set "teamId" and "teamName", match the organization from the user prompt or "organizations" list to set "organizationId" and "organizationName", and match the member from "members" to set "memberId" and "memberName".
@@ -735,6 +762,7 @@ CRITICAL SECURITY & PRIVACY RULES:
    - When the user asks to start, make, or launch an instant video call or call someone/a group right now (e.g. "start a video call with Tanvi", "make a video call inviting Aniket and Tanvi", "call team dev", "instant meeting with dev team"), you MUST use "START_VIDEO_CALL". Match participants from "members" and team from "teams".
    - When the user asks to change, update, or set their status or presence (e.g. "change my status to DND", "set status to available", "set status to busy saying coding", "change status to away", "set status to be right back for 30 minutes"), you MUST use "SET_USER_STATUS". Map "DND" to "DO_NOT_DISTURB", "online" to "AVAILABLE", "brb" to "BE_RIGHT_BACK".
    - When the user asks to add an event, reminder, or calendar item (e.g. "remind me to submit timesheet on Friday 5pm", "add calendar event sprint review on Monday"), you MUST use "CREATE_CALENDAR_EVENT".
+   - When the user asks to delete, cancel, or remove an event, reminder, or calendar item (e.g. "cancel calendar event sprint review", "delete reminder timesheet", "remove event sprint planning"), you MUST use "DELETE_CALENDAR_EVENT".
    - If a prompt requests creating an organization AND then creating teams or meetings in it, step 1 must be "CREATE_ORGANIZATION", and subsequent steps should reference "$step1.organizationId".
 
 CRITICAL STEP LIMIT RULE:
@@ -876,6 +904,9 @@ Generate the JSON execution plan:`;
     if ((rawStep as any).action === 'CHANGE_MEMBER_ROLE' || (rawStep as any).action === 'SET_MEMBER_ROLE') {
       (rawStep as any).action = 'UPDATE_MEMBER_ROLE';
     }
+    if ((rawStep as any).action === 'CANCEL_EVENT' || (rawStep as any).action === 'REMOVE_EVENT' || (rawStep as any).action === 'DELETE_EVENT') {
+      (rawStep as any).action = 'DELETE_CALENDAR_EVENT';
+    }
 
     if ((rawStep as any).action === 'SET_USER_STATUS' && (rawStep as any).params) {
       const s = String((rawStep as any).params.status || '').toUpperCase().trim();
@@ -951,6 +982,22 @@ Generate the JSON execution plan:`;
         }
       }
 
+      if (stepData.params) {
+        for (const titleKey of ['title', 'name', 'documentName', 'meetingTitle']) {
+          if (typeof stepData.params[titleKey] === 'string' && stepData.params[titleKey].length > 150) {
+            stepData.params[titleKey] = stepData.params[titleKey].slice(0, 150).trim();
+          }
+        }
+        for (const contentKey of ['content', 'message', 'description']) {
+          if (typeof stepData.params[contentKey] === 'string' && stepData.params[contentKey].length > 5000) {
+            stepData.params[contentKey] = stepData.params[contentKey].slice(0, 5000).trim();
+          }
+        }
+        if (Array.isArray(stepData.params.attendeeEmails) && stepData.params.attendeeEmails.length > 50) {
+          stepData.params.attendeeEmails = stepData.params.attendeeEmails.slice(0, 50);
+        }
+      }
+
       sanitizedSteps.push(stepData);
     }
   }
@@ -988,6 +1035,26 @@ Generate the JSON execution plan:`;
     throw new ApiError(400, 'No supported or valid workflow actions found in the prompt');
   }
 
+  for (const step of sanitizedSteps) {
+    if (step.action === 'INVITE_ORG_MEMBER') {
+      const targetOrg = step.params.organizationId || orgContext?.organizationId;
+      if (targetOrg && !targetOrg.startsWith('$')) {
+        const callerOrg = await getUserOrganizationContext(userId, targetOrg);
+        if (callerOrg && callerOrg.userRole !== OrgRole.ORG_ADMIN && !callerOrg.isOwner) {
+          throw new ApiError(403, `Pre-validation check failed: You must be an organization admin or owner to invite members (Step ${step.step})`);
+        }
+      }
+    } else if (step.action === 'REMOVE_COMMUNITY_MEMBER') {
+      const targetCommId = step.params.communityId;
+      if (targetCommId && !targetCommId.startsWith('$')) {
+        const comm = userCommunities.find((c) => c.id === targetCommId);
+        if (!comm) {
+          throw new ApiError(403, `Pre-validation check failed: You are not a member of the targeted community (Step ${step.step})`);
+        }
+      }
+    }
+  }
+
   const planId = 'wf_plan_' + crypto.randomBytes(6).toString('hex');
   const storedPlan: StoredWorkflowPlan = {
     planId,
@@ -1004,26 +1071,17 @@ Generate the JSON execution plan:`;
     await redis.set(idempotencyKey, planId, 'EX', 15);
   } catch {}
 
-  const DESTRUCTIVE_ACTIONS = new Set([
-    'DELETE_CHAT_MESSAGE',
-    'DELETE_COMMUNITY_POST',
-    'REMOVE_TEAM_MEMBER',
-    'REMOVE_COMMUNITY_MEMBER',
-    'CANCEL_MEETING',
-    'ARCHIVE_DOCUMENT',
-    'UNPIN_CHAT_MESSAGE',
-  ]);
   const hasDestructiveAction = sanitizedSteps.some((s) => DESTRUCTIVE_ACTIONS.has(s.action));
 
-  if (autoExecute && !hasDestructiveAction) {
-    return await executeWorkflowPlan(userId, planId);
+  if (autoExecute && (!hasDestructiveAction || confirmed)) {
+    return await executeWorkflowPlan(userId, planId, confirmed);
   }
 
   return {
     planId,
     summary: storedPlan.summary,
     steps: storedPlan.steps,
-    requiresConfirmation: true,
+    requiresConfirmation: hasDestructiveAction,
   };
 };
 
@@ -1052,7 +1110,20 @@ const resolveVariables = (value: any, variables: Map<string, string>): any => {
   return value;
 };
 
-export const executeWorkflowPlan = async (userId: string, planId: string) => {
+export const executeWorkflowPlan = async (userId: string, planId: string, confirmed: boolean = false) => {
+  try {
+    const execRateKey = `workflow:ratelimit:execute:${userId}`;
+    const execCount = await redis.incr(execRateKey);
+    if (execCount === 1) {
+      await redis.expire(execRateKey, 60);
+    }
+    if (execCount > 10) {
+      throw new ApiError(429, 'Rate limit exceeded: You can only execute up to 10 workflows per minute. Please try again shortly.');
+    }
+  } catch (rateErr) {
+    if (rateErr instanceof ApiError) throw rateErr;
+  }
+
   const plan = await getPlan(planId);
   if (!plan) {
     throw new ApiError(404, 'Workflow plan not found or has expired');
@@ -1060,6 +1131,11 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
 
   if (plan.userId !== userId) {
     throw new ApiError(403, 'Not authorized to execute this workflow plan');
+  }
+
+  const hasDestructive = plan.steps.some((s) => DESTRUCTIVE_ACTIONS.has(s.action));
+  if (hasDestructive && !confirmed) {
+    throw new ApiError(400, 'This plan contains destructive actions and requires explicit confirmation to execute.');
   }
 
   const lockKey = `workflow:lock:${planId}`;
@@ -1097,6 +1173,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
 
   try {
     const variables = new Map<string, string>();
+    const compensationStack: Array<{ type: 'TEAM' | 'PROJECT' | 'DOCUMENT' | 'CALENDAR_EVENT' | 'TASK' | 'WHITEBOARD'; id: string }> = [];
     let results: Array<{
       step: number;
       action: string;
@@ -1229,6 +1306,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
                 description: teamDesc,
               });
               createdTeamId = team.id;
+              compensationStack.push({ type: 'TEAM', id: team.id });
             }
           }
 
@@ -2138,6 +2216,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             projectId: targetProjectId,
           });
 
+          compensationStack.push({ type: 'DOCUMENT', id: document.id });
+
           variables.set(`$step${step.step}.documentId`, document.id);
           variables.set(`$step${step.step}.id`, document.id);
           variables.set(`$step${step.step}.title`, document.title);
@@ -2282,6 +2362,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             }
           );
 
+          compensationStack.push({ type: 'TASK', id: task.id });
+
           variables.set(`$step${step.step}.taskId`, task.id);
           variables.set(`$step${step.step}.id`, task.id);
           variables.set(`$step${step.step}.title`, task.title);
@@ -2356,6 +2438,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             budget,
             dueDate: projectDueDate,
           });
+
+          compensationStack.push({ type: 'PROJECT', id: project.id });
 
           variables.set(`$step${step.step}.projectId`, project.id);
           variables.set(`$step${step.step}.id`, project.id);
@@ -2586,6 +2670,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             meetingId: resolvedParams.meetingId ? String(resolvedParams.meetingId).trim() : undefined,
             content: resolvedParams.content,
           });
+
+          compensationStack.push({ type: 'WHITEBOARD', id: whiteboard.id });
 
           variables.set(`$step${step.step}.whiteboardId`, whiteboard.id);
           variables.set(`$step${step.step}.id`, whiteboard.id);
@@ -4231,6 +4317,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             attendeeEmails,
           });
 
+          compensationStack.push({ type: 'CALENDAR_EVENT', id: calendarEvent.id });
+
           variables.set(`$step${step.step}.eventId`, calendarEvent.id);
           variables.set(`$step${step.step}.id`, calendarEvent.id);
           variables.set(`$step${step.step}.title`, calendarEvent.title);
@@ -4512,9 +4600,69 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               },
             });
           }
+        } else if (step.action === 'DELETE_CALENDAR_EVENT' || step.action === 'CANCEL_EVENT' || step.action === 'REMOVE_EVENT' || step.action === 'DELETE_EVENT') {
+          let eventId = resolvedParams.eventId || resolvedParams.id ? String(resolvedParams.eventId || resolvedParams.id).trim() : undefined;
+          if (!eventId && resolvedParams.title) {
+            const titleQuery = String(resolvedParams.title).trim();
+            const matchedEvent = await prisma.calendarEvent.findFirst({
+              where: {
+                userId,
+                title: { contains: titleQuery, mode: 'insensitive' },
+              },
+              orderBy: { startDate: 'desc' },
+            });
+            if (matchedEvent) {
+              eventId = matchedEvent.id;
+            }
+          }
+
+          if (!eventId) {
+            const nearestEvent = await prisma.calendarEvent.findFirst({
+              where: {
+                userId,
+                startDate: { gte: new Date() },
+              },
+              orderBy: { startDate: 'asc' },
+            });
+            if (nearestEvent) {
+              eventId = nearestEvent.id;
+            }
+          }
+
+          if (!eventId) {
+            throw new ApiError(404, 'Calendar event to delete not found');
+          }
+
+          await deleteCalendarEvent(userId, eventId);
+
+          variables.set(`$step${step.step}.eventId`, eventId);
+          variables.set(`$step${step.step}.deletedEventId`, eventId);
+
+          results.push({
+            step: step.step,
+            action: 'DELETE_CALENDAR_EVENT',
+            description: step.description,
+            success: true,
+            resource: {
+              eventId,
+              deleted: true,
+            },
+          });
         }
       } catch (err: any) {
         logger.error(`Error executing workflow step ${step.step} (${step.action})`, err);
+        while (compensationStack.length > 0) {
+          const comp = compensationStack.pop();
+          if (!comp) continue;
+          try {
+            if (comp.type === 'TEAM') await prisma.team.delete({ where: { id: comp.id } });
+            else if (comp.type === 'PROJECT') await prisma.project.delete({ where: { id: comp.id } });
+            else if (comp.type === 'DOCUMENT') await prisma.document.delete({ where: { id: comp.id } });
+            else if (comp.type === 'CALENDAR_EVENT') await prisma.calendarEvent.delete({ where: { id: comp.id } });
+            else if (comp.type === 'TASK') await prisma.teamTask.delete({ where: { id: comp.id } });
+            else if (comp.type === 'WHITEBOARD') await prisma.whiteboard.delete({ where: { id: comp.id } });
+          } catch {}
+        }
         if (step.action === 'CREATE_TEAM' && createdTeamId) {
           try {
             await prisma.team.delete({ where: { id: createdTeamId } });
