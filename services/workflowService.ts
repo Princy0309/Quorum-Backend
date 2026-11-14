@@ -39,6 +39,41 @@ const sanitizeWorkflowText = (input: string): string => {
     .trim();
 };
 
+const redactSensitiveData = (text: string): string => {
+  if (!text || typeof text !== 'string') return text;
+  return text
+    .replace(/(?:sk-[a-zA-Z0-9_-]{20,}|AIza[0-9A-Za-z-_]{35}|ghp_[a-zA-Z0-9]{36}|xox[baprs]-[a-zA-Z0-9-]+|AKIA[0-9A-Z]{16})/g, '[REDACTED_API_KEY]')
+    .replace(/(?:Bearer\s+[a-zA-Z0-9_\-\.]{20,})/gi, 'Bearer [REDACTED_TOKEN]')
+    .replace(/(["']?(?:password|secret|token|apiKey|auth)["']?\s*[:=]\s*["'])([^"']{4,})(["'])/gi, '$1[REDACTED]$3');
+};
+
+const redactSensitiveObject = (obj: any): any => {
+  if (typeof obj === 'string') return redactSensitiveData(obj);
+  if (Array.isArray(obj)) return obj.map(redactSensitiveObject);
+  if (obj !== null && typeof obj === 'object') {
+    const res: Record<string, any> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (/password|secret|token|apiKey|auth/i.test(k) && typeof v === 'string') {
+        res[k] = '[REDACTED]';
+      } else {
+        res[k] = redactSensitiveObject(v);
+      }
+    }
+    return res;
+  }
+  return obj;
+};
+
+const executeWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number, stepNum: number): Promise<T> => {
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new ApiError(504, `Workflow step ${stepNum} timed out after ${timeoutMs / 1000}s`)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+};
+
 const checkAndAdjustMeetingConflict = async (
   hostId: string,
   requestedStart: Date,
@@ -1031,6 +1066,25 @@ Generate the JSON execution plan:`;
     step.params = remapStepVariables(step.params);
   }
 
+  for (const step of sanitizedSteps) {
+    const checkForwardDeps = (val: any) => {
+      if (typeof val === 'string') {
+        const matches = Array.from(val.matchAll(/\$step(\d+)\b/g));
+        for (const m of matches) {
+          const referencedStep = parseInt(m[1], 10);
+          if (referencedStep >= step.step) {
+            throw new ApiError(400, `Circular or forward step reference detected: Step ${step.step} references $step${referencedStep}, which has not executed yet`);
+          }
+        }
+      } else if (Array.isArray(val)) {
+        val.forEach(checkForwardDeps);
+      } else if (val !== null && typeof val === 'object') {
+        Object.values(val).forEach(checkForwardDeps);
+      }
+    };
+    checkForwardDeps(step.params);
+  }
+
   if (sanitizedSteps.length === 0) {
     throw new ApiError(400, 'No supported or valid workflow actions found in the prompt');
   }
@@ -1060,8 +1114,8 @@ Generate the JSON execution plan:`;
     planId,
     userId,
     organizationId: orgContext?.organizationId,
-    summary: parsedPlan.summary,
-    steps: sanitizedSteps,
+    summary: redactSensitiveData(parsedPlan.summary),
+    steps: redactSensitiveObject(sanitizedSteps),
     createdAt: new Date().toISOString(),
   };
 
@@ -1136,6 +1190,18 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
   const hasDestructive = plan.steps.some((s) => DESTRUCTIVE_ACTIONS.has(s.action));
   if (hasDestructive && !confirmed) {
     throw new ApiError(400, 'This plan contains destructive actions and requires explicit confirmation to execute.');
+  }
+
+  const userExecLockKey = `workflow:active_execution:${userId}`;
+  let userSemaphoreAcquired = false;
+  try {
+    const userLock = await redis.set(userExecLockKey, planId, 'EX', 90, 'NX');
+    if (!userLock) {
+      throw new ApiError(429, 'Another workflow is already actively executing for your account. Please wait for it to complete.');
+    }
+    userSemaphoreAcquired = true;
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
   }
 
   const lockKey = `workflow:lock:${planId}`;
@@ -1216,7 +1282,13 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
       orgId = userOrg?.organizationId;
     }
 
+    const planStartTime = Date.now();
+    const maxPlanDurationMs = 90000;
+
     for (const step of plan.steps) {
+      if (Date.now() - planStartTime > maxPlanDurationMs) {
+        throw new ApiError(504, 'Overall workflow execution deadline exceeded (90 seconds limit)');
+      }
       const existingSuccess = results.find((r) => r.step === step.step && r.success);
       if (existingSuccess) {
         continue;
@@ -1225,7 +1297,9 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
       let createdTeamId: string | undefined;
 
       try {
-        const resolvedParams = resolveVariables(step.params, variables);
+        await executeWithTimeout(
+          (async () => {
+            const resolvedParams = resolveVariables(step.params, variables);
         if (step.action === 'CREATE_ORGANIZATION') {
           const orgName = String(resolvedParams.name || 'New Organization').trim();
           const orgDescription = resolvedParams.description ? String(resolvedParams.description).trim() : undefined;
@@ -1388,6 +1462,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
 
           if (!team) {
             throw new ApiError(404, `Team '${resolvedParams.teamName || 'specified'}' not found`);
+          }
+
+          if (plan.organizationId && team.organizationId && team.organizationId !== plan.organizationId) {
+            throw new ApiError(403, 'Cross-organization operation blocked: Target team belongs to another organization');
           }
 
           const finalOrgId = String(team.organizationId || targetOrgId || '').trim();
@@ -1704,6 +1782,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
 
           if (userIds.length === 0) {
             throw new ApiError(400, 'At least one recipient user ID is required to send notifications');
+          }
+
+          if (userIds.length > 25) {
+            userIds.length = 25;
           }
 
           let validRecipients: { id: string }[] = [];
@@ -2066,6 +2148,13 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             throw new ApiError(404, `Could not find recipient or group conversation for '${resolvedParams.recipientName || resolvedParams.groupName || 'message'}'`);
           }
 
+          const spamHash = crypto.createHash('md5').update(`${userId}:${targetConvId}:${content}`).digest('hex');
+          const spamKey = `workflow:antispam:${spamHash}`;
+          const isAllowed = await redis.set(spamKey, '1', 'EX', 30, 'NX');
+          if (!isAllowed) {
+            throw new ApiError(429, 'Anti-spam guard: Duplicate chat message detected for this conversation within 30 seconds');
+          }
+
           const { message, participants } = await saveMessage(
             userId,
             targetConvId,
@@ -2277,6 +2366,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
 
           if (!team) {
             throw new ApiError(404, `Team '${resolvedParams.teamName || 'specified'}' not found to assign task`);
+          }
+
+          if (plan.organizationId && team.organizationId && team.organizationId !== plan.organizationId) {
+            throw new ApiError(403, 'Cross-organization operation blocked: Target team belongs to another organization');
           }
 
           targetOrgId = team.organizationId || targetOrgId;
@@ -2551,6 +2644,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
 
           if (!team) {
             throw new ApiError(404, `Team '${resolvedParams.teamName || 'specified'}' not found`);
+          }
+
+          if (plan.organizationId && team.organizationId && team.organizationId !== plan.organizationId) {
+            throw new ApiError(403, 'Cross-organization operation blocked: Target team belongs to another organization');
           }
 
           const finalOrgId = String(team.organizationId || targetOrgId || '').trim();
@@ -3367,7 +3464,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             });
           }
 
-          const recipientList = Array.from(participantUserIds);
+          const recipientList = Array.from(participantUserIds).slice(0, 25);
           const hostUser = await prisma.user.findUnique({
             where: { id: userId },
             select: { name: true },
@@ -4106,6 +4203,16 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             throw new ApiError(404, `Project '${resolvedParams.projectName || 'specified'}' not found`);
           }
 
+          if (plan.organizationId) {
+            const projCheck = await prisma.project.findUnique({
+              where: { id: targetProjectId },
+              select: { organizationId: true },
+            });
+            if (projCheck?.organizationId && projCheck.organizationId !== plan.organizationId) {
+              throw new ApiError(403, 'Cross-organization operation blocked: Target project belongs to another organization');
+            }
+          }
+
           let assigneeId = resolvedParams.assigneeId ? String(resolvedParams.assigneeId).trim() : undefined;
           if (!assigneeId && resolvedParams.assigneeName) {
             const assigneeQuery = String(resolvedParams.assigneeName).trim();
@@ -4649,7 +4756,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             },
           });
         }
-      } catch (err: any) {
+      })(), 15000, step.step);
+    } catch (err: any) {
         logger.error(`Error executing workflow step ${step.step} (${step.action})`, err);
         while (compensationStack.length > 0) {
           const comp = compensationStack.pop();
@@ -4754,6 +4862,11 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
         if (currentLock === lockToken) {
           await redis.del(lockKey);
         }
+      } catch {}
+    }
+    if (userSemaphoreAcquired) {
+      try {
+        await redis.del(userExecLockKey);
       } catch {}
     }
   }
