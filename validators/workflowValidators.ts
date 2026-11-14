@@ -32,6 +32,16 @@ export const workflowActionTypeSchema = z.enum([
   'START_CALL',
   'START_MEETING',
   'MAKE_VIDEO_CALL',
+  'UPDATE_TASK_STATUS',
+  'COMPLETE_TASK',
+  'CANCEL_MEETING',
+  'PIN_CHAT_MESSAGE',
+  'PIN_MESSAGE',
+  'ADD_PROJECT_MEMBER',
+  'INVITE_PROJECT_MEMBER',
+  'ARCHIVE_DOCUMENT',
+  'SET_USER_STATUS',
+  'UPDATE_USER_STATUS',
 ]);
 
 export const workflowStepSchema = z.object({
