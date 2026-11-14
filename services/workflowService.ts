@@ -6,6 +6,7 @@ import logger from '../utils/logger.js';
 import { getIO } from '../sockets/socketServer.js';
 import { generateRawCompletion, sanitizeAiInput } from './aiService.js';
 import { createTeam, addTeamMember } from './teamService.js';
+import { createOrganization } from './organizationService.js';
 import { createScopedMeeting } from './meetingService.js';
 import { addCollaborator, checkDocumentAccess } from './documentService.js';
 import { MeetingScopeType, NotificationType, OrgRole, DocumentScopeType } from '@prisma/client';
@@ -359,19 +360,26 @@ Your objective is to translate a user's natural language command into an ordered
 CRITICAL SECURITY & PRIVACY RULES:
 1. Never include internal API endpoints, URLs (like /api/...), system file paths, database schemas, tokens, or credentials in any output field.
 2. Only use the following allowed actions:
+   - "CREATE_ORGANIZATION"
    - "CREATE_TEAM"
    - "SCHEDULE_MEETING"
    - "SHARE_DOCUMENT"
    - "NOTIFY_MEMBERS"
 3. For entity resolution, match names and email addresses mentioned in the prompt to the provided workspace members and documents. If a member or document cannot be matched with certainty, omit or use best matched ID from the provided context.
 4. When an action relies on a resource produced in a previous step, reference it using variable syntax:
+   - "$step1.organizationId" or "$step1.orgId" or "$step1.id" for organization created in step 1
    - "$step1.teamId" or "$step1.id" for team created in step 1
    - "$step2.meetingId" or "$step2.meetingCode" for meeting created in step 2
 5. Parameter requirements per action:
-   - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds": string[] }
+   - "CREATE_ORGANIZATION": { "name": string, "description"?: string }
+   - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds"?: string[], "organizationId"?: string }
    - "SCHEDULE_MEETING": { "title": string, "startTime": string (ISO 8601), "durationMinutes"?: number, "teamId"?: string }
    - "SHARE_DOCUMENT": { "documentId": string, "teamId"?: string, "memberIds"?: string[] }
    - "NOTIFY_MEMBERS": { "userIds": string[], "title": string, "message": string }
+6. ACTION SELECTION RULES:
+   - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". DO NOT use "CREATE_TEAM" for organizations or companies.
+   - Use "CREATE_TEAM" ONLY when creating a team, squad, department, or group within an organization.
+   - If a prompt requests creating an organization AND then creating teams or meetings in it, step 1 must be "CREATE_ORGANIZATION", and subsequent steps should reference "$step1.organizationId".
 
 CRITICAL DATE & TIME ANCHOR FOR SCHEDULE_MEETING:
 - Current Real-World Time: ${formattedLocalTime} (${userTimezone})
@@ -387,7 +395,7 @@ Output strictly valid JSON with this exact schema:
   "steps": [
     {
       "step": 1,
-      "action": "CREATE_TEAM",
+      "action": "CREATE_ORGANIZATION",
       "description": "User-friendly description of this action",
       "params": { ... }
     }
@@ -647,12 +655,47 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
 
       try {
         const resolvedParams = resolveVariables(step.params, variables);
-        if (step.action === 'CREATE_TEAM') {
-          if (!orgId) {
+        if (step.action === 'CREATE_ORGANIZATION') {
+          const orgName = String(resolvedParams.name || 'New Organization').trim();
+          const orgDescription = resolvedParams.description ? String(resolvedParams.description).trim() : undefined;
+
+          let org: any = null;
+          const existingOrgId = variables.get(`$step${step.step}.organizationId`);
+          if (existingOrgId) {
+            org = await prisma.organization.findUnique({ where: { id: existingOrgId } });
+          }
+          if (!org) {
+            org = await createOrganization(userId, {
+              name: orgName,
+              description: orgDescription,
+            });
+          }
+
+          orgId = org.id;
+          variables.set(`$step${step.step}.organizationId`, org.id);
+          variables.set(`$step${step.step}.orgId`, org.id);
+          variables.set(`$step${step.step}.id`, org.id);
+          variables.set(`$step${step.step}.name`, org.name);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              organizationId: org.id,
+              name: org.name,
+              slug: org.slug,
+              description: org.description,
+            },
+          });
+        } else if (step.action === 'CREATE_TEAM') {
+          const targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
+          if (!targetOrgId) {
             throw new ApiError(400, 'An active organization is required to create a team');
           }
 
-          const callerOrg = await getUserOrganizationContext(userId, orgId);
+          const callerOrg = await getUserOrganizationContext(userId, targetOrgId);
           if (!callerOrg) {
             throw new ApiError(403, 'You are not a member of this organization');
           }
@@ -666,7 +709,6 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
           const teamName = String(resolvedParams.name || 'New Team').trim();
           const teamDesc = resolvedParams.description ? String(resolvedParams.description).trim() : undefined;
 
-          let createdTeamId: string | undefined;
           let team: any = null;
           const existingTeamId = variables.get(`$step${step.step}.teamId`);
           if (existingTeamId) {
@@ -676,7 +718,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             const existingTeam = await prisma.team.findUnique({
               where: {
                 organizationId_name: {
-                  organizationId: orgId,
+                  organizationId: targetOrgId,
                   name: teamName,
                 },
               },
@@ -684,7 +726,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             if (existingTeam) {
               team = existingTeam;
             } else {
-              team = await createTeam(orgId, userId, {
+              team = await createTeam(targetOrgId, userId, {
                 name: teamName,
                 description: teamDesc,
               });
@@ -706,7 +748,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
                   where: { teamId: team.id, userId: targetId }
                 });
                 if (!existingMember) {
-                  await addTeamMember(orgId, team.id, userId, callerRole, targetId, 'member');
+                  await addTeamMember(targetOrgId, team.id, userId, callerRole, targetId, 'member');
                 }
                 addedCount++;
               } catch (memberErr) {
