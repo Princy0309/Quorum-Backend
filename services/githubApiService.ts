@@ -135,7 +135,7 @@ export async function linkTeamRepository(
 
   const team = await prisma.team.findUnique({
     where: { id: teamId },
-    select: { id: true, organizationId: true },
+    select: { id: true, organizationId: true, name: true },
   });
 
   if (!team) {
@@ -174,6 +174,74 @@ export async function linkTeamRepository(
   });
 
   logger.info(`User ${userId} linked repository ${repo.full_name} to team ${teamId}`);
+
+  // 🔔 Notify all other team members that a repository was linked
+  try {
+    const actor = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, avatar: true },
+    });
+    const actorName = actor?.name || 'A teammate';
+    const teamName = team?.name || 'your team';
+
+    const teamMembers = await prisma.teamMember.findMany({
+      where: { teamId, userId: { not: userId } },
+      select: { userId: true },
+    });
+
+    for (const member of teamMembers) {
+      const notifTitle = `GitHub Repository Linked`;
+      const notifBody = `${actorName} linked repository "${repoFullName}" to ${teamName}`;
+      const notifData = {
+        source: 'github',
+        teamId,
+        repoFullName,
+      };
+
+      const notif = await prisma.notification.create({
+        data: {
+          recipientId: member.userId,
+          actorId: userId,
+          type: 'SYSTEM',
+          title: notifTitle,
+          body: notifBody,
+          data: notifData,
+        },
+        include: {
+          actor: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+            },
+          },
+        },
+      });
+
+      try {
+        const io = getIO();
+        io.to(`user:${member.userId}`).emit('notification:new', notif);
+      } catch {}
+
+      sendPushNotification(
+        [member.userId],
+        notifTitle,
+        notifBody,
+        {
+          payloadData: {
+            source: 'github',
+            teamId,
+            repoFullName,
+          },
+          channelId: 'quorum_general_notifications',
+          sound: 'default',
+        }
+      ).catch(() => {});
+    }
+  } catch (notifErr: any) {
+    logger.warn(`[GitHub] Failed to broadcast repo link notification: ${notifErr?.message}`);
+  }
+
   return repoLink;
 }
 
@@ -449,6 +517,92 @@ export async function updateTeamIssueStatus(
   );
 
   await invalidateTeamIssuesCache(teamId);
+
+  // Dispatch real-time in-app, socket, and push notifications when issue is closed or reopened
+  try {
+    const actor = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, avatar: true },
+    });
+    const actorName = actor?.name || 'A teammate';
+
+    const assignees = Array.isArray(updated.assignees)
+      ? updated.assignees.map((a: any) => a.login)
+      : [];
+
+    for (const assigneeGhUsername of assignees) {
+      const link = await prisma.userGithubLink.findFirst({
+        where: {
+          githubUsername: {
+            equals: assigneeGhUsername,
+            mode: 'insensitive',
+          },
+        },
+        select: { userId: true },
+      });
+
+      if (link?.userId && link.userId !== userId) {
+        const actionVerb = state === 'closed' ? 'closed' : 'reopened';
+        const notifTitle = `GitHub Issue ${state === 'closed' ? 'Closed' : 'Reopened'}: #${issueNumber}`;
+        const notifBody = `${actorName} ${actionVerb} "${updated.title}" in ${repoLink.repoFullName}`;
+        const notifData = {
+          source: 'github',
+          teamId,
+          repoFullName: repoLink.repoFullName,
+          issueNumber,
+          issueUrl: updated.html_url || '',
+        };
+
+        const notif = await prisma.notification.create({
+          data: {
+            recipientId: link.userId,
+            actorId: userId,
+            type: 'SYSTEM',
+            title: notifTitle,
+            body: notifBody,
+            data: notifData,
+          },
+          include: {
+            actor: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true,
+              },
+            },
+          },
+        });
+
+        try {
+          const io = getIO();
+          io.to(`user:${link.userId}`).emit('notification:new', notif);
+          logger.info(`[GitHub] Emitted real-time issue status update to user ${link.userId}`);
+        } catch (socketErr: any) {
+          logger.warn(`[GitHub] Socket broadcast skipped: ${socketErr?.message}`);
+        }
+
+        sendPushNotification(
+          [link.userId],
+          notifTitle,
+          notifBody,
+          {
+            payloadData: {
+              source: 'github',
+              teamId,
+              issueNumber: String(issueNumber),
+              issueUrl: updated.html_url || '',
+            },
+            channelId: 'quorum_general_notifications',
+            sound: 'default',
+          }
+        ).catch((pushErr) => {
+          logger.warn(`[GitHub] Push failed for user ${link.userId}:`, pushErr);
+        });
+      }
+    }
+  } catch (notifErr: any) {
+    logger.warn(`[GitHub] Could not dispatch issue status notification: ${notifErr?.message}`);
+  }
 
   return updated;
 }
