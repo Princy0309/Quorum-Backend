@@ -3,7 +3,8 @@ import redis from '../config/redis.js';
 import { ApiError } from '../utils/ApiError.js';
 import { getFreshGithubAccessToken } from './githubOAuthService.js';
 import logger from '../utils/logger.js';
-
+import { getIO } from '../sockets/socketServer.js';
+import { sendPushNotification } from './notificationService.js';
 const GITHUB_API_BASE = 'https://api.github.com';
 const HTTP_TIMEOUT_MS = 10000;
 const CACHE_TTL_SECONDS = 30;
@@ -327,6 +328,97 @@ export async function createTeamIssue(
   );
 
   await invalidateTeamIssuesCache(teamId);
+
+  // Dispatch real-time in-app, socket, and mobile push notifications to assignees
+  if (Array.isArray(data.assignees) && data.assignees.length > 0) {
+    try {
+      const actor = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, name: true, avatar: true },
+      });
+      const actorName = actor?.name || 'A teammate';
+
+      for (const assigneeGhUsername of data.assignees) {
+        try {
+          const link = await prisma.userGithubLink.findFirst({
+            where: {
+              githubUsername: {
+                equals: assigneeGhUsername,
+                mode: 'insensitive',
+              },
+            },
+            select: { userId: true },
+          });
+
+          // Only notify if user is linked to Quorum and it's not a self-assignment
+          if (link?.userId && link.userId !== userId) {
+            const notifTitle = `GitHub Issue Assigned: #${issue.number}`;
+            const notifBody = `${actorName} assigned you to "${issue.title}" in ${repoLink.repoFullName}`;
+            const notifData = {
+              source: 'github',
+              teamId,
+              repoFullName: repoLink.repoFullName,
+              issueNumber: issue.number,
+              issueUrl: issue.html_url || '',
+            };
+
+            //In-app database notification
+            const notif = await prisma.notification.create({
+              data: {
+                recipientId: link.userId,
+                actorId: userId,
+                type: 'SYSTEM',
+                title: notifTitle,
+                body: notifBody,
+                data: notifData,
+              },
+              include: {
+                actor: {
+                  select: {
+                    id: true,
+                    name: true,
+                    avatar: true,
+                  },
+                },
+              },
+            });
+
+            // Real-time WebSocket emission (rings bell & shows live toast)
+            try {
+              const io = getIO();
+              io.to(`user:${link.userId}`).emit('notification:new', notif);
+              logger.info(`[GitHub] Emitted real-time socket notification to user ${link.userId}`);
+            } catch (socketErr: any) {
+              logger.warn(`[GitHub] Could not emit socket notification for issue #${issue.number}: ${socketErr?.message}`);
+            }
+
+            //Mobile push notification (FCM) for background/locked phone
+            sendPushNotification(
+              [link.userId],
+              notifTitle,
+              notifBody,
+              {
+                payloadData: {
+                  source: 'github',
+                  teamId,
+                  issueNumber: String(issue.number),
+                  issueUrl: issue.html_url || '',
+                },
+                channelId: 'quorum_general_notifications',
+                sound: 'default',
+              }
+            ).catch((pushErr) => {
+              logger.warn(`[GitHub] Push notification failed for user ${link.userId}:`, pushErr);
+            });
+          }
+        } catch (assigneeErr: any) {
+          logger.warn(`[GitHub] Failed to notify assignee ${assigneeGhUsername}:`, assigneeErr);
+        }
+      }
+    } catch (notifWrapErr: any) {
+      logger.warn(`[GitHub] Error in assignee notification flow:`, notifWrapErr);
+    }
+  }
 
   logger.info(`User ${userId} created issue #${issue.number} in ${repoLink.repoFullName}`);
   return issue;
