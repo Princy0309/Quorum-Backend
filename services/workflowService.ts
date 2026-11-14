@@ -2789,6 +2789,19 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             throw new ApiError(404, 'Could not find a matching message to delete');
           }
 
+          const msg = await prisma.message.findUnique({
+            where: { id: messageId },
+            select: { senderId: true, conversationId: true },
+          });
+
+          if (!msg) {
+            throw new ApiError(404, 'Message not found');
+          }
+
+          if (msg.senderId !== userId) {
+            throw new ApiError(403, 'You do not have permission to delete another person\'s chat message');
+          }
+
           const deleteForEveryone = resolvedParams.deleteForEveryone !== false;
           const deleteResult = await deleteMessage(userId, targetConvId, messageId, deleteForEveryone);
 
@@ -2841,6 +2854,30 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
 
           if (!postId) {
             throw new ApiError(404, `Could not find a post to delete in ${resolvedParams.communityName || 'the community'}`);
+          }
+
+          const post = await prisma.communityPost.findUnique({
+            where: { id: postId },
+            select: { authorId: true, communityId: true },
+          });
+
+          if (!post) {
+            throw new ApiError(404, 'Community post not found');
+          }
+
+          if (post.authorId !== userId) {
+            const callerMembership = await prisma.communityMember.findUnique({
+              where: {
+                communityId_userId: {
+                  communityId: post.communityId,
+                  userId,
+                },
+              },
+              select: { role: true },
+            });
+            if (!callerMembership || (callerMembership.role !== 'OWNER' && callerMembership.role !== 'ADMIN')) {
+              throw new ApiError(403, 'You do not have permission to delete another person\'s community post');
+            }
           }
 
           const deleteResult = await deleteCommunityPost(userId, postId);
