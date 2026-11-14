@@ -5,12 +5,15 @@ import { ApiError } from '../utils/ApiError.js';
 import logger from '../utils/logger.js';
 import { getIO } from '../sockets/socketServer.js';
 import { generateRawCompletion, sanitizeAiInput } from './aiService.js';
-import { createTeam, addTeamMember } from './teamService.js';
-import { createOrganization } from './organizationService.js';
-import { createCommunity } from './communityService.js';
+import { createTeam, addTeamMember, removeTeamMember } from './teamService.js';
+import { createOrganization, createOrganizationInvite } from './organizationService.js';
+import { createCommunity, inviteUserToCommunity, removeCommunityMember } from './communityService.js';
 import { createCommunityPost } from './postService.js';
 import { createScopedMeeting } from './meetingService.js';
-import { addCollaborator, checkDocumentAccess } from './documentService.js';
+import { createDocument, addCollaborator, checkDocumentAccess } from './documentService.js';
+import { createTask } from './taskService.js';
+import { createProject } from './projectService.js';
+import { createWhiteboard } from './whiteboardService.js';
 import { getOrCreateDirectConversation, saveMessage } from './chatService.js';
 import { CHAT_EVENTS } from '../utils/constants.js';
 import { MeetingScopeType, NotificationType, OrgRole, DocumentScopeType } from '@prisma/client';
@@ -437,6 +440,25 @@ const getUserCommunities = async (userId: string) => {
   return Array.from(map.values());
 };
 
+const getUserProjects = async (userId: string, organizationId?: string) => {
+  const projects = await prisma.project.findMany({
+    where: {
+      OR: [
+        { createdById: userId },
+        { members: { some: { userId } } },
+        ...(organizationId ? [{ organizationId }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+      organizationId: true,
+    },
+    take: 50,
+  });
+  return projects;
+};
+
 export const generateWorkflowPlan = async (
   userId: string,
   rawPrompt: string,
@@ -453,6 +475,7 @@ export const generateWorkflowPlan = async (
   const allUserOrgs = await getAllUserOrganizationsContext(userId);
   const accessibleDocs = await getUserAccessibleDocuments(userId, orgContext?.organizationId);
   const userCommunities = await getUserCommunities(userId);
+  const userProjects = await getUserProjects(userId, orgContext?.organizationId);
 
   const now = clientTime && !isNaN(Date.parse(clientTime)) ? new Date(clientTime) : new Date();
   const userTimezone = timezone && timezone.trim() ? timezone.trim() : 'Asia/Kolkata';
@@ -486,6 +509,11 @@ export const generateWorkflowPlan = async (
     teams: (orgContext?.availableTeams && orgContext.availableTeams.length > 0)
       ? orgContext.availableTeams
       : allUserOrgs.flatMap((o) => o.teams),
+    projects: userProjects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      organizationId: p.organizationId,
+    })),
     documents: accessibleDocs.map((d) => ({
       id: d.id,
       title: d.title,
@@ -506,33 +534,66 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "CREATE_ORGANIZATION"
    - "CREATE_TEAM"
    - "ADD_TEAM_MEMBER"
+   - "REMOVE_TEAM_MEMBER"
+   - "INVITE_ORG_MEMBER"
    - "SCHEDULE_MEETING"
    - "SHARE_DOCUMENT"
+   - "CREATE_DOCUMENT"
+   - "CREATE_TASK"
+   - "CREATE_PROJECT"
+   - "CREATE_WHITEBOARD"
+   - "CREATE_POLL"
    - "NOTIFY_MEMBERS"
    - "CREATE_COMMUNITY"
    - "CREATE_COMMUNITY_POST"
+   - "INVITE_COMMUNITY_MEMBER"
+   - "REMOVE_COMMUNITY_MEMBER"
    - "SEND_CHAT_MESSAGE"
 3. For entity resolution, match names and email addresses mentioned in the prompt to the provided workspace members, communities, and documents. If a member, community, or document cannot be matched with certainty, omit or use best matched ID from the provided context.
 4. When an action relies on a resource produced in a previous step, reference it using variable syntax:
    - "$step1.organizationId" or "$step1.orgId" or "$step1.id" for organization created in step 1
    - "$step1.teamId" or "$step1.id" for team created in step 1
    - "$step2.meetingId" or "$step2.meetingCode" for meeting created in step 2
+   - "$step1.documentId" or "$step1.id" for document created in step 1
+   - "$step1.taskId" or "$step1.id" for task created in step 1
+   - "$step1.projectId" or "$step1.id" for project created in step 1
+   - "$step1.whiteboardId" or "$step1.id" for whiteboard created in step 1
+   - "$step1.pollId" or "$step1.id" for poll created in step 1
    - "$step1.communityId" or "$step1.id" for community created in step 1
    - "$step1.messageId" or "$step1.id" for chat message created in step 1
+   - "$step1.inviteId" or "$step1.id" for invite created in step 1
 5. Parameter requirements per action:
    - "CREATE_ORGANIZATION": { "name": string, "description"?: string }
    - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds"?: string[], "organizationId"?: string, "organizationName"?: string }
    - "ADD_TEAM_MEMBER": { "teamId"?: string, "teamName"?: string, "memberId"?: string, "memberIds"?: string[], "memberName"?: string, "organizationId"?: string, "organizationName"?: string }
+   - "REMOVE_TEAM_MEMBER": { "teamId"?: string, "teamName"?: string, "memberId"?: string, "memberName"?: string, "memberEmail"?: string, "organizationId"?: string, "organizationName"?: string }
+   - "INVITE_ORG_MEMBER": { "email"?: string, "memberName"?: string, "role"?: "MEMBER" | "ORG_ADMIN", "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string }
    - "SCHEDULE_MEETING": { "title": string, "startTime": string (ISO 8601), "durationMinutes"?: number, "teamId"?: string }
    - "SHARE_DOCUMENT": { "documentId": string, "teamId"?: string, "memberIds"?: string[] }
+   - "CREATE_DOCUMENT": { "title": string, "scopeType"?: "PERSONAL" | "ORGANIZATION" | "TEAM" | "PROJECT", "content"?: string, "organizationId"?: string, "teamId"?: string, "projectId"?: string }
+   - "CREATE_TASK": { "title": string, "description"?: string, "dueDate"?: string, "teamId"?: string, "teamName"?: string, "assigneeId"?: string, "assigneeName"?: string, "organizationId"?: string, "organizationName"?: string }
+   - "CREATE_PROJECT": { "name": string, "description"?: string, "budget"?: number, "dueDate"?: string, "organizationId"?: string, "organizationName"?: string }
+   - "CREATE_WHITEBOARD": { "name": string, "organizationId"?: string, "organizationName"?: string, "teamId"?: string, "projectId"?: string, "meetingId"?: string }
+   - "CREATE_POLL": { "question": string, "options": string[], "allowMultipleAnswers"?: boolean, "recipientUserId"?: string, "recipientName"?: string, "groupName"?: string, "teamId"?: string, "conversationId"?: string }
    - "NOTIFY_MEMBERS": { "userIds": string[], "title": string, "message": string }
    - "CREATE_COMMUNITY": { "name": string, "description"?: string }
    - "CREATE_COMMUNITY_POST": { "communityId"?: string, "communityName"?: string, "content": string }
+   - "INVITE_COMMUNITY_MEMBER": { "communityId"?: string, "communityName"?: string, "userId"?: string, "memberName"?: string, "email"?: string, "role"?: "MEMBER" | "ADMIN" }
+   - "REMOVE_COMMUNITY_MEMBER": { "communityId"?: string, "communityName"?: string, "targetUserId"?: string, "memberName"?: string, "memberEmail"?: string }
    - "SEND_CHAT_MESSAGE": { "content": string, "recipientUserId"?: string, "recipientName"?: string, "groupName"?: string, "teamId"?: string, "conversationId"?: string }
 6. ACTION SELECTION RULES:
    - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". DO NOT use "CREATE_TEAM" for organizations or companies.
    - When the user asks to add or invite someone/a member to a team (e.g. "add tanvi to team dev team(frontend)", "add user to team"), you MUST use "ADD_TEAM_MEMBER". DO NOT use "CREATE_TEAM" when adding members to an existing team. Match the team from the provided "teams" list to set "teamId" and "teamName", match the organization from the user prompt or "organizations" list to set "organizationId" and "organizationName", and match the member from "members" to set "memberId" and "memberName".
+   - When the user asks to remove or kick someone from a team (e.g. "remove tanvi from team frontend", "kick member from team dev"), you MUST use "REMOVE_TEAM_MEMBER". Match team from "teams" and member from "members".
+   - When the user asks to invite someone to an organization or company (e.g. "invite user@example.com to organization", "invite tanvi to company"), you MUST use "INVITE_ORG_MEMBER".
    - Use "CREATE_TEAM" ONLY when creating a NEW team, squad, department, or group within an organization.
+   - When the user asks to create, make, or write a document or notes (e.g. "create a document named PRD", "make team document for sprint planning"), you MUST use "CREATE_DOCUMENT".
+   - When the user asks to create or assign a task (e.g. "create task fix navbar for tanvi in team dev", "assign task deploy to tanvi"), you MUST use "CREATE_TASK".
+   - When the user asks to create or start a project (e.g. "create a project named Mobile App", "start website redesign project"), you MUST use "CREATE_PROJECT".
+   - When the user asks to create a whiteboard or canvas (e.g. "create a whiteboard for architecture design", "make whiteboard"), you MUST use "CREATE_WHITEBOARD".
+   - When the user asks to create a poll (e.g. "create a poll asking what time to meet with options 2pm, 4pm", "create poll in team dev"), you MUST use "CREATE_POLL".
+   - When the user asks to invite or add someone to a community (e.g. "invite tanvi to community college", "add user to community developers"), you MUST use "INVITE_COMMUNITY_MEMBER". Match community from "communities" and member from "members".
+   - When the user asks to remove or kick someone from a community (e.g. "remove tanvi from community college", "kick user from community"), you MUST use "REMOVE_COMMUNITY_MEMBER". Match community from "communities".
    - When the user asks to post, share, or publish a message, announcement, or post in a community (e.g. "make a post on community named college saying hello guys", "post in community college hello guys"), you MUST use "CREATE_COMMUNITY_POST". Match the community by name against the provided "communities" list in contextData to set "communityId" and include "communityName" and "content". DO NOT use "NOTIFY_MEMBERS" or "CREATE_TEAM" for community posts.
    - When the user asks to create or make a community (e.g. "make a community named xyz", "create community"), use "CREATE_COMMUNITY".
    - When the user asks to write, send, text, or ping a message to a person or someone (e.g. "write a message to Aniket saying hello", "send message to John"), or to a group or team (e.g. "write a message in frontend group saying meeting starts now", "send a message to team dev"), you MUST use "SEND_CHAT_MESSAGE". Match the person against workspace members for "recipientUserId"/"recipientName", or match the group against "teams" for "groupName"/"teamId". DO NOT use "NOTIFY_MEMBERS" or "CREATE_COMMUNITY_POST" for direct or group chat messages.
@@ -604,6 +665,33 @@ Generate the JSON execution plan:`;
     }
     if ((rawStep as any).action === 'ADD_MEMBER' || (rawStep as any).action === 'INVITE_MEMBER') {
       (rawStep as any).action = 'ADD_TEAM_MEMBER';
+    }
+    if ((rawStep as any).action === 'ASSIGN_TASK') {
+      (rawStep as any).action = 'CREATE_TASK';
+    }
+    if ((rawStep as any).action === 'INVITE_COMMUNITY' || (rawStep as any).action === 'INVITE_MEMBER_TO_COMMUNITY') {
+      (rawStep as any).action = 'INVITE_COMMUNITY_MEMBER';
+    }
+    if ((rawStep as any).action === 'REMOVE_COMMUNITY' || (rawStep as any).action === 'REMOVE_MEMBER_FROM_COMMUNITY') {
+      (rawStep as any).action = 'REMOVE_COMMUNITY_MEMBER';
+    }
+    if ((rawStep as any).action === 'REMOVE_MEMBER' || (rawStep as any).action === 'REMOVE_FROM_TEAM') {
+      (rawStep as any).action = 'REMOVE_TEAM_MEMBER';
+    }
+    if ((rawStep as any).action === 'INVITE_ORG' || (rawStep as any).action === 'INVITE_TO_ORG') {
+      (rawStep as any).action = 'INVITE_ORG_MEMBER';
+    }
+    if ((rawStep as any).action === 'MAKE_DOCUMENT' || (rawStep as any).action === 'NEW_DOCUMENT') {
+      (rawStep as any).action = 'CREATE_DOCUMENT';
+    }
+    if ((rawStep as any).action === 'MAKE_PROJECT' || (rawStep as any).action === 'NEW_PROJECT') {
+      (rawStep as any).action = 'CREATE_PROJECT';
+    }
+    if ((rawStep as any).action === 'MAKE_WHITEBOARD' || (rawStep as any).action === 'NEW_WHITEBOARD') {
+      (rawStep as any).action = 'CREATE_WHITEBOARD';
+    }
+    if ((rawStep as any).action === 'MAKE_POLL' || (rawStep as any).action === 'NEW_POLL') {
+      (rawStep as any).action = 'CREATE_POLL';
     }
 
     const originalStep = typeof (rawStep as any).step === 'number' ? (rawStep as any).step : i + 1;
@@ -1714,6 +1802,883 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               content: message.content,
               recipientCount: participants.length - 1
             }
+          });
+        } else if (step.action === 'CREATE_DOCUMENT') {
+          const title = String(resolvedParams.title || resolvedParams.documentName || resolvedParams.name || 'Untitled Document').trim();
+          if (!title) {
+            throw new ApiError(400, 'Document title is required');
+          }
+
+          let scopeType = (resolvedParams.scopeType ? String(resolvedParams.scopeType).toUpperCase() : 'PERSONAL') as DocumentScopeType;
+          if (!['PERSONAL', 'ORGANIZATION', 'TEAM', 'PROJECT'].includes(scopeType)) {
+            scopeType = DocumentScopeType.PERSONAL;
+          }
+
+          let targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
+          let targetTeamId = resolvedParams.teamId ? String(resolvedParams.teamId).trim() : undefined;
+          let targetProjectId = resolvedParams.projectId ? String(resolvedParams.projectId).trim() : undefined;
+
+          if (scopeType === DocumentScopeType.ORGANIZATION && !targetOrgId) {
+            if (resolvedParams.organizationName) {
+              const orgCtx = await getUserOrganizationContext(userId, undefined, String(resolvedParams.organizationName).trim());
+              targetOrgId = orgCtx?.organizationId;
+            }
+          }
+
+          if (scopeType === DocumentScopeType.TEAM && !targetTeamId) {
+            if (resolvedParams.teamName) {
+              const teamQuery = String(resolvedParams.teamName).trim();
+              const team = await prisma.team.findFirst({
+                where: {
+                  ...(targetOrgId ? { organizationId: targetOrgId } : {}),
+                  name: { contains: teamQuery, mode: 'insensitive' },
+                },
+                select: { id: true, organizationId: true },
+              });
+              if (team) {
+                targetTeamId = team.id;
+                targetOrgId = team.organizationId;
+              }
+            }
+          }
+
+          if (scopeType === DocumentScopeType.PROJECT && !targetProjectId) {
+            if (resolvedParams.projectName) {
+              const projQuery = String(resolvedParams.projectName).trim();
+              const proj = await prisma.project.findFirst({
+                where: {
+                  name: { contains: projQuery, mode: 'insensitive' },
+                  OR: [{ members: { some: { userId } } }, { createdById: userId }],
+                },
+                select: { id: true, organizationId: true },
+              });
+              if (proj) {
+                targetProjectId = proj.id;
+                if (proj.organizationId) {
+                  targetOrgId = proj.organizationId;
+                }
+              }
+            }
+          }
+
+          if (scopeType === DocumentScopeType.PERSONAL) {
+            targetOrgId = undefined;
+            targetTeamId = undefined;
+            targetProjectId = undefined;
+          }
+
+          const rawContent = resolvedParams.content;
+          const content = typeof rawContent === 'string'
+            ? {
+                type: 'doc',
+                content: [
+                  {
+                    type: 'paragraph',
+                    content: [{ type: 'text', text: rawContent }],
+                  },
+                ],
+              }
+            : (rawContent || { type: 'doc', content: [{ type: 'paragraph' }] });
+
+          const document = await createDocument(userId, {
+            title,
+            content,
+            scopeType,
+            organizationId: targetOrgId,
+            teamId: targetTeamId,
+            projectId: targetProjectId,
+          });
+
+          variables.set(`$step${step.step}.documentId`, document.id);
+          variables.set(`$step${step.step}.id`, document.id);
+          variables.set(`$step${step.step}.title`, document.title);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              documentId: document.id,
+              title: document.title,
+              scopeType: document.scopeType,
+              organizationId: document.organizationId,
+              teamId: document.teamId,
+              projectId: document.projectId,
+            },
+          });
+        } else if (step.action === 'CREATE_TASK' || step.action === 'ASSIGN_TASK') {
+          const taskTitle = String(resolvedParams.title || resolvedParams.name || '').trim();
+          if (!taskTitle) {
+            throw new ApiError(400, 'Task title is required');
+          }
+
+          let targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
+          let team: any = null;
+          if (resolvedParams.teamId) {
+            team = await prisma.team.findUnique({
+              where: { id: String(resolvedParams.teamId).trim() },
+              select: { id: true, name: true, organizationId: true },
+            });
+          }
+          if (!team && resolvedParams.teamName) {
+            const teamQuery = String(resolvedParams.teamName).trim();
+            team = await prisma.team.findFirst({
+              where: {
+                ...(targetOrgId ? { organizationId: targetOrgId } : {}),
+                name: { contains: teamQuery, mode: 'insensitive' },
+              },
+              select: { id: true, name: true, organizationId: true },
+            });
+          }
+
+          if (!team) {
+            const userTeam = await prisma.teamMember.findFirst({
+              where: { userId },
+              select: {
+                team: {
+                  select: { id: true, name: true, organizationId: true },
+                },
+              },
+            });
+            if (userTeam) {
+              team = userTeam.team;
+            }
+          }
+
+          if (!team) {
+            throw new ApiError(404, `Team '${resolvedParams.teamName || 'specified'}' not found to assign task`);
+          }
+
+          targetOrgId = team.organizationId || targetOrgId;
+          if (!targetOrgId) {
+            throw new ApiError(400, 'Organization ID is required to create a task');
+          }
+
+          const callerOrg = await getUserOrganizationContext(userId, targetOrgId);
+          if (!callerOrg) {
+            throw new ApiError(403, 'You are not a member of the task organization');
+          }
+
+          let assigneeId = resolvedParams.assigneeId ? String(resolvedParams.assigneeId).trim() : undefined;
+          if (!assigneeId && resolvedParams.assigneeName) {
+            const assigneeQuery = String(resolvedParams.assigneeName).trim();
+            const matchedTeamMember = await prisma.teamMember.findFirst({
+              where: {
+                teamId: team.id,
+                user: {
+                  name: { contains: assigneeQuery, mode: 'insensitive' },
+                },
+              },
+              select: { userId: true },
+            });
+            if (matchedTeamMember) {
+              assigneeId = matchedTeamMember.userId;
+            } else {
+              const matchedOrgUser = await prisma.organizationMember.findFirst({
+                where: {
+                  organizationId: targetOrgId,
+                  user: {
+                    name: { contains: assigneeQuery, mode: 'insensitive' },
+                  },
+                },
+                select: { userId: true },
+              });
+              if (matchedOrgUser) {
+                assigneeId = matchedOrgUser.userId;
+              }
+            }
+          }
+
+          if (!assigneeId) {
+            assigneeId = userId;
+          }
+
+          const isAssigneeInTeam = await prisma.teamMember.findUnique({
+            where: {
+              teamId_userId: {
+                teamId: team.id,
+                userId: assigneeId,
+              },
+            },
+          });
+
+          if (!isAssigneeInTeam) {
+            throw new ApiError(400, 'Assignee must be a member of this specific team');
+          }
+
+          const task = await createTask(
+            targetOrgId,
+            team.id,
+            userId,
+            callerOrg.isOwner ? OrgRole.ORG_ADMIN : callerOrg.userRole,
+            {
+              title: taskTitle,
+              description: resolvedParams.description ? String(resolvedParams.description).trim() : undefined,
+              dueDate: resolvedParams.dueDate ? String(resolvedParams.dueDate).trim() : undefined,
+              assigneeId,
+            }
+          );
+
+          variables.set(`$step${step.step}.taskId`, task.id);
+          variables.set(`$step${step.step}.id`, task.id);
+          variables.set(`$step${step.step}.title`, task.title);
+
+          results.push({
+            step: step.step,
+            action: 'CREATE_TASK',
+            description: step.description,
+            success: true,
+            resource: {
+              taskId: task.id,
+              title: task.title,
+              teamId: team.id,
+              teamName: team.name,
+              assigneeId: task.assigneeId,
+              status: task.status,
+            },
+          });
+        } else if (step.action === 'CREATE_PROJECT') {
+          const projectName = String(resolvedParams.name || resolvedParams.title || '').trim();
+          if (!projectName || projectName.length < 2) {
+            throw new ApiError(400, 'Project name must be at least 2 characters');
+          }
+
+          let targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
+          if (!targetOrgId && resolvedParams.organizationName) {
+            const orgCtx = await getUserOrganizationContext(userId, undefined, String(resolvedParams.organizationName).trim());
+            targetOrgId = orgCtx?.organizationId;
+          }
+
+          if (!targetOrgId) {
+            const userOrg = await prisma.organizationMember.findFirst({
+              where: { userId },
+              select: { organizationId: true },
+            });
+            targetOrgId = userOrg?.organizationId;
+          }
+
+          if (!targetOrgId) {
+            throw new ApiError(400, 'An organization is required to create a project');
+          }
+
+          const callerOrg = await getUserOrganizationContext(userId, targetOrgId);
+          if (!callerOrg) {
+            throw new ApiError(403, 'You are not a member of this organization');
+          }
+
+          const canCreate = callerOrg.isOwner || callerOrg.userRole === OrgRole.ORG_ADMIN || callerOrg.userRole === OrgRole.TEAM_HEAD;
+          if (!canCreate) {
+            throw new ApiError(403, 'Only organization owners, admins, or team leads can create projects');
+          }
+
+          const rawBudget = resolvedParams.budget;
+          const budget = rawBudget !== undefined && rawBudget !== null && !isNaN(Number(rawBudget)) ? Number(rawBudget) : undefined;
+
+          const project = await createProject(userId, targetOrgId, {
+            name: projectName,
+            description: resolvedParams.description ? String(resolvedParams.description).trim() : undefined,
+            budget,
+            dueDate: resolvedParams.dueDate ? String(resolvedParams.dueDate).trim() : undefined,
+          });
+
+          variables.set(`$step${step.step}.projectId`, project.id);
+          variables.set(`$step${step.step}.id`, project.id);
+          variables.set(`$step${step.step}.name`, project.name);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              projectId: project.id,
+              name: project.name,
+              organizationId: targetOrgId,
+              status: project.status,
+            },
+          });
+        } else if (step.action === 'INVITE_ORG_MEMBER') {
+          let targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
+          if (!targetOrgId && resolvedParams.organizationName) {
+            const orgCtx = await getUserOrganizationContext(userId, undefined, String(resolvedParams.organizationName).trim());
+            targetOrgId = orgCtx?.organizationId;
+          }
+
+          if (!targetOrgId) {
+            throw new ApiError(400, 'Organization ID is required to invite an organization member');
+          }
+
+          const callerOrg = await getUserOrganizationContext(userId, targetOrgId);
+          if (!callerOrg) {
+            throw new ApiError(403, 'You are not a member of this organization');
+          }
+
+          if (!callerOrg.isOwner && callerOrg.userRole !== OrgRole.ORG_ADMIN) {
+            throw new ApiError(403, 'Only organization owners and admins can invite members to the organization');
+          }
+
+          let email = resolvedParams.email ? String(resolvedParams.email).trim().toLowerCase() : undefined;
+          if (!email && resolvedParams.memberName) {
+            const queryName = String(resolvedParams.memberName).trim();
+            const matchedUser = await prisma.user.findFirst({
+              where: {
+                name: { contains: queryName, mode: 'insensitive' },
+              },
+              select: { email: true, id: true },
+            });
+            if (matchedUser) {
+              email = matchedUser.email.toLowerCase();
+            }
+          }
+
+          if (!email) {
+            throw new ApiError(400, 'Member email is required to invite to organization');
+          }
+
+          const inviteResult = await createOrganizationInvite(targetOrgId, userId, {
+            email,
+            role: resolvedParams.role === 'ORG_ADMIN' ? OrgRole.ORG_ADMIN : OrgRole.MEMBER,
+            teamId: resolvedParams.teamId ? String(resolvedParams.teamId).trim() : undefined,
+            teamRole: resolvedParams.teamRole ? resolvedParams.teamRole : undefined,
+          });
+
+          const inviteId = (inviteResult as any)?.id || (inviteResult as any)?.invite?.id || '';
+          if (inviteId) {
+            variables.set(`$step${step.step}.inviteId`, inviteId);
+            variables.set(`$step${step.step}.id`, inviteId);
+          }
+          variables.set(`$step${step.step}.email`, email);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              organizationId: targetOrgId,
+              email,
+              invite: inviteResult,
+            },
+          });
+        } else if (step.action === 'REMOVE_TEAM_MEMBER') {
+          let targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
+          if (!targetOrgId && resolvedParams.organizationName) {
+            const orgCtx = await getUserOrganizationContext(userId, undefined, String(resolvedParams.organizationName).trim());
+            targetOrgId = orgCtx?.organizationId;
+          }
+
+          let team: any = null;
+          if (resolvedParams.teamId) {
+            team = await prisma.team.findUnique({
+              where: { id: String(resolvedParams.teamId).trim() },
+              select: { id: true, name: true, organizationId: true },
+            });
+          }
+          if (!team && resolvedParams.teamName) {
+            const teamQuery = String(resolvedParams.teamName).trim();
+            team = await prisma.team.findFirst({
+              where: {
+                ...(targetOrgId ? { organizationId: targetOrgId } : {}),
+                name: { contains: teamQuery, mode: 'insensitive' },
+              },
+              select: { id: true, name: true, organizationId: true },
+            });
+          }
+
+          if (!team) {
+            throw new ApiError(404, `Team '${resolvedParams.teamName || 'specified'}' not found`);
+          }
+
+          const finalOrgId = String(team.organizationId || targetOrgId || '').trim();
+          if (!finalOrgId) {
+            throw new ApiError(400, 'Organization ID is required to remove team member');
+          }
+
+          const callerOrg = await getUserOrganizationContext(userId, finalOrgId);
+          if (!callerOrg) {
+            throw new ApiError(403, 'You are not a member of this organization');
+          }
+
+          const callerRole = callerOrg.isOwner ? OrgRole.ORG_ADMIN : callerOrg.userRole;
+
+          let targetUserId = resolvedParams.memberId || resolvedParams.userId || resolvedParams.targetUserId
+            ? String(resolvedParams.memberId || resolvedParams.userId || resolvedParams.targetUserId).trim()
+            : undefined;
+
+          if (!targetUserId && resolvedParams.memberName) {
+            const memberQuery = String(resolvedParams.memberName).trim();
+            const matchedTeamMember = await prisma.teamMember.findFirst({
+              where: {
+                teamId: team.id,
+                user: {
+                  name: { contains: memberQuery, mode: 'insensitive' },
+                },
+              },
+              select: { userId: true },
+            });
+            if (matchedTeamMember) {
+              targetUserId = matchedTeamMember.userId;
+            }
+          }
+
+          if (!targetUserId && resolvedParams.memberEmail) {
+            const emailQuery = String(resolvedParams.memberEmail).trim().toLowerCase();
+            const matchedTeamMember = await prisma.teamMember.findFirst({
+              where: {
+                teamId: team.id,
+                user: {
+                  email: { equals: emailQuery, mode: 'insensitive' },
+                },
+              },
+              select: { userId: true },
+            });
+            if (matchedTeamMember) {
+              targetUserId = matchedTeamMember.userId;
+            }
+          }
+
+          if (!targetUserId) {
+            throw new ApiError(404, `Member '${resolvedParams.memberName || resolvedParams.memberEmail || 'specified'}' not found in team '${team.name}'`);
+          }
+
+          await removeTeamMember(finalOrgId, team.id, userId, callerRole, targetUserId);
+
+          variables.set(`$step${step.step}.removedUserId`, targetUserId);
+          variables.set(`$step${step.step}.teamId`, team.id);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              teamId: team.id,
+              teamName: team.name,
+              removedUserId: targetUserId,
+              organizationId: finalOrgId,
+            },
+          });
+        } else if (step.action === 'CREATE_WHITEBOARD') {
+          const boardName = String(resolvedParams.name || resolvedParams.title || 'Untitled Whiteboard').trim();
+          let targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
+          if (!targetOrgId && resolvedParams.organizationName) {
+            const orgCtx = await getUserOrganizationContext(userId, undefined, String(resolvedParams.organizationName).trim());
+            targetOrgId = orgCtx?.organizationId;
+          }
+
+          const whiteboard = await createWhiteboard(userId, {
+            name: boardName,
+            organizationId: targetOrgId,
+            meetingId: resolvedParams.meetingId ? String(resolvedParams.meetingId).trim() : undefined,
+            content: resolvedParams.content,
+          });
+
+          variables.set(`$step${step.step}.whiteboardId`, whiteboard.id);
+          variables.set(`$step${step.step}.id`, whiteboard.id);
+          variables.set(`$step${step.step}.name`, whiteboard.name);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              whiteboardId: whiteboard.id,
+              name: whiteboard.name,
+              organizationId: whiteboard.organizationId,
+            },
+          });
+        } else if (step.action === 'CREATE_POLL') {
+          const pollQuestion = String(resolvedParams.question || resolvedParams.title || '').trim();
+          if (!pollQuestion) {
+            throw new ApiError(400, 'Poll question is required');
+          }
+
+          let rawOptions = resolvedParams.options;
+          if (typeof rawOptions === 'string') {
+            try {
+              rawOptions = JSON.parse(rawOptions);
+            } catch {
+              rawOptions = rawOptions.split(',').map((s: string) => s.trim());
+            }
+          }
+
+          if (!Array.isArray(rawOptions) || rawOptions.length < 2) {
+            throw new ApiError(400, 'Poll must have at least 2 options');
+          }
+
+          const pollOptions = rawOptions.map((o: any) => String(o).trim()).filter((o: string) => o.length > 0);
+          if (pollOptions.length < 2) {
+            throw new ApiError(400, 'Poll must have at least 2 valid non-empty options');
+          }
+
+          let targetConvId: string | undefined = resolvedParams.conversationId
+            ? String(resolvedParams.conversationId).trim()
+            : undefined;
+
+          if ((!targetConvId || targetConvId.startsWith('$')) && resolvedParams.teamId) {
+            const teamConv = await prisma.conversation.findFirst({
+              where: { teamId: String(resolvedParams.teamId).trim() },
+              select: { id: true },
+            });
+            if (teamConv) {
+              targetConvId = teamConv.id;
+            }
+          }
+
+          if ((!targetConvId || targetConvId.startsWith('$')) && resolvedParams.recipientUserId) {
+            const targetUserId = String(resolvedParams.recipientUserId).trim();
+            if (targetUserId !== userId) {
+              const directConv = await getOrCreateDirectConversation(userId, targetUserId);
+              if (directConv) {
+                targetConvId = directConv.id;
+              }
+            }
+          }
+
+          if ((!targetConvId || targetConvId.startsWith('$')) && resolvedParams.recipientName) {
+            const queryName = String(resolvedParams.recipientName).trim();
+            const matchedUser = await prisma.user.findFirst({
+              where: {
+                name: { contains: queryName, mode: 'insensitive' },
+              },
+              select: { id: true },
+            });
+            if (matchedUser && matchedUser.id !== userId) {
+              const directConv = await getOrCreateDirectConversation(userId, matchedUser.id);
+              if (directConv) {
+                targetConvId = directConv.id;
+              }
+            }
+          }
+
+          if ((!targetConvId || targetConvId.startsWith('$')) && resolvedParams.groupName) {
+            const queryGroup = String(resolvedParams.groupName).trim();
+            const matchingConv = await prisma.conversation.findFirst({
+              where: {
+                participants: { some: { userId } },
+                name: { contains: queryGroup, mode: 'insensitive' },
+              },
+              select: { id: true },
+            });
+            if (matchingConv) {
+              targetConvId = matchingConv.id;
+            } else {
+              const team = await prisma.team.findFirst({
+                where: {
+                  name: { contains: queryGroup, mode: 'insensitive' },
+                  members: { some: { userId } },
+                },
+                select: { id: true },
+              });
+              if (team) {
+                const teamConv = await prisma.conversation.findFirst({
+                  where: { teamId: team.id },
+                  select: { id: true },
+                });
+                if (teamConv) {
+                  targetConvId = teamConv.id;
+                }
+              }
+            }
+          }
+
+          if (!targetConvId || targetConvId.startsWith('$')) {
+            throw new ApiError(404, `Could not find recipient or group conversation for '${resolvedParams.recipientName || resolvedParams.groupName || 'poll'}'`);
+          }
+
+          const { message, participants } = await saveMessage(
+            userId,
+            targetConvId,
+            resolvedParams.content || resolvedParams.message || '',
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            {
+              question: pollQuestion,
+              options: pollOptions,
+              allowMultipleAnswers: Boolean(resolvedParams.allowMultipleAnswers),
+            }
+          );
+
+          try {
+            const io = getIO();
+            const conversationRooms = [`conversation:${message.conversationId}`];
+            io.to(conversationRooms).emit(CHAT_EVENTS.MESSAGE_NEW, message);
+            participants.forEach((p) => {
+              io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+                conversationId: message.conversationId,
+                lastMessage: message,
+              });
+            });
+
+            const recipientUserIds = participants
+              .filter((p) => p.userId !== userId)
+              .map((p) => p.userId);
+
+            if (recipientUserIds.length > 0) {
+              const sender = await prisma.user.findUnique({
+                where: { id: userId },
+                select: { name: true },
+              });
+              sendPushToOfflineUsers(
+                recipientUserIds,
+                sender?.name || 'New Poll',
+                `Poll: ${pollQuestion}`,
+                {
+                  type: 'NEW_MESSAGE',
+                  conversationId: message.conversationId,
+                  messageId: message.id,
+                },
+                {
+                  tag: `chat_${message.conversationId}`,
+                  channelId: 'quorum_chat_messages',
+                  sound: 'default',
+                }
+              ).catch((pushErr) => {
+                logger.warn('Failed to send push notification for poll message', pushErr);
+              });
+            }
+          } catch (emitErr) {
+            logger.warn('Failed to dispatch poll chat socket events', emitErr);
+          }
+
+          variables.set(`$step${step.step}.pollId`, message.id);
+          variables.set(`$step${step.step}.messageId`, message.id);
+          variables.set(`$step${step.step}.id`, message.id);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              messageId: message.id,
+              conversationId: message.conversationId,
+              question: pollQuestion,
+              options: pollOptions,
+            },
+          });
+        } else if (step.action === 'INVITE_COMMUNITY_MEMBER') {
+          let targetCommunityId = resolvedParams.communityId ? String(resolvedParams.communityId).trim() : undefined;
+          if ((!targetCommunityId || targetCommunityId.startsWith('$')) && resolvedParams.communityName) {
+            const queryName = String(resolvedParams.communityName).trim();
+            const communityRecord = await prisma.community.findFirst({
+              where: {
+                name: { equals: queryName, mode: 'insensitive' },
+              },
+              select: { id: true },
+            });
+            if (communityRecord) {
+              targetCommunityId = communityRecord.id;
+            } else {
+              const partialComm = await prisma.community.findFirst({
+                where: {
+                  name: { contains: queryName, mode: 'insensitive' },
+                },
+                select: { id: true },
+              });
+              if (partialComm) {
+                targetCommunityId = partialComm.id;
+              }
+            }
+          }
+
+          if (!targetCommunityId || targetCommunityId.startsWith('$')) {
+            const userComm = await prisma.communityMember.findFirst({
+              where: { userId },
+              select: { communityId: true },
+            });
+            targetCommunityId = userComm?.communityId;
+          }
+
+          if (!targetCommunityId) {
+            throw new ApiError(404, `Target community '${resolvedParams.communityName || ''}' not found`);
+          }
+
+          const callerMembership = await prisma.communityMember.findUnique({
+            where: {
+              communityId_userId: {
+                communityId: targetCommunityId,
+                userId,
+              },
+            },
+          });
+
+          if (!callerMembership || (callerMembership.role !== 'OWNER' && callerMembership.role !== 'ADMIN')) {
+            throw new ApiError(403, 'Only community owners and admins can invite members to this community');
+          }
+
+          let targetUserId = resolvedParams.userId || resolvedParams.targetUserId || resolvedParams.memberId
+            ? String(resolvedParams.userId || resolvedParams.targetUserId || resolvedParams.memberId).trim()
+            : undefined;
+          let targetEmail = resolvedParams.email
+            ? String(resolvedParams.email).trim().toLowerCase()
+            : undefined;
+
+          if (!targetUserId && !targetEmail && resolvedParams.memberName) {
+            const queryName = String(resolvedParams.memberName).trim();
+            const matchedUser = await prisma.user.findFirst({
+              where: {
+                name: { contains: queryName, mode: 'insensitive' },
+              },
+              select: { id: true, email: true },
+            });
+            if (matchedUser) {
+              targetUserId = matchedUser.id;
+              targetEmail = matchedUser.email.toLowerCase();
+            }
+          }
+
+          if (!targetUserId && !targetEmail) {
+            throw new ApiError(400, 'User ID, member name, or email is required to invite to community');
+          }
+
+          if (targetUserId && targetUserId === userId) {
+            throw new ApiError(400, 'You cannot invite yourself to the community');
+          }
+
+          const inviteResult = await inviteUserToCommunity(userId, targetCommunityId, {
+            userId: targetUserId,
+            email: targetEmail,
+            role: resolvedParams.role === 'ADMIN' ? 'ADMIN' : 'MEMBER',
+            expiresInDays: resolvedParams.expiresInDays ? Number(resolvedParams.expiresInDays) : 7,
+          });
+
+          const inviteId = (inviteResult as any)?.id || (inviteResult as any)?.invite?.id || '';
+          if (inviteId) {
+            variables.set(`$step${step.step}.inviteId`, inviteId);
+            variables.set(`$step${step.step}.id`, inviteId);
+          }
+          variables.set(`$step${step.step}.communityId`, targetCommunityId);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              communityId: targetCommunityId,
+              invitedUserId: targetUserId,
+              email: targetEmail,
+              invite: inviteResult,
+            },
+          });
+        } else if (step.action === 'REMOVE_COMMUNITY_MEMBER') {
+          let targetCommunityId = resolvedParams.communityId ? String(resolvedParams.communityId).trim() : undefined;
+          if ((!targetCommunityId || targetCommunityId.startsWith('$')) && resolvedParams.communityName) {
+            const queryName = String(resolvedParams.communityName).trim();
+            const communityRecord = await prisma.community.findFirst({
+              where: {
+                name: { equals: queryName, mode: 'insensitive' },
+              },
+              select: { id: true },
+            });
+            if (communityRecord) {
+              targetCommunityId = communityRecord.id;
+            } else {
+              const partialComm = await prisma.community.findFirst({
+                where: {
+                  name: { contains: queryName, mode: 'insensitive' },
+                },
+                select: { id: true },
+              });
+              if (partialComm) {
+                targetCommunityId = partialComm.id;
+              }
+            }
+          }
+
+          if (!targetCommunityId || targetCommunityId.startsWith('$')) {
+            const userComm = await prisma.communityMember.findFirst({
+              where: { userId },
+              select: { communityId: true },
+            });
+            targetCommunityId = userComm?.communityId;
+          }
+
+          if (!targetCommunityId) {
+            throw new ApiError(404, `Target community '${resolvedParams.communityName || ''}' not found`);
+          }
+
+          const callerMembership = await prisma.communityMember.findUnique({
+            where: {
+              communityId_userId: {
+                communityId: targetCommunityId,
+                userId,
+              },
+            },
+          });
+
+          if (!callerMembership || (callerMembership.role !== 'OWNER' && callerMembership.role !== 'ADMIN')) {
+            throw new ApiError(403, 'Only community owners and admins can remove members from this community');
+          }
+
+          let targetUserId = resolvedParams.targetUserId || resolvedParams.userId || resolvedParams.memberId
+            ? String(resolvedParams.targetUserId || resolvedParams.userId || resolvedParams.memberId).trim()
+            : undefined;
+
+          if (!targetUserId && resolvedParams.memberName) {
+            const memberQuery = String(resolvedParams.memberName).trim();
+            const matchedMember = await prisma.communityMember.findFirst({
+              where: {
+                communityId: targetCommunityId,
+                user: {
+                  name: { contains: memberQuery, mode: 'insensitive' },
+                },
+              },
+              select: { userId: true },
+            });
+            if (matchedMember) {
+              targetUserId = matchedMember.userId;
+            }
+          }
+
+          if (!targetUserId && resolvedParams.memberEmail) {
+            const emailQuery = String(resolvedParams.memberEmail).trim().toLowerCase();
+            const matchedMember = await prisma.communityMember.findFirst({
+              where: {
+                communityId: targetCommunityId,
+                user: {
+                  email: { equals: emailQuery, mode: 'insensitive' },
+                },
+              },
+              select: { userId: true },
+            });
+            if (matchedMember) {
+              targetUserId = matchedMember.userId;
+            }
+          }
+
+          if (!targetUserId) {
+            throw new ApiError(404, `Member '${resolvedParams.memberName || resolvedParams.memberEmail || 'specified'}' not found in community`);
+          }
+
+          if (targetUserId === userId) {
+            throw new ApiError(400, 'Cannot remove yourself via this command. Use leave community instead');
+          }
+
+          await removeCommunityMember(userId, targetCommunityId, targetUserId);
+
+          variables.set(`$step${step.step}.removedUserId`, targetUserId);
+          variables.set(`$step${step.step}.communityId`, targetCommunityId);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              communityId: targetCommunityId,
+              removedUserId: targetUserId,
+            },
           });
         }
       } catch (err: any) {
