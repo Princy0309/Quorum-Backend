@@ -1663,6 +1663,23 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             throw new ApiError(400, 'durationMinutes must be a positive number between 1 and 1440');
           }
 
+          if (targetTeamId) {
+            const teamMembership = await prisma.teamMember.findUnique({
+              where: {
+                teamId_userId: {
+                  teamId: targetTeamId,
+                  userId,
+                },
+              },
+            });
+            if (!teamMembership) {
+              const callerOrg = orgId ? await getUserOrganizationContext(userId, orgId) : null;
+              if (!callerOrg?.isOwner && callerOrg?.userRole !== OrgRole.ORG_ADMIN) {
+                throw new ApiError(403, 'You must be a member of the team to schedule a team meeting');
+              }
+            }
+          }
+
           startTime = await checkAndAdjustMeetingConflict(userId, startTime, durationMinutes || 60);
 
           let meeting: any = null;
@@ -3500,6 +3517,23 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             if (team) {
               targetTeamId = team.id;
               targetOrgId = team.organizationId;
+            }
+          }
+
+          if (targetTeamId) {
+            const teamMembership = await prisma.teamMember.findUnique({
+              where: {
+                teamId_userId: {
+                  teamId: targetTeamId,
+                  userId,
+                },
+              },
+            });
+            if (!teamMembership) {
+              const callerOrg = targetOrgId ? await getUserOrganizationContext(userId, targetOrgId) : null;
+              if (!callerOrg?.isOwner && callerOrg?.userRole !== OrgRole.ORG_ADMIN) {
+                throw new ApiError(403, 'You must be a member of the team to start a team video call');
+              }
             }
           }
 
