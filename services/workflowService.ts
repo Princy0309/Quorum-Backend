@@ -11,6 +11,8 @@ import { createCommunity } from './communityService.js';
 import { createCommunityPost } from './postService.js';
 import { createScopedMeeting } from './meetingService.js';
 import { addCollaborator, checkDocumentAccess } from './documentService.js';
+import { getOrCreateDirectConversation, saveMessage } from './chatService.js';
+import { CHAT_EVENTS } from '../utils/constants.js';
 import { MeetingScopeType, NotificationType, OrgRole, DocumentScopeType } from '@prisma/client';
 import { WorkflowStep, workflowStepSchema } from '../validators/workflowValidators.js';
 import { sendPushToOfflineUsers } from './notificationService.js';
@@ -410,12 +412,14 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "NOTIFY_MEMBERS"
    - "CREATE_COMMUNITY"
    - "CREATE_COMMUNITY_POST"
+   - "SEND_CHAT_MESSAGE"
 3. For entity resolution, match names and email addresses mentioned in the prompt to the provided workspace members, communities, and documents. If a member, community, or document cannot be matched with certainty, omit or use best matched ID from the provided context.
 4. When an action relies on a resource produced in a previous step, reference it using variable syntax:
    - "$step1.organizationId" or "$step1.orgId" or "$step1.id" for organization created in step 1
    - "$step1.teamId" or "$step1.id" for team created in step 1
    - "$step2.meetingId" or "$step2.meetingCode" for meeting created in step 2
    - "$step1.communityId" or "$step1.id" for community created in step 1
+   - "$step1.messageId" or "$step1.id" for chat message created in step 1
 5. Parameter requirements per action:
    - "CREATE_ORGANIZATION": { "name": string, "description"?: string }
    - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds"?: string[], "organizationId"?: string }
@@ -424,11 +428,13 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "NOTIFY_MEMBERS": { "userIds": string[], "title": string, "message": string }
    - "CREATE_COMMUNITY": { "name": string, "description"?: string }
    - "CREATE_COMMUNITY_POST": { "communityId"?: string, "communityName"?: string, "content": string }
+   - "SEND_CHAT_MESSAGE": { "content": string, "recipientUserId"?: string, "recipientName"?: string, "groupName"?: string, "teamId"?: string, "conversationId"?: string }
 6. ACTION SELECTION RULES:
    - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". DO NOT use "CREATE_TEAM" for organizations or companies.
    - Use "CREATE_TEAM" ONLY when creating a team, squad, department, or group within an organization.
    - When the user asks to post, share, or publish a message, announcement, or post in a community (e.g. "make a post on community named college saying hello guys", "post in community college hello guys"), you MUST use "CREATE_COMMUNITY_POST". Match the community by name against the provided "communities" list in contextData to set "communityId" and include "communityName" and "content". DO NOT use "NOTIFY_MEMBERS" or "CREATE_TEAM" for community posts.
    - When the user asks to create or make a community (e.g. "make a community named xyz", "create community"), use "CREATE_COMMUNITY".
+   - When the user asks to write, send, text, or ping a message to a person or someone (e.g. "write a message to Aniket saying hello", "send message to John"), or to a group or team (e.g. "write a message in frontend group saying meeting starts now", "send a message to team dev"), you MUST use "SEND_CHAT_MESSAGE". Match the person against workspace members for "recipientUserId"/"recipientName", or match the group against "teams" for "groupName"/"teamId". DO NOT use "NOTIFY_MEMBERS" or "CREATE_COMMUNITY_POST" for direct or group chat messages.
    - If a prompt requests creating an organization AND then creating teams or meetings in it, step 1 must be "CREATE_ORGANIZATION", and subsequent steps should reference "$step1.organizationId".
 
 CRITICAL DATE & TIME ANCHOR FOR SCHEDULE_MEETING:
@@ -491,6 +497,9 @@ Generate the JSON execution plan:`;
 
     if ((rawStep as any).action === 'POST_COMMUNITY' || (rawStep as any).action === 'CREATE_POST') {
       (rawStep as any).action = 'CREATE_COMMUNITY_POST';
+    }
+    if ((rawStep as any).action === 'SEND_MESSAGE' || (rawStep as any).action === 'WRITE_MESSAGE') {
+      (rawStep as any).action = 'SEND_CHAT_MESSAGE';
     }
 
     const originalStep = typeof (rawStep as any).step === 'number' ? (rawStep as any).step : i + 1;
@@ -1338,6 +1347,160 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
               content: post.content,
               channelId: post.channelId,
             },
+          });
+        } else if (step.action === 'SEND_CHAT_MESSAGE' || step.action === 'SEND_MESSAGE' || step.action === 'WRITE_MESSAGE') {
+          const content = String(resolvedParams.content || resolvedParams.message || '').trim();
+          if (!content) {
+            throw new ApiError(400, 'Message content is required');
+          }
+
+          let targetConvId: string | undefined = resolvedParams.conversationId
+            ? String(resolvedParams.conversationId).trim()
+            : undefined;
+
+          if ((!targetConvId || targetConvId.startsWith('$')) && resolvedParams.teamId) {
+            const teamConv = await prisma.conversation.findFirst({
+              where: { teamId: String(resolvedParams.teamId).trim() },
+              select: { id: true }
+            });
+            if (teamConv) {
+              targetConvId = teamConv.id;
+            }
+          }
+
+          if ((!targetConvId || targetConvId.startsWith('$')) && resolvedParams.recipientUserId) {
+            const targetUserId = String(resolvedParams.recipientUserId).trim();
+            if (targetUserId !== userId) {
+              const directConv = await getOrCreateDirectConversation(userId, targetUserId);
+              if (directConv) {
+                targetConvId = directConv.id;
+              }
+            }
+          }
+
+          if ((!targetConvId || targetConvId.startsWith('$')) && resolvedParams.recipientName) {
+            const queryName = String(resolvedParams.recipientName).trim();
+            const matchedUser = await prisma.user.findFirst({
+              where: {
+                name: {
+                  contains: queryName,
+                  mode: 'insensitive'
+                }
+              },
+              select: { id: true }
+            });
+            if (matchedUser && matchedUser.id !== userId) {
+              const directConv = await getOrCreateDirectConversation(userId, matchedUser.id);
+              if (directConv) {
+                targetConvId = directConv.id;
+              }
+            }
+          }
+
+          if ((!targetConvId || targetConvId.startsWith('$')) && resolvedParams.groupName) {
+            const queryGroup = String(resolvedParams.groupName).trim();
+            const matchingConv = await prisma.conversation.findFirst({
+              where: {
+                participants: { some: { userId } },
+                name: {
+                  contains: queryGroup,
+                  mode: 'insensitive'
+                }
+              },
+              select: { id: true }
+            });
+            if (matchingConv) {
+              targetConvId = matchingConv.id;
+            } else {
+              const team = await prisma.team.findFirst({
+                where: {
+                  name: {
+                    contains: queryGroup,
+                    mode: 'insensitive'
+                  },
+                  members: { some: { userId } }
+                },
+                select: { id: true }
+              });
+              if (team) {
+                const teamConv = await prisma.conversation.findFirst({
+                  where: { teamId: team.id },
+                  select: { id: true }
+                });
+                if (teamConv) {
+                  targetConvId = teamConv.id;
+                }
+              }
+            }
+          }
+
+          if (!targetConvId || targetConvId.startsWith('$')) {
+            throw new ApiError(404, `Could not find recipient or group conversation for '${resolvedParams.recipientName || resolvedParams.groupName || 'message'}'`);
+          }
+
+          const { message, participants } = await saveMessage(
+            userId,
+            targetConvId,
+            content
+          );
+
+          try {
+            const io = getIO();
+            const conversationRooms = [`conversation:${message.conversationId}`];
+            io.to(conversationRooms).emit(CHAT_EVENTS.MESSAGE_NEW, message);
+            participants.forEach((p) => {
+              io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+                conversationId: message.conversationId,
+                lastMessage: message
+              });
+            });
+
+            const recipientUserIds = participants
+              .filter((p) => p.userId !== userId)
+              .map((p) => p.userId);
+
+            if (recipientUserIds.length > 0) {
+              const sender = await prisma.user.findUnique({
+                where: { id: userId },
+                select: { name: true }
+              });
+              sendPushToOfflineUsers(
+                recipientUserIds,
+                sender?.name || 'New Message',
+                content.slice(0, 100),
+                {
+                  type: 'NEW_MESSAGE',
+                  conversationId: message.conversationId,
+                  messageId: message.id
+                },
+                {
+                  tag: `chat_${message.conversationId}`,
+                  channelId: 'quorum_chat_messages',
+                  sound: 'default'
+                }
+              ).catch((pushErr) => {
+                logger.warn('Failed to send push notification for chat message', pushErr);
+              });
+            }
+          } catch (emitErr) {
+            logger.warn('Failed to dispatch chat socket events', emitErr);
+          }
+
+          variables.set(`$step${step.step}.messageId`, message.id);
+          variables.set(`$step${step.step}.conversationId`, message.conversationId);
+          variables.set(`$step${step.step}.id`, message.id);
+
+          results.push({
+            step: step.step,
+            action: 'SEND_CHAT_MESSAGE',
+            description: step.description,
+            success: true,
+            resource: {
+              messageId: message.id,
+              conversationId: message.conversationId,
+              content: message.content,
+              recipientCount: participants.length - 1
+            }
           });
         }
       } catch (err: any) {

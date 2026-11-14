@@ -10,6 +10,9 @@ export const workflowActionTypeSchema = z.enum([
   'CREATE_COMMUNITY_POST',
   'POST_COMMUNITY',
   'CREATE_POST',
+  'SEND_CHAT_MESSAGE',
+  'SEND_MESSAGE',
+  'WRITE_MESSAGE',
 ]);
 
 export const workflowStepSchema = z.object({
