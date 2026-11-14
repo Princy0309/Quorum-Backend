@@ -8,13 +8,13 @@ import { generateRawCompletion, sanitizeAiInput } from './aiService.js';
 import { createTeam, addTeamMember, removeTeamMember } from './teamService.js';
 import { createOrganization, createOrganizationInvite } from './organizationService.js';
 import { createCommunity, inviteUserToCommunity, removeCommunityMember } from './communityService.js';
-import { createCommunityPost } from './postService.js';
+import { createCommunityPost, deleteCommunityPost } from './postService.js';
 import { createScopedMeeting } from './meetingService.js';
 import { createDocument, addCollaborator, checkDocumentAccess } from './documentService.js';
 import { createTask } from './taskService.js';
 import { createProject } from './projectService.js';
 import { createWhiteboard } from './whiteboardService.js';
-import { getOrCreateDirectConversation, saveMessage } from './chatService.js';
+import { getOrCreateDirectConversation, saveMessage, deleteMessage } from './chatService.js';
 import { CHAT_EVENTS } from '../utils/constants.js';
 import { MeetingScopeType, NotificationType, OrgRole, DocumentScopeType } from '@prisma/client';
 import { WorkflowStep, workflowStepSchema } from '../validators/workflowValidators.js';
@@ -549,11 +549,14 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "INVITE_COMMUNITY_MEMBER"
    - "REMOVE_COMMUNITY_MEMBER"
    - "SEND_CHAT_MESSAGE"
+   - "DELETE_CHAT_MESSAGE"
+   - "DELETE_COMMUNITY_POST"
+   - "START_VIDEO_CALL"
 3. For entity resolution, match names and email addresses mentioned in the prompt to the provided workspace members, communities, and documents. If a member, community, or document cannot be matched with certainty, omit or use best matched ID from the provided context.
 4. When an action relies on a resource produced in a previous step, reference it using variable syntax:
    - "$step1.organizationId" or "$step1.orgId" or "$step1.id" for organization created in step 1
    - "$step1.teamId" or "$step1.id" for team created in step 1
-   - "$step2.meetingId" or "$step2.meetingCode" for meeting created in step 2
+   - "$step2.meetingId" or "$step2.meetingCode" or "$step2.link" for meeting/call created in step 2
    - "$step1.documentId" or "$step1.id" for document created in step 1
    - "$step1.taskId" or "$step1.id" for task created in step 1
    - "$step1.projectId" or "$step1.id" for project created in step 1
@@ -562,6 +565,8 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "$step1.communityId" or "$step1.id" for community created in step 1
    - "$step1.messageId" or "$step1.id" for chat message created in step 1
    - "$step1.inviteId" or "$step1.id" for invite created in step 1
+   - "$step1.deletedMessageId" for deleted message in step 1
+   - "$step1.deletedPostId" for deleted post in step 1
 5. Parameter requirements per action:
    - "CREATE_ORGANIZATION": { "name": string, "description"?: string }
    - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds"?: string[], "organizationId"?: string, "organizationName"?: string }
@@ -569,6 +574,7 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "REMOVE_TEAM_MEMBER": { "teamId"?: string, "teamName"?: string, "memberId"?: string, "memberName"?: string, "memberEmail"?: string, "organizationId"?: string, "organizationName"?: string }
    - "INVITE_ORG_MEMBER": { "email"?: string, "memberName"?: string, "role"?: "MEMBER" | "ORG_ADMIN", "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string }
    - "SCHEDULE_MEETING": { "title": string, "startTime": string (ISO 8601), "durationMinutes"?: number, "teamId"?: string }
+   - "START_VIDEO_CALL": { "title"?: string, "participantUserIds"?: string[], "participantNames"?: string[], "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string, "durationMinutes"?: number, "sendChatMessage"?: boolean }
    - "SHARE_DOCUMENT": { "documentId": string, "teamId"?: string, "memberIds"?: string[] }
    - "CREATE_DOCUMENT": { "title": string, "scopeType"?: "PERSONAL" | "ORGANIZATION" | "TEAM" | "PROJECT", "content"?: string, "organizationId"?: string, "teamId"?: string, "projectId"?: string }
    - "CREATE_TASK": { "title": string, "description"?: string, "dueDate"?: string, "teamId"?: string, "teamName"?: string, "assigneeId"?: string, "assigneeName"?: string, "organizationId"?: string, "organizationName"?: string }
@@ -578,9 +584,11 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "NOTIFY_MEMBERS": { "userIds": string[], "title": string, "message": string }
    - "CREATE_COMMUNITY": { "name": string, "description"?: string }
    - "CREATE_COMMUNITY_POST": { "communityId"?: string, "communityName"?: string, "content": string }
+   - "DELETE_COMMUNITY_POST": { "postId"?: string, "communityId"?: string, "communityName"?: string, "contentQuery"?: string }
    - "INVITE_COMMUNITY_MEMBER": { "communityId"?: string, "communityName"?: string, "userId"?: string, "memberName"?: string, "email"?: string, "role"?: "MEMBER" | "ADMIN" }
    - "REMOVE_COMMUNITY_MEMBER": { "communityId"?: string, "communityName"?: string, "targetUserId"?: string, "memberName"?: string, "memberEmail"?: string }
    - "SEND_CHAT_MESSAGE": { "content": string, "recipientUserId"?: string, "recipientName"?: string, "groupName"?: string, "teamId"?: string, "conversationId"?: string }
+   - "DELETE_CHAT_MESSAGE": { "messageId"?: string, "conversationId"?: string, "recipientName"?: string, "recipientUserId"?: string, "groupName"?: string, "teamId"?: string, "contentQuery"?: string, "deleteForEveryone"?: boolean }
 6. ACTION SELECTION RULES:
    - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". DO NOT use "CREATE_TEAM" for organizations or companies.
    - When the user asks to add or invite someone/a member to a team (e.g. "add tanvi to team dev team(frontend)", "add user to team"), you MUST use "ADD_TEAM_MEMBER". DO NOT use "CREATE_TEAM" when adding members to an existing team. Match the team from the provided "teams" list to set "teamId" and "teamName", match the organization from the user prompt or "organizations" list to set "organizationId" and "organizationName", and match the member from "members" to set "memberId" and "memberName".
@@ -595,8 +603,11 @@ CRITICAL SECURITY & PRIVACY RULES:
    - When the user asks to invite or add someone to a community (e.g. "invite tanvi to community college", "add user to community developers"), you MUST use "INVITE_COMMUNITY_MEMBER". Match community from "communities" and member from "members".
    - When the user asks to remove or kick someone from a community (e.g. "remove tanvi from community college", "kick user from community"), you MUST use "REMOVE_COMMUNITY_MEMBER". Match community from "communities".
    - When the user asks to post, share, or publish a message, announcement, or post in a community (e.g. "make a post on community named college saying hello guys", "post in community college hello guys"), you MUST use "CREATE_COMMUNITY_POST". Match the community by name against the provided "communities" list in contextData to set "communityId" and include "communityName" and "content". DO NOT use "NOTIFY_MEMBERS" or "CREATE_TEAM" for community posts.
+   - When the user asks to delete, remove, or take down a post in a community (e.g. "delete my post in community college", "delete post saying xyz in tech community"), you MUST use "DELETE_COMMUNITY_POST". Match community from "communities".
    - When the user asks to create or make a community (e.g. "make a community named xyz", "create community"), use "CREATE_COMMUNITY".
    - When the user asks to write, send, text, or ping a message to a person or someone (e.g. "write a message to Aniket saying hello", "send message to John"), or to a group or team (e.g. "write a message in frontend group saying meeting starts now", "send a message to team dev"), you MUST use "SEND_CHAT_MESSAGE". Match the person against workspace members for "recipientUserId"/"recipientName", or match the group against "teams" for "groupName"/"teamId". DO NOT use "NOTIFY_MEMBERS" or "CREATE_COMMUNITY_POST" for direct or group chat messages.
+   - When the user asks to delete, unsend, or erase a message in chat (e.g. "delete my last message to Tanvi", "delete message saying hello in dev team", "unsend message"), you MUST use "DELETE_CHAT_MESSAGE". Match recipient or team from context.
+   - When the user asks to start, make, or launch an instant video call or call someone/a group right now (e.g. "start a video call with Tanvi", "make a video call inviting Aniket and Tanvi", "call team dev", "instant meeting with dev team"), you MUST use "START_VIDEO_CALL". Match participants from "members" and team from "teams".
    - If a prompt requests creating an organization AND then creating teams or meetings in it, step 1 must be "CREATE_ORGANIZATION", and subsequent steps should reference "$step1.organizationId".
 
 CRITICAL DATE & TIME ANCHOR FOR SCHEDULE_MEETING:
@@ -662,6 +673,15 @@ Generate the JSON execution plan:`;
     }
     if ((rawStep as any).action === 'SEND_MESSAGE' || (rawStep as any).action === 'WRITE_MESSAGE') {
       (rawStep as any).action = 'SEND_CHAT_MESSAGE';
+    }
+    if ((rawStep as any).action === 'DELETE_MESSAGE' || (rawStep as any).action === 'DELETE_CHAT') {
+      (rawStep as any).action = 'DELETE_CHAT_MESSAGE';
+    }
+    if ((rawStep as any).action === 'DELETE_POST' || (rawStep as any).action === 'REMOVE_COMMUNITY_POST') {
+      (rawStep as any).action = 'DELETE_COMMUNITY_POST';
+    }
+    if ((rawStep as any).action === 'START_CALL' || (rawStep as any).action === 'START_MEETING' || (rawStep as any).action === 'MAKE_VIDEO_CALL' || (rawStep as any).action === 'INSTANT_CALL') {
+      (rawStep as any).action = 'START_VIDEO_CALL';
     }
     if ((rawStep as any).action === 'ADD_MEMBER' || (rawStep as any).action === 'INVITE_MEMBER') {
       (rawStep as any).action = 'ADD_TEAM_MEMBER';
@@ -2678,6 +2698,329 @@ export const executeWorkflowPlan = async (userId: string, planId: string) => {
             resource: {
               communityId: targetCommunityId,
               removedUserId: targetUserId,
+            },
+          });
+        } else if (step.action === 'DELETE_CHAT_MESSAGE') {
+          let messageId = resolvedParams.messageId ? String(resolvedParams.messageId).trim() : undefined;
+          let targetConvId: string | undefined = resolvedParams.conversationId
+            ? String(resolvedParams.conversationId).trim()
+            : undefined;
+
+          if (!targetConvId || targetConvId.startsWith('$')) {
+            if (resolvedParams.teamId) {
+              const teamConv = await prisma.conversation.findFirst({
+                where: { teamId: String(resolvedParams.teamId).trim() },
+                select: { id: true },
+              });
+              if (teamConv) {
+                targetConvId = teamConv.id;
+              }
+            }
+            if (!targetConvId && resolvedParams.recipientUserId) {
+              const targetUserId = String(resolvedParams.recipientUserId).trim();
+              if (targetUserId !== userId) {
+                const directConv = await getOrCreateDirectConversation(userId, targetUserId);
+                if (directConv) {
+                  targetConvId = directConv.id;
+                }
+              }
+            }
+            if (!targetConvId && resolvedParams.recipientName) {
+              const queryName = String(resolvedParams.recipientName).trim();
+              const matchedUser = await prisma.user.findFirst({
+                where: { name: { contains: queryName, mode: 'insensitive' } },
+                select: { id: true },
+              });
+              if (matchedUser && matchedUser.id !== userId) {
+                const directConv = await getOrCreateDirectConversation(userId, matchedUser.id);
+                if (directConv) {
+                  targetConvId = directConv.id;
+                }
+              }
+            }
+            if (!targetConvId && resolvedParams.groupName) {
+              const queryGroup = String(resolvedParams.groupName).trim();
+              const matchingConv = await prisma.conversation.findFirst({
+                where: {
+                  participants: { some: { userId } },
+                  name: { contains: queryGroup, mode: 'insensitive' },
+                },
+                select: { id: true },
+              });
+              if (matchingConv) {
+                targetConvId = matchingConv.id;
+              }
+            }
+          }
+
+          if (!messageId) {
+            if (!targetConvId) {
+              const lastUserMessage = await prisma.message.findFirst({
+                where: {
+                  senderId: userId,
+                  isDeleted: false,
+                },
+                orderBy: { createdAt: 'desc' },
+                select: { id: true, conversationId: true },
+              });
+              if (lastUserMessage) {
+                messageId = lastUserMessage.id;
+                targetConvId = lastUserMessage.conversationId;
+              }
+            } else {
+              const contentQuery = resolvedParams.contentQuery ? String(resolvedParams.contentQuery).trim() : undefined;
+              const targetMessage = await prisma.message.findFirst({
+                where: {
+                  conversationId: targetConvId,
+                  senderId: userId,
+                  isDeleted: false,
+                  ...(contentQuery ? { content: { contains: contentQuery, mode: 'insensitive' } } : {}),
+                },
+                orderBy: { createdAt: 'desc' },
+                select: { id: true },
+              });
+              if (targetMessage) {
+                messageId = targetMessage.id;
+              }
+            }
+          }
+
+          if (!messageId || !targetConvId) {
+            throw new ApiError(404, 'Could not find a matching message to delete');
+          }
+
+          const deleteForEveryone = resolvedParams.deleteForEveryone !== false;
+          const deleteResult = await deleteMessage(userId, targetConvId, messageId, deleteForEveryone);
+
+          variables.set(`$step${step.step}.deletedMessageId`, messageId);
+          variables.set(`$step${step.step}.id`, messageId);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              messageId,
+              conversationId: targetConvId,
+              deleteForEveryone,
+              result: deleteResult,
+            },
+          });
+        } else if (step.action === 'DELETE_COMMUNITY_POST') {
+          let postId = resolvedParams.postId ? String(resolvedParams.postId).trim() : undefined;
+
+          if (!postId || postId.startsWith('$')) {
+            let targetCommunityId = resolvedParams.communityId ? String(resolvedParams.communityId).trim() : undefined;
+            if ((!targetCommunityId || targetCommunityId.startsWith('$')) && resolvedParams.communityName) {
+              const queryName = String(resolvedParams.communityName).trim();
+              const comm = await prisma.community.findFirst({
+                where: { name: { contains: queryName, mode: 'insensitive' } },
+                select: { id: true },
+              });
+              if (comm) {
+                targetCommunityId = comm.id;
+              }
+            }
+
+            const contentQuery = resolvedParams.contentQuery ? String(resolvedParams.contentQuery).trim() : undefined;
+            const targetPost = await prisma.communityPost.findFirst({
+              where: {
+                authorId: userId,
+                ...(targetCommunityId ? { communityId: targetCommunityId } : {}),
+                ...(contentQuery ? { content: { contains: contentQuery, mode: 'insensitive' } } : {}),
+              },
+              orderBy: { createdAt: 'desc' },
+              select: { id: true, communityId: true },
+            });
+
+            if (targetPost) {
+              postId = targetPost.id;
+            }
+          }
+
+          if (!postId) {
+            throw new ApiError(404, `Could not find a post to delete in ${resolvedParams.communityName || 'the community'}`);
+          }
+
+          const deleteResult = await deleteCommunityPost(userId, postId);
+
+          variables.set(`$step${step.step}.deletedPostId`, postId);
+          variables.set(`$step${step.step}.id`, postId);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              postId,
+              result: deleteResult,
+            },
+          });
+        } else if (step.action === 'START_VIDEO_CALL') {
+          const callTitle = String(resolvedParams.title || 'Quick Sync Video Call').trim();
+          let targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
+          let targetTeamId = resolvedParams.teamId ? String(resolvedParams.teamId).trim() : undefined;
+
+          if (!targetOrgId && resolvedParams.organizationName) {
+            const orgCtx = await getUserOrganizationContext(userId, undefined, String(resolvedParams.organizationName).trim());
+            targetOrgId = orgCtx?.organizationId;
+          }
+
+          if (!targetTeamId && resolvedParams.teamName) {
+            const teamQuery = String(resolvedParams.teamName).trim();
+            const team = await prisma.team.findFirst({
+              where: {
+                ...(targetOrgId ? { organizationId: targetOrgId } : {}),
+                name: { contains: teamQuery, mode: 'insensitive' },
+              },
+              select: { id: true, organizationId: true },
+            });
+            if (team) {
+              targetTeamId = team.id;
+              targetOrgId = team.organizationId;
+            }
+          }
+
+          const durationMinutes = resolvedParams.durationMinutes !== undefined && resolvedParams.durationMinutes !== null
+            ? Number(resolvedParams.durationMinutes)
+            : 60;
+
+          const scopeType = targetTeamId
+            ? MeetingScopeType.TEAM
+            : (targetOrgId ? MeetingScopeType.ORGANIZATION : MeetingScopeType.PERSONAL);
+
+          const meeting = await createScopedMeeting(userId, {
+            title: callTitle,
+            scopeType,
+            organizationId: targetOrgId,
+            teamId: targetTeamId,
+            durationMinutes,
+          });
+
+          const participantUserIds = new Set<string>();
+          if (Array.isArray(resolvedParams.participantUserIds)) {
+            resolvedParams.participantUserIds.forEach((id: any) => {
+              if (id && String(id).trim() !== userId) {
+                participantUserIds.add(String(id).trim());
+              }
+            });
+          }
+
+          if (Array.isArray(resolvedParams.participantNames)) {
+            for (const rawName of resolvedParams.participantNames) {
+              const nameQuery = String(rawName).trim();
+              if (nameQuery) {
+                const matchedUser = await prisma.user.findFirst({
+                  where: {
+                    name: { contains: nameQuery, mode: 'insensitive' },
+                  },
+                  select: { id: true },
+                });
+                if (matchedUser && matchedUser.id !== userId) {
+                  participantUserIds.add(matchedUser.id);
+                }
+              }
+            }
+          }
+
+          if (targetTeamId) {
+            const teamMembers = await prisma.teamMember.findMany({
+              where: { teamId: targetTeamId },
+              select: { userId: true },
+            });
+            teamMembers.forEach((tm) => {
+              if (tm.userId !== userId) {
+                participantUserIds.add(tm.userId);
+              }
+            });
+          }
+
+          const recipientList = Array.from(participantUserIds);
+          const hostUser = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { name: true },
+          });
+          const hostName = hostUser?.name || 'A teammate';
+
+          if (recipientList.length > 0) {
+            try {
+              const io = getIO();
+              for (const targetId of recipientList) {
+                io.to(`user:${targetId}`).emit('notification:new', {
+                  type: 'MEETING_STARTED',
+                  title: `Incoming Video Call: ${meeting.title}`,
+                  body: `${hostName} started a video call. Click to join!`,
+                  actorId: userId,
+                  data: {
+                    meetingCode: meeting.code,
+                    meetingLink: meeting.link,
+                  },
+                  createdAt: new Date(),
+                });
+              }
+
+              sendPushToOfflineUsers(
+                recipientList,
+                `Incoming Video Call: ${meeting.title}`,
+                `${hostName} started a video call. Tap to join!`,
+                {
+                  type: 'MEETING_STARTED',
+                  meetingCode: meeting.code,
+                  meetingLink: meeting.link,
+                },
+                {
+                  tag: `call_${meeting.code}`,
+                  channelId: 'quorum_chat_messages',
+                  sound: 'default',
+                }
+              ).catch((pushErr) => {
+                logger.warn('Failed to send call push notification', pushErr);
+              });
+            } catch (notifyErr) {
+              logger.warn('Failed to dispatch call socket/push notifications', notifyErr);
+            }
+
+            if (resolvedParams.sendChatMessage !== false) {
+              const callChatMessage = `📞 Started a video call: ${meeting.title}\nJoin here: ${meeting.link}`;
+              try {
+                if (recipientList.length === 1) {
+                  const directConv = await getOrCreateDirectConversation(userId, recipientList[0]);
+                  if (directConv) {
+                    await saveMessage(userId, directConv.id, callChatMessage);
+                  }
+                } else if (targetTeamId) {
+                  const teamConv = await prisma.conversation.findFirst({
+                    where: { teamId: targetTeamId },
+                    select: { id: true },
+                  });
+                  if (teamConv) {
+                    await saveMessage(userId, teamConv.id, callChatMessage);
+                  }
+                }
+              } catch (chatErr) {
+                logger.warn('Failed to send video call chat link message', chatErr);
+              }
+            }
+          }
+
+          variables.set(`$step${step.step}.meetingId`, meeting.code);
+          variables.set(`$step${step.step}.meetingCode`, meeting.code);
+          variables.set(`$step${step.step}.link`, meeting.link);
+          variables.set(`$step${step.step}.id`, meeting.code);
+
+          results.push({
+            step: step.step,
+            action: step.action,
+            description: step.description,
+            success: true,
+            resource: {
+              meetingCode: meeting.code,
+              link: meeting.link,
+              title: meeting.title,
+              invitedParticipantsCount: recipientList.length,
+              recipientList,
             },
           });
         }

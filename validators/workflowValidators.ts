@@ -24,6 +24,14 @@ export const workflowActionTypeSchema = z.enum([
   'SEND_CHAT_MESSAGE',
   'SEND_MESSAGE',
   'WRITE_MESSAGE',
+  'DELETE_CHAT_MESSAGE',
+  'DELETE_MESSAGE',
+  'DELETE_COMMUNITY_POST',
+  'DELETE_POST',
+  'START_VIDEO_CALL',
+  'START_CALL',
+  'START_MEETING',
+  'MAKE_VIDEO_CALL',
 ]);
 
 export const workflowStepSchema = z.object({
