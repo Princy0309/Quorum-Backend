@@ -147,7 +147,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         });
         setScreenSharePresence(activePeerId, false)
           .then((updated) => broadcastUserPresenceUpdate(io, activePeerId, updated))
-          .catch(() => {});
+          .catch(() => { });
       }
 
       const publishedTrackIds = peer ? Array.from(peer.publishedTracks.keys()) : [];
@@ -382,6 +382,13 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
               : 'camera');
           peer.pendingTrackSource = undefined;
           const publishedTrack = roomBroker.publishTrack(resolvedRoom, resolvedPeerId, track, resolvedSource);
+
+          if (resolvedSource === 'screen') {
+            const userId = socket.data.user?.id || resolvedPeerId;
+            setScreenSharePresence(userId, true)
+              .then((updated) => broadcastUserPresenceUpdate(io, userId, updated))
+              .catch(() => { });
+          }
 
           socket.to(resolvedRoom).emit('sfu:new-producer', {
             peerId: resolvedPeerId,
