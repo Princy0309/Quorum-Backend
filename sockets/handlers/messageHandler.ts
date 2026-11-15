@@ -480,11 +480,13 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         });
         const teamId = conversationRecord?.teamId || undefined;
         let organizationId: string | undefined;
+        let teamName: string | undefined;
         if (teamId) {
           const team = await prisma.team.findUnique({
             where: { id: teamId },
-            select: { organizationId: true }
+            select: { name: true, organizationId: true }
           });
+          teamName = team?.name;
           organizationId = team?.organizationId;
         }
 
@@ -496,13 +498,22 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
             messageId: message.id
           }),
           ...(teamId ? { teamId } : {}),
+          ...(teamName ? { teamName } : {}),
           ...(organizationId ? { organizationId } : {})
         };
+
+        const standardTitle = teamName
+          ? `${teamName} • ${senderName}`
+          : `New message from ${senderName}`;
+
+        const mentionTitle = teamName
+          ? `${senderName} mentioned you in ${teamName}`
+          : `${senderName} mentioned you`;
 
         if (mentionedRecipientIds.length > 0) {
           sendPushToOfflineUsers(
             mentionedRecipientIds,
-            `${senderName} mentioned you`,
+            mentionTitle,
             rawContent || 'Mentioned you in a message',
             {
               ...basePushData,
@@ -526,7 +537,7 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         if (standardRecipientIds.length > 0) {
           sendPushToOfflineUsers(
             standardRecipientIds,
-            `New message from ${senderName}`,
+            standardTitle,
             rawContent || 'Sent an attachment',
             {
               ...basePushData,
