@@ -660,7 +660,8 @@ export const inviteProjectMember = async (
     select: { name: true },
   });
 
-  const inviteUrl = `${process.env.APP_URL || 'https://app.quorum.me'}/projects/join?token=${token}`;
+  const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'https://newquorum.me';
+  const inviteUrl = `${baseUrl.replace(/\/+$/, '')}/projects/join?token=${token}`;
 
   try {
     await addProjectInviteEmailToQueue({
@@ -685,7 +686,7 @@ export const inviteProjectMember = async (
         type: 'ORG_INVITE',
         title: `Project Invitation: ${project.name}`,
         body: `You have been invited to collaborate on "${project.name}" by ${project.organization.name}.`,
-        data: { projectId, token, type: 'PROJECT_INVITE' },
+        data: { projectId, token, type: 'PROJECT_INVITE', inviteUrl, projectInviteUrl: inviteUrl },
       });
     } catch (err: any) {
       logger.warn('Failed to queue project invite notification', { error: err.message });

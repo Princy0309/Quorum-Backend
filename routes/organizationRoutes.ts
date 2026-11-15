@@ -102,7 +102,15 @@ import {
 const router = Router();
 
 router.get('/join/:token', getInvitePreviewController);
+router.get('/invites/:token', getInvitePreviewController);
+router.get('/invites/preview/:token', getInvitePreviewController);
+router.get('/invitations/:token', getInvitePreviewController);
+
 router.post('/join/:token', authMiddleware, acceptInviteController);
+router.post('/join', authMiddleware, acceptInviteController);
+router.post('/invites/accept', authMiddleware, acceptInviteController);
+router.post('/invites/:token/accept', authMiddleware, acceptInviteController);
+router.post('/invitations/:token/accept', authMiddleware, acceptInviteController);
 
 
 router.post('/', authMiddleware, validate(createOrganizationSchema), createOrganizationController);

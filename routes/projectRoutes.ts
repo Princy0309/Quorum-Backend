@@ -52,11 +52,17 @@ router.post(
 );
 router.get('/my-projects', authMiddleware, getUserProjectsController);
 
-router.post('/accept-invite', authMiddleware, acceptProjectInviteController);
-router.post('/invites/accept', authMiddleware, acceptProjectInviteController);
-
+router.get('/join/:token', getProjectInvitePreviewController);
 router.get('/invites/preview/:token', getProjectInvitePreviewController);
 router.get('/invites/:token', getProjectInvitePreviewController);
+router.get('/invitations/:token', getProjectInvitePreviewController);
+
+router.post('/join/:token', authMiddleware, acceptProjectInviteController);
+router.post('/join/:token/accept', authMiddleware, acceptProjectInviteController);
+router.post('/invites/:token/accept', authMiddleware, acceptProjectInviteController);
+router.post('/invitations/:token/accept', authMiddleware, acceptProjectInviteController);
+router.post('/accept-invite', authMiddleware, acceptProjectInviteController);
+router.post('/invites/accept', authMiddleware, acceptProjectInviteController);
 
 router.post(
   '/organization/:organizationId',
