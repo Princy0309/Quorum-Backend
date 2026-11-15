@@ -278,16 +278,27 @@ export const initSocketServer = (httpServer: any) => {
 
     socket.on('meeting:end', (data, ack) => handleEndMeeting(io, socket, data, ack));
 
-    socket.on('meeting:screen-share', async (data: { meetingCode: string; isSharing: boolean }, ack?: (res: any) => void) => {
+    const handleScreenSharePresence = async (data: any, ack?: (res: any) => void) => {
       const userId = socket.data.user?.id;
       if (!userId) return ack?.({ success: false, message: 'Unauthorized' });
 
       try {
-        const isSharing = Boolean(data?.isSharing);
+        const isSharing = typeof data?.isSharing === 'boolean'
+          ? data.isSharing
+          : typeof data?.isScreenSharing === 'boolean'
+            ? data.isScreenSharing
+            : typeof data?.sharing === 'boolean'
+              ? data.sharing
+              : typeof data?.enabled === 'boolean'
+                ? data.enabled
+                : true;
+
         const updated = await setScreenSharePresence(userId, isSharing);
         await broadcastUserPresenceUpdate(io, userId, updated);
-        if (data?.meetingCode) {
-          io.to(data.meetingCode.trim().toLowerCase()).emit('meeting:screen-share-changed', {
+
+        const meetingCode = data?.meetingCode || data?.roomCode;
+        if (meetingCode) {
+          io.to(String(meetingCode).trim().toLowerCase()).emit('meeting:screen-share-changed', {
             userId,
             isSharing,
           });
@@ -297,7 +308,12 @@ export const initSocketServer = (httpServer: any) => {
         logger.warn(`Failed to update screen share presence: ${err.message}`);
         ack?.({ success: false, message: err.message });
       }
-    });
+    };
+
+    socket.on('meeting:screen-share', handleScreenSharePresence);
+    socket.on('meeting:screenshare', handleScreenSharePresence);
+    socket.on('meeting:start-screen-share', (data, ack) => handleScreenSharePresence({ ...data, isSharing: true }, ack));
+    socket.on('meeting:stop-screen-share', (data, ack) => handleScreenSharePresence({ ...data, isSharing: false }, ack));
 
     socket.on('meeting:toggle-mic', (data, ack) => handleToggleMic(io, socket, data, ack));
     socket.on('meeting:toggle-cam', (data, ack) => handleToggleCam(io, socket, data, ack));

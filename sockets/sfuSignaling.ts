@@ -7,7 +7,8 @@ import { SrtpSession } from '../sfu/protocols/srtp/srtpPacket.js';
 import logger from '../utils/logger.js';
 import { RoomSharder } from '../sfu/roomSharder.js';
 import { canUserJoinMeeting } from '../services/meetingPermissionService.js';
-
+import { setScreenSharePresence } from '../services/presenceService.js';
+import { broadcastUserPresenceUpdate } from './handlers/presenceHandler.js';
 
 
 interface JoinPayload {
@@ -144,6 +145,9 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           peerId: activePeerId,
           trackId: screenTrackId,
         });
+        setScreenSharePresence(activePeerId, false)
+          .then((updated) => broadcastUserPresenceUpdate(io, activePeerId, updated))
+          .catch(() => {});
       }
 
       const publishedTrackIds = peer ? Array.from(peer.publishedTracks.keys()) : [];
@@ -151,7 +155,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       if (peer?.peerConnection) {
         try {
           (peer.peerConnection as any).close();
-        } catch {}
+        } catch { }
         peer.peerConnection = undefined;
       }
 
@@ -159,7 +163,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       for (const pc of closedSubs) {
         try {
           pc.close();
-        } catch {}
+        } catch { }
       }
 
       pendingPublisherCandidates.delete(`${activeRoom}:${activePeerId}`);
@@ -169,7 +173,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         for (const pc of closedTrackSubs) {
           try {
             pc.close();
-          } catch {}
+          } catch { }
         }
         for (const key of pendingSubscriberCandidates.keys()) {
           if (key.startsWith(`${activeRoom}:`) && key.endsWith(`:${tId}`)) {
@@ -197,17 +201,17 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     }
   };
 
-    socket.on('sfu:join', async ({ roomCode, peerId, name }: JoinPayload) => {
-      if (!roomCode) {
-        socket.emit('sfu:error', { message: 'roomCode is required' });
-        return;
-      }
+  socket.on('sfu:join', async ({ roomCode, peerId, name }: JoinPayload) => {
+    if (!roomCode) {
+      socket.emit('sfu:error', { message: 'roomCode is required' });
+      return;
+    }
 
-      if (!socket.data.user?.isAuthenticated) {
-        logger.warn(`[Signaling] Rejecting unauthenticated SFU join from socket ${socket.id}`);
-        socket.emit('sfu:error', { message: 'Authentication required to join SFU room' });
-        return;
-      }
+    if (!socket.data.user?.isAuthenticated) {
+      logger.warn(`[Signaling] Rejecting unauthenticated SFU join from socket ${socket.id}`);
+      socket.emit('sfu:error', { message: 'Authentication required to join SFU room' });
+      return;
+    }
 
     const effectivePeerId = socket.data.user.id || peerId;
     const effectiveName = socket.data.user.name || name || 'Participant';
@@ -219,62 +223,62 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       return;
     }
 
-      if (currentRoom) {
-        handleLeave();
-      }
+    if (currentRoom) {
+      handleLeave();
+    }
 
-      const existingRoom = roomBroker.getRoom(roomCode);
-      const existingPeer = existingRoom?.peers.get(effectivePeerId);
-      if (existingPeer && existingPeer.socketId && existingPeer.socketId !== socket.id) {
-        io.to(existingPeer.socketId).emit('sfu:replaced', {
-          roomCode,
-          peerId: effectivePeerId,
-          message: 'Session replaced by another connection',
-        });
-        existingPeer.socketId = socket.id;
-      }
-
-      currentRoom = roomCode;
-      currentPeerId = effectivePeerId;
-
-      try {
-        const assignedWorker = await RoomSharder.getInstance().getOrAssignWorker(roomCode);
-        logger.info(`[Signaling] Room ${roomCode} coordinated on ${assignedWorker} for peer ${effectivePeerId}`);
-      } catch (shardingErr) {
-        logger.warn(`[Signaling] Room sharder coordination warning:`, shardingErr);
-      }
-
-      socket.join(roomCode);
-      roomBroker.addPeer(roomCode, effectivePeerId, socket.id, effectiveName);
-
-      const existingTracks = roomBroker.getRoomTracks(roomCode).map((t) => ({
-        trackId: t.trackId,
-        kind: t.kind,
-        peerId: t.peerId,
-        source: t.source || 'camera',
-      }));
-
-      socket.emit('sfu:joined', {
-        existingTracks,
-        activeScreenSharer: roomBroker.getActiveScreenSharer(roomCode),
+    const existingRoom = roomBroker.getRoom(roomCode);
+    const existingPeer = existingRoom?.peers.get(effectivePeerId);
+    if (existingPeer && existingPeer.socketId && existingPeer.socketId !== socket.id) {
+      io.to(existingPeer.socketId).emit('sfu:replaced', {
+        roomCode,
+        peerId: effectivePeerId,
+        message: 'Session replaced by another connection',
       });
-      socket.to(roomCode).emit('sfu:peer-joined', { peerId: effectivePeerId, name: effectiveName });
+      existingPeer.socketId = socket.id;
+    }
 
-      for (const t of existingTracks) {
-        if (t.peerId !== effectivePeerId) {
-          socket.emit('sfu:new-producer', {
-            peerId: t.peerId,
-            trackId: t.trackId,
-            kind: t.kind,
-            source: t.source,
-          });
-        }
-      }
+    currentRoom = roomCode;
+    currentPeerId = effectivePeerId;
 
-      logger.info(`[Signaling] Peer ${effectivePeerId} joined SFU room ${roomCode}`);
+    try {
+      const assignedWorker = await RoomSharder.getInstance().getOrAssignWorker(roomCode);
+      logger.info(`[Signaling] Room ${roomCode} coordinated on ${assignedWorker} for peer ${effectivePeerId}`);
+    } catch (shardingErr) {
+      logger.warn(`[Signaling] Room sharder coordination warning:`, shardingErr);
+    }
+
+    socket.join(roomCode);
+    roomBroker.addPeer(roomCode, effectivePeerId, socket.id, effectiveName);
+
+    const existingTracks = roomBroker.getRoomTracks(roomCode).map((t) => ({
+      trackId: t.trackId,
+      kind: t.kind,
+      peerId: t.peerId,
+      source: t.source || 'camera',
+    }));
+
+    socket.emit('sfu:joined', {
+      existingTracks,
+      activeScreenSharer: roomBroker.getActiveScreenSharer(roomCode),
     });
+    socket.to(roomCode).emit('sfu:peer-joined', { peerId: effectivePeerId, name: effectiveName });
 
-  
+    for (const t of existingTracks) {
+      if (t.peerId !== effectivePeerId) {
+        socket.emit('sfu:new-producer', {
+          peerId: t.peerId,
+          trackId: t.trackId,
+          kind: t.kind,
+          source: t.source,
+        });
+      }
+    }
+
+    logger.info(`[Signaling] Peer ${effectivePeerId} joined SFU room ${roomCode}`);
+  });
+
+
 
   socket.on('sfu:offer', async ({ roomCode, peerId, sdp, source }: OfferPayload) => {
     let pc: RTCPeerConnection | null = null;
@@ -322,7 +326,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
               for (const subPc of closed) {
                 try {
                   subPc.close();
-                } catch {}
+                } catch { }
               }
               roomBroker.unpublishTrack(resolvedRoom, resolvedPeerId, oldTrackId);
               socket.to(resolvedRoom).emit('sfu:track-unpublished', { peerId: resolvedPeerId, trackId: oldTrackId });
@@ -439,7 +443,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
               for (const subPc of closed) {
                 try {
                   subPc.close();
-                } catch {}
+                } catch { }
               }
               roomBroker.unpublishTrack(activeRoom, activePeerId, tId);
               socket.to(activeRoom).emit('sfu:track-unpublished', { peerId: activePeerId, trackId: tId });
@@ -617,7 +621,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         if (existingPc) {
           try {
             existingPc.close();
-          } catch {}
+          } catch { }
           subscriberRegistry.delete(activeRoom, activePeerId, trackId);
         }
 
@@ -663,7 +667,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           logger.error(`[Signaling] Failed to subscribe peer ${activePeerId} to track ${trackId}`);
           try {
             consumerPc.close();
-          } catch {}
+          } catch { }
           subscriberRegistry.delete(activeRoom, activePeerId, trackId);
           roomBroker.unsubscribeFromTrack(activeRoom, activePeerId, trackId);
           socket.emit('sfu:error', { message: 'Failed to subscribe to track' });
@@ -690,7 +694,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           logger.warn(`[Signaling] Subscription was cancelled or replaced after setRemoteDescription for track ${trackId}`);
           try {
             consumerPc.close();
-          } catch {}
+          } catch { }
           return;
         }
 
@@ -700,7 +704,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           logger.warn(`[Signaling] Subscription was cancelled or replaced after createAnswer for track ${trackId}`);
           try {
             consumerPc.close();
-          } catch {}
+          } catch { }
           return;
         }
 
@@ -710,7 +714,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           logger.warn(`[Signaling] Subscription was cancelled or replaced after setLocalDescription for track ${trackId}`);
           try {
             consumerPc.close();
-          } catch {}
+          } catch { }
           return;
         }
 
@@ -729,7 +733,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
 
         for (const dtlsTransport of dtlsTransports) {
           logger.info(`[Signaling] DTLS transport state for sub ${activePeerId} track ${trackId}: ${dtlsTransport.state}`);
-          
+
           const onSubscriberDtlsConnected = () => {
             try {
               logger.info(`[Signaling] 🔗 Subscriber DTLS connected! Marking ready for peer ${activePeerId} on track ${trackId}`);
@@ -769,7 +773,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
           logger.warn(`[Signaling] Subscription was cancelled prior to emitting response for track ${trackId}`);
           try {
             consumerPc.close();
-          } catch {}
+          } catch { }
           return;
         }
 
@@ -791,7 +795,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         if (consumerPc) {
           try {
             consumerPc.close();
-          } catch {}
+          } catch { }
         }
         pendingSubscriberCandidates.delete(`${activeRoom}:${activePeerId}:${trackId}`);
         subscriberRegistry.delete(activeRoom, activePeerId, trackId);
@@ -814,7 +818,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     if (pc) {
       try {
         pc.close();
-      } catch {}
+      } catch { }
       subscriberRegistry.delete(activeRoom, activePeerId, trackId);
     }
     roomBroker.unsubscribeFromTrack(activeRoom, activePeerId, trackId);
@@ -840,7 +844,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     for (const pc of closed) {
       try {
         pc.close();
-      } catch {}
+      } catch { }
     }
 
     for (const key of pendingSubscriberCandidates.keys()) {
@@ -854,6 +858,9 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       if (wasScreenTrack && activeSharer?.peerId === activePeerId) {
         roomBroker.releaseScreenShareLock(activeRoom, activePeerId);
         io.to(activeRoom).emit('sfu:screen-share-stopped', { peerId: activePeerId, trackId });
+        setScreenSharePresence(activePeerId, false)
+          .then((updated) => broadcastUserPresenceUpdate(io, activePeerId, updated))
+          .catch(() => { });
       }
       socket.to(activeRoom).emit('sfu:track-unpublished', { peerId: activePeerId, trackId });
       logger.info(`[Signaling] Peer ${activePeerId} unpublished track ${trackId}`);
@@ -892,6 +899,10 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       peerId: activePeerId,
     });
     logger.info(`[Signaling] Screen share lock acquired by peer ${activePeerId} in room ${activeRoom}`);
+
+    setScreenSharePresence(activePeerId, true)
+      .then((updated) => broadcastUserPresenceUpdate(io, activePeerId, updated))
+      .catch((err) => logger.warn(`Failed to update screen share presence: ${err?.message}`));
   });
 
   socket.on('sfu:stop-screen-share', ({ roomCode, peerId }: { roomCode?: string; peerId?: string }) => {
@@ -916,7 +927,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       for (const pc of closed) {
         try {
           pc.close();
-        } catch {}
+        } catch { }
       }
       for (const key of pendingSubscriberCandidates.keys()) {
         if (key.startsWith(`${activeRoom}:`) && key.endsWith(`:${screenTrackId}`)) {
@@ -935,6 +946,10 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       trackId: screenTrackId,
     });
     logger.info(`[Signaling] Screen share stopped by peer ${activePeerId} in room ${activeRoom}`);
+
+    setScreenSharePresence(activePeerId, false)
+      .then((updated) => broadcastUserPresenceUpdate(io, activePeerId, updated))
+      .catch((err) => logger.warn(`Failed to clear screen share presence: ${err?.message}`));
   });
 
   socket.on('sfu:leave', handleLeave);
