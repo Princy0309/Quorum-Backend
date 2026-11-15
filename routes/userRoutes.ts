@@ -9,6 +9,10 @@ import {
   updateUserStatusController,
   clearUserStatusController,
 } from '../controllers/userController.js';
+import {
+  getPreferencesController,
+  updatePreferenceController,
+} from '../controllers/notificationController.js';
 import { authMiddleware, requireEmailVerified } from '../middlewares/authMiddleware.js';
 import { validate } from '../middlewares/validate.js';
 import { onboardingSchema, updateProfileSchema, updateStatusSchema } from '../validators/userValidators.js';
@@ -55,5 +59,16 @@ router.get('/:userId/presence', authMiddleware, getUserPresenceController);
 
 router.get('/search', authMiddleware, searchLimiter, searchUsersController);
 router.get('/', authMiddleware, searchLimiter, searchUsersController);
+
+// User notification preferences aliases (supports /users/preferences, /user/preferences, etc.)
+router.get('/preferences', authMiddleware, getPreferencesController);
+router.put('/preferences', authMiddleware, updatePreferenceController);
+router.patch('/preferences', authMiddleware, updatePreferenceController);
+router.post('/preferences', authMiddleware, updatePreferenceController);
+
+router.get('/notification-preferences', authMiddleware, getPreferencesController);
+router.put('/notification-preferences', authMiddleware, updatePreferenceController);
+router.patch('/notification-preferences', authMiddleware, updatePreferenceController);
+router.post('/notification-preferences', authMiddleware, updatePreferenceController);
 
 export default router;

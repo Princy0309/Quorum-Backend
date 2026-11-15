@@ -52,6 +52,7 @@ router.use('/v1/chat/users', userRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/notification', notificationRoutes);
 router.use('/v1/notifications', notificationRoutes);
+router.use('/v1/notification', notificationRoutes);
 router.use('/ai', aiRoutes);
 router.use('/v1/ai', aiRoutes);
 

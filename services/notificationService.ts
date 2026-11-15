@@ -11,6 +11,97 @@
     UpdateNotificationPreferenceInput
   } from '../types/index.js';
 
+  export const normalizeNotificationType = (raw: any): NotificationType | undefined => {
+    if (!raw || typeof raw !== 'string') return undefined;
+    const cleaned = raw.trim().toUpperCase().replace(/[-\s]/g, '_');
+
+    if (Object.values(NotificationType).includes(cleaned as NotificationType)) {
+      return cleaned as NotificationType;
+    }
+
+    switch (cleaned) {
+      case 'DIRECT_MESSAGES':
+      case 'DIRECT_MESSAGE':
+      case 'DIRECTMESSAGES':
+      case 'DIRECTMESSAGE':
+      case 'CHAT':
+      case 'CHATS':
+      case 'CHAT_MESSAGE':
+      case 'CHAT_MESSAGES':
+      case 'DM':
+      case 'DMS':
+      case 'MESSAGES':
+      case 'MESSAGE':
+      case 'MESSAGE_REPLY':
+        return NotificationType.DIRECT_MESSAGE;
+
+      case 'COMMUNITY_COMMENTS':
+      case 'COMMUNITY_COMMENT':
+      case 'COMMUNITY_POST_COMMENTS':
+      case 'COMMUNITY_POST_COMMENT':
+      case 'COMMUNITY_POST':
+      case 'COMMUNITY_POSTS':
+      case 'COMMENTS':
+      case 'COMMENT':
+        return NotificationType.COMMUNITY_POST_COMMENT;
+
+      case 'CALENDAR_REMINDERS':
+      case 'CALENDAR_REMINDER':
+      case 'CALENDAR':
+      case 'CALENDARS':
+      case 'EVENT_REMINDER':
+      case 'EVENT_REMINDERS':
+      case 'EVENT':
+      case 'EVENTS':
+        return NotificationType.EVENT_REMINDER;
+
+      case 'ORGANIZATION_INVITES':
+      case 'ORGANIZATION_INVITE':
+      case 'ORG_INVITES':
+      case 'ORG_INVITE':
+      case 'ORGANIZATION':
+      case 'ORG':
+        return NotificationType.ORG_INVITE;
+
+      case 'TEAM_INVITES':
+      case 'TEAM_INVITE':
+      case 'TEAMS':
+      case 'TEAM':
+        return NotificationType.TEAM_INVITE;
+
+      case 'COMMUNITY_INVITES':
+      case 'COMMUNITY_INVITE':
+      case 'COMMUNITIES':
+      case 'COMMUNITY':
+        return NotificationType.COMMUNITY_INVITE;
+
+      case 'MEETING_STARTED':
+      case 'MEETING_STARTS':
+      case 'MEETINGS':
+      case 'MEETING':
+        return NotificationType.MEETING_STARTED;
+
+      case 'ORG_FEED_POST':
+      case 'ORG_FEED_POSTS':
+      case 'FEED_POST':
+      case 'FEED_POSTS':
+        return NotificationType.ORG_FEED_POST;
+
+      case 'ORG_FEED_COMMENT':
+      case 'ORG_FEED_COMMENTS':
+      case 'FEED_COMMENT':
+      case 'FEED_COMMENTS':
+        return NotificationType.ORG_FEED_COMMENT;
+
+      case 'SYSTEM':
+      case 'SYSTEM_ALERT':
+        return NotificationType.SYSTEM;
+
+      default:
+        return undefined;
+    }
+  };
+
   export const getUserNotifications = async (
     userId: string,
     options: GetNotificationsOptions = {}
@@ -163,24 +254,17 @@
 
     // 1. Filter out users who turned off push notifications for this category
     const rawType = options?.payloadData?.type || options?.category;
-    let resolvedType: NotificationType | undefined;
+    let resolvedType: NotificationType | undefined = normalizeNotificationType(rawType);
 
-    if (rawType === 'CHAT_MESSAGE' || rawType === 'DIRECT_MESSAGE') {
-      resolvedType = NotificationType.DIRECT_MESSAGE;
-    } else if (rawType === 'COMMUNITY_POST' || rawType === 'COMMUNITY_POST_COMMENT') {
-      resolvedType = NotificationType.COMMUNITY_POST_COMMENT;
-    } else if (rawType === 'TEAM_INVITE') {
-      resolvedType = NotificationType.TEAM_INVITE;
-    } else if (rawType === 'ORG_INVITE') {
-      resolvedType = NotificationType.ORG_INVITE;
-    } else if (rawType === 'COMMUNITY_INVITE') {
-      resolvedType = NotificationType.COMMUNITY_INVITE;
-    } else if (rawType === 'MEETING_STARTED') {
-      resolvedType = NotificationType.MEETING_STARTED;
-    } else if (rawType === 'EVENT_REMINDER') {
-      resolvedType = NotificationType.EVENT_REMINDER;
-    } else if (Object.values(NotificationType).includes(rawType as NotificationType)) {
-      resolvedType = rawType as NotificationType;
+    // Fallback detection: if category is MESSAGE_REPLY, or channelId/conversationId is present, it's a chat message
+    if (!resolvedType) {
+      if (
+        options?.conversationId ||
+        options?.category === 'MESSAGE_REPLY' ||
+        options?.channelId === 'quorum_chat_messages'
+      ) {
+        resolvedType = NotificationType.DIRECT_MESSAGE;
+      }
     }
 
     if (resolvedType) {
@@ -195,13 +279,20 @@
         });
         const disabledSet = new Set(disabledPrefs.map((p) => p.userId));
         targetUserIds = targetUserIds.filter((id) => !disabledSet.has(id));
+        logger.info('[SendPushNotification] Preference filter check', {
+          rawType,
+          resolvedType,
+          disabledCount: disabledPrefs.length,
+          disabledUserIds: disabledPrefs.map((p) => p.userId),
+          remainingTargetCount: targetUserIds.length,
+        });
       } catch (prefErr: any) {
         logger.warn('Failed to query user notification preferences for push filter', prefErr);
       }
     }
 
     if (targetUserIds.length === 0) {
-      logger.info('All push notification targets muted by user preferences', { rawType });
+      logger.info('All push notification targets muted by user preferences', { rawType, resolvedType });
       return;
     }
 
@@ -263,8 +354,36 @@
   };
 
   export const getUserPreferences = async (userId: string) => {
-    return await prisma.userNotificationPreference.findMany({
+    const saved = await prisma.userNotificationPreference.findMany({
       where: { userId },
+    });
+    const savedMap = new Map(saved.map((p) => [p.notificationType, p]));
+
+    const ALL_TYPES: NotificationType[] = [
+      NotificationType.ORG_INVITE,
+      NotificationType.TEAM_INVITE,
+      NotificationType.COMMUNITY_INVITE,
+      NotificationType.COMMUNITY_POST_COMMENT,
+      NotificationType.MEETING_STARTED,
+      NotificationType.DIRECT_MESSAGE,
+      NotificationType.EVENT_REMINDER,
+      NotificationType.ORG_FEED_POST,
+      NotificationType.ORG_FEED_COMMENT,
+    ];
+
+    return ALL_TYPES.map((type) => {
+      const existing = savedMap.get(type);
+      if (existing) return existing;
+      return {
+        id: `default-${type}`,
+        userId,
+        notificationType: type,
+        inApp: true,
+        push: true,
+        email: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
     });
   };
 
@@ -272,12 +391,13 @@
     userId: string,
     input: UpdateNotificationPreferenceInput
   ) => {
-    const { notificationType, inApp, push, email } = input;
+    const normalizedType = normalizeNotificationType(input.notificationType) || input.notificationType;
+    const { inApp, push, email } = input;
     return await prisma.userNotificationPreference.upsert({
       where: {
         userId_notificationType: {
           userId,
-          notificationType,
+          notificationType: normalizedType,
         },
       },
       update: {
@@ -287,7 +407,7 @@
       },
       create: {
         userId,
-        notificationType,
+        notificationType: normalizedType,
         inApp: inApp ?? true,
         push: push ?? true,
         email: email ?? true,
@@ -312,9 +432,7 @@
       return null;
     }
 
-    const resolvedNotificationType: NotificationType = Object.values(NotificationType).includes(type as NotificationType)
-      ? (type as NotificationType)
-      : (type === 'CHAT_MESSAGE' ? NotificationType.DIRECT_MESSAGE : NotificationType.SYSTEM);
+    const resolvedNotificationType: NotificationType = normalizeNotificationType(type) || NotificationType.SYSTEM;
 
     const preference = await prisma.userNotificationPreference.findUnique({
       where: {

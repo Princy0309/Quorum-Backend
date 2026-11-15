@@ -3,7 +3,7 @@ import { queueRedisConnection } from './emailQueue.js';
 import prisma from '../config/prisma.js';
 import { NotificationType } from '@prisma/client';
 import { getIO } from '../sockets/socketServer.js';
-import { sendPushToOfflineUsers, sendPushNotification } from '../services/notificationService.js';
+import { sendPushToOfflineUsers, sendPushNotification, normalizeNotificationType } from '../services/notificationService.js';
 import { getMultipleUserPresences } from '../services/presenceService.js';
 import logger from '../utils/logger.js';
 import type { CreateNotificationInput } from '../types/index.js';
@@ -48,9 +48,7 @@ export const notificationWorker = new Worker(
       return null;
     }
 
-    const resolvedType: NotificationType = Object.values(NotificationType).includes(type as NotificationType)
-      ? (type as NotificationType)
-      : ((type as any) === 'CHAT_MESSAGE' ? NotificationType.DIRECT_MESSAGE : NotificationType.SYSTEM);
+    const resolvedType: NotificationType = normalizeNotificationType(type) || NotificationType.SYSTEM;
 
     const preference = await prisma.userNotificationPreference.findUnique({
       where: {
