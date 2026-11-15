@@ -368,6 +368,12 @@ export const handleLeaveMeeting = (
             roomState.participants.delete(user.id);
             roomBroker.removePeersByUser(normalizedCode, user.id);
 
+            // Clear meeting presence & notify teammates + virtual office
+            setScreenSharePresence(user.id, false).catch(() => { });
+            setMeetingPresence(user.id, false).then((updated) => {
+                broadcastUserPresenceUpdate(io, user.id, updated).catch(() => { });
+            }).catch(() => { });
+
             const activeParticipants = formatParticipants(roomState.participants);
             io.to(normalizedCode).emit('meeting:participant-left', {
                 userId: user.id,

@@ -393,3 +393,15 @@ export const getPresenceAudienceUserIds = async (userId: string): Promise<string
     return [userId];
   }
 };
+
+export const getUserTeamIds = async (userId: string): Promise<string[]> => {
+  try {
+    const teams = await prisma.teamMember.findMany({
+      where: { userId },
+      select: { teamId: true },
+    });
+    return teams.map((t) => t.teamId);
+  } catch {
+    return [];
+  }
+};
