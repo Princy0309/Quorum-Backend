@@ -401,15 +401,21 @@ export const sendTeamMessageController = asyncHandler(
       });
       const recipientIds = teamRecipients.map((m) => m.userId);
       if (recipientIds.length > 0) {
+        const teamRecord = await prisma.team.findUnique({
+          where: { id: teamId },
+          select: { name: true }
+        });
+        const teamName = teamRecord?.name || 'Team';
         const preview = content ? (content.length > 100 ? `${content.slice(0, 97)}...` : content) : 'Sent an attachment';
         sendPushToOfflineUsers(
           recipientIds,
-          `New message in team chat`,
-          `${message.sender.name || 'Someone'}: ${preview}`,
+          `${teamName} • ${message.sender.name || 'Someone'}`,
+          preview,
           {
             conversationId: conversation.id,
             messageId: message.id,
             teamId,
+            teamName,
             type: 'CHAT_MESSAGE'
           },
           {

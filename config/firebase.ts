@@ -112,6 +112,18 @@ export interface SendFCMResult {
 
 const FCM_BATCH_SIZE = 500;
 
+const isValidHttpUrl = (str: unknown): str is string => {
+  if (typeof str !== 'string') return false;
+  const trimmed = str.trim();
+  if (!trimmed) return false;
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
 export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCMResult> => {
   const { tokens, title, body, data } = payload;
   if (!tokens || tokens.length === 0) {
@@ -126,6 +138,8 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
     logger.warn('Firebase Messaging is not initialized; skipping push notification dispatch');
     return { successCount: 0, failureCount: tokens.length, invalidTokens: [] };
   }
+
+  const validImageUrl = isValidHttpUrl(payload.imageUrl) ? payload.imageUrl.trim() : undefined;
 
   let successCount = 0;
   let failureCount = 0;
@@ -166,7 +180,7 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
         notification: {
           title,
           body,
-          ...(payload.imageUrl ? { imageUrl: payload.imageUrl } : {})
+          ...(validImageUrl ? { imageUrl: validImageUrl } : {})
         },
         data: formattedData,
         android: {
@@ -181,7 +195,7 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
             priority: 'high',
             clickAction: 'FLUTTER_NOTIFICATION_CLICK',
             ...(payload.badge !== undefined && payload.badge > 0 ? { notificationCount: payload.badge } : {}),
-            ...(payload.imageUrl ? { imageUrl: payload.imageUrl } : {})
+            ...(validImageUrl ? { imageUrl: validImageUrl } : {})
           }
         },
         apns: {
@@ -207,7 +221,7 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
           notification: {
             title,
             body,
-            icon: payload.imageUrl || '/icon-192.png',
+            icon: validImageUrl || '/icon-192.png',
             badge: '/badge-72.png',
             tag: stableTag,
             data: formattedData
