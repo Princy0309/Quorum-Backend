@@ -4,7 +4,7 @@ import { CommunityRole, ensureDefaultGeneralChannel } from './communityService.j
 import { getIO } from '../sockets/socketServer.js';
 import { COMMUNITY_EVENTS } from '../utils/constants.js';
 import logger from '../utils/logger.js';
-import { createAndDispatchNotification } from './notificationService.js';
+import { sendPushNotification } from './notificationService.js';
 
 export interface CommunityPostInput {
   content?: string;
@@ -120,25 +120,26 @@ export const createCommunityPost = async (
       const notifTitle = `New post in ${commTitle}`;
       const notifBody = `${authorName}: ${postSnippet}`;
 
-      Promise.allSettled(
-        recipientMembers.map((m) =>
-          createAndDispatchNotification({
-            recipientId: m.userId,
-            actorId: userId,
-            type: 'COMMUNITY_POST',
-            title: notifTitle,
-            body: notifBody,
-            data: {
-              communityId,
-              postId: post.id,
-              channelId: targetChannelId || undefined,
-              authorId: userId,
-              type: 'COMMUNITY_POST'
-            }
-          })
-        )
+      const recipientUserIds = recipientMembers.map((m) => m.userId);
+      sendPushNotification(
+        recipientUserIds,
+        notifTitle,
+        notifBody,
+        {
+          payloadData: {
+            communityId,
+            postId: post.id,
+            channelId: targetChannelId || '',
+            authorId: userId,
+            type: 'COMMUNITY_POST'
+          },
+          conversationId: communityId,
+          channelId: 'quorum_chat_messages',
+          sound: 'default',
+          forcePush: true
+        }
       ).catch((notifErr: any) => {
-        logger.error('Failed to dispatch community post notifications', {
+        logger.error('Failed to dispatch community post push notifications', {
           communityId,
           postId: post.id,
           error: notifErr.message
