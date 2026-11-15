@@ -17,6 +17,9 @@ import prisma from '../config/prisma.js';
 import { queueNotification } from '../queues/notificationQueue.js';
 import { getIO } from '../sockets/socketServer.js';
 import { uploadBufferToS3 } from '../services/uploadService.js';
+import { sendPushToOfflineUsers } from '../services/notificationService.js';
+import { CHAT_EVENTS } from '../utils/constants.js';
+import logger from '../utils/logger.js';
 
 
 const getParam = (param: unknown): string => {
@@ -384,10 +387,45 @@ export const sendTeamMessageController = asyncHandler(
       const io = getIO();
       if (io) {
         io.to(`conversation:${conversation.id}`).to(conversation.id).emit('chat:message:new', message);
+        io.to(`conversation:${conversation.id}`).to(conversation.id).emit(CHAT_EVENTS.MESSAGE_NEW, message);
       }
-    } catch {
-      // socket server might not be initialized
-    }
+    } catch {}
+
+    try {
+      const teamRecipients = await prisma.teamMember.findMany({
+        where: {
+          teamId,
+          NOT: { userId: req.user.id },
+        },
+        select: { userId: true },
+      });
+      const recipientIds = teamRecipients.map((m) => m.userId);
+      if (recipientIds.length > 0) {
+        const preview = content ? (content.length > 100 ? `${content.slice(0, 97)}...` : content) : 'Sent an attachment';
+        sendPushToOfflineUsers(
+          recipientIds,
+          `New message in team chat`,
+          `${message.sender.name || 'Someone'}: ${preview}`,
+          {
+            conversationId: conversation.id,
+            messageId: message.id,
+            teamId,
+            type: 'CHAT_MESSAGE'
+          },
+          {
+            conversationId: conversation.id,
+            tag: conversation.id,
+            category: 'MESSAGE_REPLY',
+            imageUrl: message.sender.avatar || undefined,
+            channelId: 'quorum_chat_messages',
+            sound: 'default',
+            forcePush: true
+          }
+        ).catch((err: any) => {
+          logger.warn('Failed to send team message push', err);
+        });
+      }
+    } catch {}
 
     if (content && typeof content === 'string') {
       try {
