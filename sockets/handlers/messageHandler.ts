@@ -515,7 +515,8 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
               category: 'MESSAGE_REPLY',
               imageUrl: senderAvatar,
               channelId: 'quorum_chat_messages',
-              sound: 'default'
+              sound: 'default',
+              forcePush: true
             }
           ).catch((err) => {
             logger.error('Background FCM mention notification dispatch error', { error: err.message });
@@ -537,7 +538,8 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
               category: 'MESSAGE_REPLY',
               imageUrl: senderAvatar,
               channelId: 'quorum_chat_messages',
-              sound: 'default'
+              sound: 'default',
+              forcePush: true
             }
           ).catch((err) => {
             logger.error('Background FCM notification dispatch error', { error: err.message });

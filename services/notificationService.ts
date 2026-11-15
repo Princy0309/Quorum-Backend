@@ -143,18 +143,12 @@ export const sendPushNotification = async (
   if (!options?.forcePush) {
     try {
       const presenceMap = await getMultipleUserPresences(recipientUserIds);
-      const appStateKeys = recipientUserIds.map((id) => `user_app_state:${id}`);
-      const appStates = await redis.mget(...appStateKeys);
-
-      targetUserIds = recipientUserIds.filter((id, idx) => {
+      targetUserIds = recipientUserIds.filter((id) => {
         const userPresence = presenceMap.get(id);
-       
         if (userPresence?.status === 'DO_NOT_DISTURB') {
           return false;
         }
-        const isOnline = !!userPresence?.isOnline;
-        const appState = appStates[idx];
-        return !isOnline || appState === 'background' || !appState;
+        return true;
       });
     } catch (presenceErr: any) {
       logger.warn('Failed to check presence for push targets, falling back to all targets', presenceErr);
@@ -216,6 +210,7 @@ export const sendPushToOfflineUsers = async (
   options?: Omit<SendPushOptions, 'payloadData'>
 ) => {
   return await sendPushNotification(recipientUserIds, title, body, {
+    forcePush: true,
     ...options,
     payloadData,
   });
