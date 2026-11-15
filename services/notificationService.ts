@@ -200,6 +200,8 @@ export const sendPushNotification = async (
       where: { token: { in: result.invalidTokens } },
     });
   }
+
+  return result;
 };
 
 export const sendPushToOfflineUsers = async (
