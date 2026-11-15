@@ -12,6 +12,9 @@ import {
   getTeamMembers,
   leaveTeam,
   transferLeadAndLeaveTeam,
+  getTeamProfilePicture,
+  updateTeamProfilePicture,
+  deleteTeamProfilePicture,
 } from '../services/teamService.js';
 import prisma from '../config/prisma.js';
 import { queueNotification } from '../queues/notificationQueue.js';
@@ -35,11 +38,12 @@ export const createTeamController = asyncHandler(
     }
 
     const orgId = getParam(req.params.id);
-    const { name, description } = req.body;
+    const { name, description, avatar } = req.body;
 
     const team = await createTeam(orgId, req.user.id, {
       name,
       description,
+      avatar,
     });
 
     return res.status(201).json({
@@ -79,15 +83,105 @@ export const updateTeamController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const orgId = getParam(req.params.id);
     const teamId = getParam(req.params.teamId);
-    const { name, description } = req.body;
+    const { name, description, avatar } = req.body;
 
     const updated = await updateTeam(orgId, teamId, {
       name,
       description,
+      avatar,
     });
 
     return res.status(200).json({
       success: true,
+      data: updated,
+    });
+  }
+);
+
+export const getTeamProfilePictureController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const orgId = getParam(req.params.id);
+    const teamId = getParam(req.params.teamId);
+
+    if (!orgId || !teamId) {
+      return next(new ApiError(400, 'Organization ID and Team ID are required'));
+    }
+
+    const data = await getTeamProfilePicture(orgId, teamId);
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  }
+);
+
+export const updateTeamProfilePictureController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id) {
+      return next(new ApiError(401, 'Unauthorized'));
+    }
+
+    const orgId = getParam(req.params.id);
+    const teamId = getParam(req.params.teamId);
+
+    if (!orgId || !teamId) {
+      return next(new ApiError(400, 'Organization ID and Team ID are required'));
+    }
+
+    const uploadedFile = (req.files && Array.isArray(req.files) && req.files.length > 0)
+      ? req.files[0]
+      : ((req as any).file || undefined);
+
+    if (uploadedFile) {
+      const isImage = (uploadedFile.mimetype && uploadedFile.mimetype.startsWith('image/')) ||
+        /\.(jpg|jpeg|png|gif|webp|svg|heic|avif)$/i.test(uploadedFile.originalname || '');
+      if (!isImage) {
+        return next(new ApiError(400, 'Profile picture must be an image file'));
+      }
+    }
+
+    const { avatar, logo, profilePicture, url, imageUrl } = req.body || {};
+    const inputAvatar = avatar !== undefined ? avatar : (logo !== undefined ? logo : (profilePicture !== undefined ? profilePicture : (url !== undefined ? url : imageUrl)));
+
+    if (!uploadedFile && inputAvatar === undefined) {
+      return next(new ApiError(400, 'Either an image file or a valid picture URL must be provided'));
+    }
+
+    const updated = await updateTeamProfilePicture(
+      req.user.id,
+      orgId,
+      teamId,
+      { avatar: inputAvatar },
+      uploadedFile
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Team profile picture updated successfully',
+      data: updated,
+    });
+  }
+);
+
+export const deleteTeamProfilePictureController = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.id) {
+      return next(new ApiError(401, 'Unauthorized'));
+    }
+
+    const orgId = getParam(req.params.id);
+    const teamId = getParam(req.params.teamId);
+
+    if (!orgId || !teamId) {
+      return next(new ApiError(400, 'Organization ID and Team ID are required'));
+    }
+
+    const updated = await deleteTeamProfilePicture(req.user.id, orgId, teamId);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Team profile picture removed successfully',
       data: updated,
     });
   }

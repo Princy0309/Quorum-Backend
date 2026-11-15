@@ -5,20 +5,21 @@ import type { CreateTeamInput, UpdateTeamInput } from '../types/team.js';
 import { queueNotification } from '../queues/notificationQueue.js';
 import logger from '../utils/logger.js';
 import { createSystemOrgFeedPost } from './orgFeedService.js';
+import { uploadBufferToS3 } from './uploadService.js';
+import { deleteS3Object } from '../config/s3.js';
 
 export const createTeam = async (
   organizationId: string,
   creatorUserId: string,
   data: CreateTeamInput
 ) => {
-  const { name, description } = data;
+  const { name, description, avatar } = data;
 
   if (!name || name.trim().length === 0) {
     throw new ApiError(400, 'Team name is required');
   }
 
   const trimmedName = name.trim();
-
 
   const existingTeam = await prisma.team.findUnique({
     where: {
@@ -39,6 +40,7 @@ export const createTeam = async (
         organizationId,
         name: trimmedName,
         description: description?.trim() || null,
+        avatar: avatar !== undefined ? (avatar ? avatar.trim() : null) : null,
       },
     });
 
@@ -187,8 +189,8 @@ export const updateTeam = async (
     throw new ApiError(404, 'Team not found in this organization');
   }
 
-  const { name, description } = data;
-  const updateData: { name?: string; description?: string | null } = {};
+  const { name, description, avatar } = data;
+  const updateData: { name?: string; description?: string | null; avatar?: string | null } = {};
 
   if (name !== undefined) {
     const trimmedName = name.trim();
@@ -215,10 +217,112 @@ export const updateTeam = async (
     updateData.description = description ? description.trim() : null;
   }
 
+  if (avatar !== undefined) {
+    updateData.avatar = avatar ? avatar.trim() : null;
+  }
+
   return await prisma.team.update({
     where: { id: teamId },
     data: updateData,
   });
+};
+
+export const getTeamProfilePicture = async (organizationId: string, teamId: string) => {
+  const team = await prisma.team.findFirst({
+    where: {
+      id: teamId,
+      organizationId,
+    },
+    select: {
+      id: true,
+      name: true,
+      avatar: true,
+    },
+  });
+
+  if (!team) {
+    throw new ApiError(404, 'Team not found in this organization');
+  }
+
+  return {
+    teamId: team.id,
+    name: team.name,
+    avatar: team.avatar || null,
+    logo: team.avatar || null,
+    profilePicture: team.avatar || null,
+  };
+};
+
+export const updateTeamProfilePicture = async (
+  userId: string,
+  organizationId: string,
+  teamId: string,
+  input: { avatar?: string | null; logo?: string | null; profilePicture?: string | null },
+  file?: { buffer: Buffer; originalname: string; mimetype: string }
+) => {
+  const team = await prisma.team.findFirst({
+    where: {
+      id: teamId,
+      organizationId,
+    },
+    include: {
+      members: {
+        where: { userId },
+      },
+      organization: {
+        include: {
+          members: {
+            where: { userId },
+          },
+        },
+      },
+    },
+  });
+
+  if (!team) {
+    throw new ApiError(404, 'Team not found in this organization');
+  }
+
+  const isOrgOwner = team.organization.ownerId === userId;
+  const isOrgAdmin = team.organization.members.some((m) => m.role === OrgRole.ORG_ADMIN);
+  const isTeamLead = team.members.some((m) => m.role.toUpperCase() === 'LEAD');
+
+  if (!isOrgOwner && !isOrgAdmin && !isTeamLead) {
+    throw new ApiError(403, 'Only organization admins or team leads can update the team profile picture');
+  }
+
+  let finalAvatar: string | null = input.avatar !== undefined
+    ? input.avatar
+    : (input.logo !== undefined ? input.logo : (input.profilePicture !== undefined ? input.profilePicture : team.avatar));
+
+  if (file && file.buffer && file.buffer.length > 0) {
+    const uploadRes = await uploadBufferToS3(file.buffer, file.originalname, 'teams', file.mimetype);
+    finalAvatar = uploadRes.publicUrl;
+  }
+
+  if (team.avatar && team.avatar !== finalAvatar) {
+    await deleteS3Object(team.avatar).catch(() => {});
+  }
+
+  const updatedTeam = await prisma.team.update({
+    where: { id: teamId },
+    data: { avatar: finalAvatar },
+  });
+
+  return {
+    ...updatedTeam,
+    avatar: updatedTeam.avatar,
+    logo: updatedTeam.avatar,
+    profilePicture: updatedTeam.avatar,
+  };
+};
+
+export const deleteTeamProfilePicture = async (
+  userId: string,
+  organizationId: string,
+  teamId: string
+) => {
+  return await updateTeamProfilePicture(userId, organizationId, teamId, { avatar: null });
 };
 
 export const deleteTeam = async (organizationId: string, teamId: string) => {
