@@ -1,6 +1,7 @@
 import { Queue, Worker, Job } from 'bullmq';
 import { queueRedisConnection } from './emailQueue.js';
 import prisma from '../config/prisma.js';
+import { NotificationType } from '@prisma/client';
 import { getIO } from '../sockets/socketServer.js';
 import { sendPushToOfflineUsers, sendPushNotification } from '../services/notificationService.js';
 import { getMultipleUserPresences } from '../services/presenceService.js';
@@ -47,17 +48,21 @@ export const notificationWorker = new Worker(
       return null;
     }
 
+    const resolvedType: NotificationType = Object.values(NotificationType).includes(type as NotificationType)
+      ? (type as NotificationType)
+      : ((type as any) === 'CHAT_MESSAGE' ? NotificationType.DIRECT_MESSAGE : NotificationType.SYSTEM);
+
     const preference = await prisma.userNotificationPreference.findUnique({
       where: {
         userId_notificationType: {
           userId: recipientId,
-          notificationType: type,
+          notificationType: resolvedType,
         },
       },
     });
     const allowInApp = preference ? preference.inApp : true;
     const allowPush = preference ? preference.push : true;
-    const allowEmail = type === 'COMMUNITY_POST_COMMENT' ? false : (preference ? preference.email : true);
+    const allowEmail = resolvedType === NotificationType.COMMUNITY_POST_COMMENT ? false : (preference ? preference.email : true);
 
     if (!allowInApp && !allowPush && !allowEmail) {
       logger.info(`[NotificationWorker] User ${recipientId} muted all alerts for ${type}`);
@@ -66,36 +71,33 @@ export const notificationWorker = new Worker(
 
     logger.info(`[NotificationWorker] Processing job #${job.id} for user ${recipientId}`);    
 
-
     let notification;
-    if(allowInApp){
+    if (allowInApp) {
       try {
-      notification = await prisma.notification.create({
-        data: {
-          recipientId,
-          actorId: actorId || null,
-          type,
-          title,
-          body,
-          data: data ? data : undefined,
-        },
-        include: {
-          actor: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true,
+        notification = await prisma.notification.create({
+          data: {
+            recipientId,
+            actorId: actorId || null,
+            type: resolvedType,
+            title,
+            body,
+            data: data ? data : undefined,
+          },
+          include: {
+            actor: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true,
+              },
             },
           },
-        },
-      });
-    } catch (dbErr: any) {
-      logger.error(`[NotificationWorker] DB insert failed for job #${job.id}: ${dbErr.message}`);
-      throw dbErr;
+        });
+      } catch (dbErr: any) {
+        logger.error(`[NotificationWorker] DB insert failed for job #${job.id}: ${dbErr.message}`);
+        throw dbErr;
+      }
     }
-
-    }
-    
 
     let isOnline = false;
     try {
@@ -117,8 +119,8 @@ export const notificationWorker = new Worker(
 
     if (allowPush) {
       try {
-        const resolvedType = (data as any)?.type || type;
-        const stringifiedData: Record<string, string> = { type: resolvedType };
+        const resolvedPayloadType = (data as any)?.type || type;
+        const stringifiedData: Record<string, string> = { type: resolvedPayloadType };
         if (data && typeof data === 'object') {
           for (const [key, value] of Object.entries(data)) {
             if (value !== undefined && value !== null) {
@@ -135,7 +137,8 @@ export const notificationWorker = new Worker(
           tag,
           channelId: 'quorum_chat_messages',
           category: type.includes('CHAT') ? 'MESSAGE_REPLY' : undefined,
-          sound: 'default'
+          sound: 'default',
+          forcePush: true
         });
         logger.info(`[NotificationWorker] Dispatched push to user:${recipientId}`);
       } catch (pushErr: any) {

@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import prisma from '../config/prisma.js';
 import logger from '../utils/logger.js';
 import { decryptJiraToken } from '../utils/jiraCrypto.js';
+import { createAndDispatchNotification } from './notificationService.js';
 
 export function verifyWebhookSignature(
   rawBody: Buffer,
@@ -188,20 +189,18 @@ export async function processJiraWebhook(
             ? `${integration.siteUrl}/browse/${cleanKey}`
             : null;
 
-          await prisma.notification.create({
+          await createAndDispatchNotification({
+            recipientId: assigneeLink.userId,
+            type: 'SYSTEM',
+            title: `Assigned: ${cleanKey}`,
+            body: newSummary
+              ? `You've been assigned to "${newSummary}" in Jira.`
+              : `You've been assigned ticket ${cleanKey} in Jira.`,
             data: {
-              recipientId: assigneeLink.userId,
-              type: 'SYSTEM',
-              title: `Assigned: ${cleanKey}`,
-              body: newSummary
-                ? `You've been assigned to "${newSummary}" in Jira.`
-                : `You've been assigned ticket ${cleanKey} in Jira.`,
-              data: {
-                source: 'jira',
-                jiraKey: cleanKey,
-                jiraStatus: newStatus || null,
-                jiraUrl,
-              },
+              source: 'jira',
+              jiraKey: cleanKey,
+              jiraStatus: newStatus || null,
+              jiraUrl,
             },
           });
 
