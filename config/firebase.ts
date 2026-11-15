@@ -112,15 +112,18 @@ export interface SendFCMResult {
 
 const FCM_BATCH_SIZE = 500;
 
-const isValidHttpUrl = (str: unknown): str is string => {
-  if (typeof str !== 'string') return false;
+const sanitizeHttpUrl = (str: unknown): string | undefined => {
+  if (typeof str !== 'string') return undefined;
   const trimmed = str.trim();
-  if (!trimmed) return false;
+  if (!trimmed) return undefined;
   try {
     const url = new URL(trimmed);
-    return url.protocol === 'http:' || url.protocol === 'https:';
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      return url.href;
+    }
+    return undefined;
   } catch {
-    return false;
+    return undefined;
   }
 };
 
@@ -139,7 +142,7 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
     return { successCount: 0, failureCount: tokens.length, invalidTokens: [] };
   }
 
-  const validImageUrl = isValidHttpUrl(payload.imageUrl) ? payload.imageUrl.trim() : undefined;
+  const validImageUrl = sanitizeHttpUrl(payload.imageUrl);
 
   let successCount = 0;
   let failureCount = 0;
