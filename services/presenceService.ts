@@ -296,18 +296,30 @@ export const setUserCustomStatus = async (
   input: CustomStatusInput
 ): Promise<UserPresenceData> => {
   const customStatusKey = `user:custom_status:${userId}`;
+
+  const rawStatus = (input as any)?.status || (input as any)?.presence?.status || (input as any)?.data?.status;
+  if (!rawStatus) {
+    return getUserPresence(userId);
+  }
+
+  const normalizedStatus = rawStatus.toString().trim().toUpperCase() as PresenceStatus;
+
+  if (normalizedStatus === 'AVAILABLE') {
+    return clearUserCustomStatus(userId);
+  }
+
   const now = new Date();
-  const expiresAt = input.clearAfterMinutes
+  const expiresAt = input?.clearAfterMinutes
     ? new Date(now.getTime() + input.clearAfterMinutes * 60 * 1000)
     : null;
 
   const payload = {
-    status: (input.status || 'AVAILABLE').toString().toUpperCase().trim() as PresenceStatus,
-    statusMessage: input.statusMessage ? input.statusMessage.trim().slice(0, 100) : null,
+    status: normalizedStatus,
+    statusMessage: input?.statusMessage ? input.statusMessage.trim().slice(0, 100) : null,
     statusExpiresAt: expiresAt ? expiresAt.toISOString() : null,
   };
 
-  if (input.clearAfterMinutes && input.clearAfterMinutes > 0) {
+  if (input?.clearAfterMinutes && input.clearAfterMinutes > 0) {
     await redis.set(
       customStatusKey,
       JSON.stringify(payload),
@@ -323,7 +335,6 @@ export const setUserCustomStatus = async (
 
   return getUserPresence(userId);
 };
-
 export const clearUserCustomStatus = async (userId: string): Promise<UserPresenceData> => {
   const customStatusKey = `user:custom_status:${userId}`;
   await redis.del(customStatusKey);

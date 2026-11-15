@@ -7,7 +7,7 @@ import {
   getUserProfile,
   updateUserProfile
 } from '../services/userService.js';
-import { getUserPresence, getMultipleUserPresences, setUserCustomStatus, clearUserCustomStatus} from '../services/presenceService.js';
+import { getUserPresence, getMultipleUserPresences, setUserCustomStatus, clearUserCustomStatus } from '../services/presenceService.js';
 import { sendSuccess } from '../utils/ApiResponse.js';
 import { getIO } from '../sockets/socketServer.js';
 import { broadcastUserPresenceUpdate } from '../sockets/handlers/presenceHandler.js';
@@ -52,15 +52,15 @@ export const updateUserProfileController = asyncHandler(async (req: Request, res
 });
 
 export const updateOnboarding = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-    if(!req.user?.id){
-        return next(new ApiError(401, 'Unauthorized'));
-    }
+  if (!req.user?.id) {
+    return next(new ApiError(401, 'Unauthorized'));
+  }
 
-    const { useCases } = req.body;
+  const { useCases } = req.body;
 
-    const user = await saveUserOnboarding( req.user.id, useCases || []);
+  const user = await saveUserOnboarding(req.user.id, useCases || []);
 
-    return sendSuccess(res, 200, 'Onboarding preferences saved and successful', {user});
+  return sendSuccess(res, 200, 'Onboarding preferences saved and successful', { user });
 });
 
 export const searchUsersController = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
@@ -177,13 +177,14 @@ export const updateUserStatusController = asyncHandler(async (req: Request, res:
 
   try {
     const io = getIO();
-    broadcastUserPresenceUpdate(io, req.user.id, updatedPresence).catch(() => {});
+    broadcastUserPresenceUpdate(io, req.user.id, updatedPresence).catch(() => { });
   } catch {
     // Socket server not initialized in isolated tests
   }
 
   return sendSuccess(res, 200, 'User status updated successfully', {
     presence: updatedPresence,
+    ...updatedPresence,
   });
 });
 
@@ -196,7 +197,7 @@ export const clearUserStatusController = asyncHandler(async (req: Request, res: 
 
   try {
     const io = getIO();
-    broadcastUserPresenceUpdate(io, req.user.id, updatedPresence).catch(() => {});
+    broadcastUserPresenceUpdate(io, req.user.id, updatedPresence).catch(() => { });
   } catch {
     // Socket server not initialized in isolated tests
   }

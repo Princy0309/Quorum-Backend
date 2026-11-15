@@ -6,6 +6,7 @@ import {
   refreshUserPresence,
   setUserCustomStatus,
   clearUserCustomStatus,
+  getUserPresence,
   UserPresenceData,
   CustomStatusInput,
   getPresenceAudienceUserIds,
@@ -30,6 +31,24 @@ export const broadcastUserPresenceUpdate = async (
       statusMessage: presence.statusMessage || null,
       statusExpiresAt: presence.statusExpiresAt || null,
       lastSeen: presence.lastSeen || null,
+      isInMeeting: presence.isInMeeting || false,
+      meetingCode: presence.meetingCode || null,
+      presence: {
+        userId,
+        isOnline: presence.isOnline,
+        status: presence.status,
+        statusMessage: presence.statusMessage || null,
+        statusExpiresAt: presence.statusExpiresAt || null,
+        lastSeen: presence.lastSeen || null,
+      },
+      data: {
+        userId,
+        isOnline: presence.isOnline,
+        status: presence.status,
+        statusMessage: presence.statusMessage || null,
+        statusExpiresAt: presence.statusExpiresAt || null,
+        lastSeen: presence.lastSeen || null,
+      },
     };
 
     audience.forEach((contactId) => {
@@ -51,10 +70,10 @@ export const registerPresenceHandler = async (io: SocketIOServer, socket: Authen
     if (isFirstConnection) {
       const contacts = await getPresenceAudienceUserIds(userId);
       contacts.forEach((contactId) => {
-        if(contactId != userId){
+        if (contactId != userId) {
           io.to(`user:${contactId}`).emit(CHAT_EVENTS.PRESENCE_ONLINE, { userId });
         }
-        
+
       });
     }
   } catch (err: any) {
@@ -89,6 +108,12 @@ export const registerPresenceHandler = async (io: SocketIOServer, socket: Authen
 
   socket.on('presence:update', async (data: CustomStatusInput, ack?: (res: any) => void) => {
     try {
+      if (!data?.status) {
+        await refreshUserPresence(userId, socket.id);
+        const current = await getUserPresence(userId);
+        if (typeof ack === 'function') ack({ success: true, data: current });
+        return;
+      }
       const updated = await setUserCustomStatus(userId, data);
       await broadcastUserPresenceUpdate(io, userId, updated);
       if (typeof ack === 'function') ack({ success: true, data: updated });
@@ -96,7 +121,6 @@ export const registerPresenceHandler = async (io: SocketIOServer, socket: Authen
       if (typeof ack === 'function') ack({ success: false, error: err.message });
     }
   });
-
   socket.on('presence:clear-status', async (_data: any, ack?: (res: any) => void) => {
     try {
       const updated = await clearUserCustomStatus(userId);
