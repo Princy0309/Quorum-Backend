@@ -42,9 +42,8 @@ const envSchema = z.object({
   GITHUB_ENCRYPTION_KEY: z.string().optional().default(''),
   GITHUB_STATE_SECRET: z.string().optional().default(''),
   TURNSTILE_SECRET_KEY: z.string().optional().default('1x0000000000000000000000000000000AA'),
-
-
-
+  FIREBASE_SERVICE_ACCOUNT: z.string().optional(),
+  FIREBASE_PROJECT_ID: z.string().optional().default('quorum-4d54b'),
 }).passthrough();
 
 const envVars = envSchema.safeParse(process.env);

@@ -1,47 +1,72 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { getApps, initializeApp, cert } from 'firebase-admin/app';
 import { getMessaging, Messaging } from 'firebase-admin/messaging';
 import logger from '../utils/logger.js';
 
 let firebaseMessaging: Messaging | null = null;
 
+const parseServiceAccount = (raw: string | undefined): any => {
+  if (!raw || typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {}
+
+  try {
+    const decoded = Buffer.from(trimmed, 'base64').toString('utf-8');
+    return JSON.parse(decoded);
+  } catch {}
+
+  if (fs.existsSync(trimmed)) {
+    try {
+      return JSON.parse(fs.readFileSync(trimmed, 'utf-8'));
+    } catch {}
+  }
+
+  return null;
+};
+
 const initFirebaseAdmin = () => {
   if (getApps().length > 0) {
     return getMessaging();
   }
 
-  let serviceAccount: any = null;
-  const serviceAccountRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (serviceAccountRaw) {
-    try {
-      serviceAccount = JSON.parse(serviceAccountRaw);
-    } catch {
-      if (fs.existsSync(serviceAccountRaw)) {
-        try {
-          serviceAccount = JSON.parse(fs.readFileSync(serviceAccountRaw, 'utf-8'));
-        } catch {}
-      }
-    }
-  }
+  let serviceAccount: any =
+    parseServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT) ||
+    parseServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_KEY) ||
+    parseServiceAccount(process.env.FIREBASE_CREDENTIALS) ||
+    parseServiceAccount(process.env.GOOGLE_APPLICATION_CREDENTIALS);
 
   if (!serviceAccount) {
+    let currentDir = process.cwd();
+    try {
+      currentDir = path.dirname(fileURLToPath(import.meta.url));
+    } catch {}
+
     const candidatePaths = [
       path.resolve(process.cwd(), 'firebase-service-account.json'),
       path.resolve(process.cwd(), 'serviceAccountKey.json'),
-      path.resolve(process.cwd(), 'config', 'firebase-service-account.json')
+      path.resolve(process.cwd(), 'config', 'firebase-service-account.json'),
+      path.resolve(currentDir, '..', 'firebase-service-account.json'),
+      path.resolve(currentDir, '..', 'serviceAccountKey.json'),
+      path.resolve(currentDir, 'firebase-service-account.json'),
     ];
     for (const p of candidatePaths) {
       if (fs.existsSync(p)) {
         try {
           serviceAccount = JSON.parse(fs.readFileSync(p, 'utf-8'));
-          break;
+          if (serviceAccount) break;
         } catch {}
       }
     }
   }
 
   if (!serviceAccount) {
+    logger.warn('Firebase Admin SDK service account credentials not found. Push notifications will be skipped until credentials are provided via FIREBASE_SERVICE_ACCOUNT or firebase-service-account.json.');
     return null;
   }
 
@@ -50,11 +75,12 @@ const initFirebaseAdmin = () => {
   }
 
   try {
-    initializeApp({
+    const app = initializeApp({
       credential: cert(serviceAccount),
       projectId: serviceAccount.project_id || process.env.FIREBASE_PROJECT_ID || 'quorum-4d54b'
     });
-    return getMessaging();
+    logger.info(`Firebase Admin SDK successfully initialized for project: ${serviceAccount.project_id || 'quorum-4d54b'}`);
+    return getMessaging(app);
   } catch (err: any) {
     logger.error('Failed to initialize Firebase Admin SDK', { error: err.message });
     return null;
@@ -140,7 +166,7 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
           notification: {
             title,
             body,
-            channelId: 'quorum_chat_messages',
+            channelId: payload.channelId || 'quorum_chat_messages',
             sound: payload.sound || 'default',
             defaultSound: true,
             defaultVibrateTimings: true,
@@ -200,6 +226,13 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
           });
 
           if (
+            code === 'messaging/mismatched-credential' ||
+            code === 'messaging/sender-id-mismatch' ||
+            msg.includes('mismatched-credential') ||
+            msg.includes('sender-id-mismatch')
+          ) {
+            logger.error('CRITICAL: Firebase sender-id mismatch. The client registration token was generated from a different Firebase project than this backend credentials.', { code, message: msg });
+          } else if (
             code === 'messaging/invalid-registration-token' ||
             code === 'messaging/registration-token-not-registered' ||
             msg.includes('not registered') ||

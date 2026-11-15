@@ -22,6 +22,8 @@ import { WorkflowStep, workflowStepSchema } from '../validators/workflowValidato
 import { sendPushToOfflineUsers } from './notificationService.js';
 import { setUserCustomStatus, PresenceStatus } from './presenceService.js';
 import { broadcastUserPresenceUpdate } from '../sockets/handlers/presenceHandler.js';
+import env from '../config/env.js';
+import { addScopedMeetingInviteEmailToQueue } from '../queues/emailQueue.js';
 
 const sanitizeWorkflowText = (input: string): string => {
   if (!input || typeof input !== 'string') return '';
@@ -789,6 +791,7 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "SEND_CHAT_MESSAGE"
    - "DELETE_CHAT_MESSAGE"
    - "DELETE_COMMUNITY_POST"
+   - "CREATE_MEETING"
    - "START_VIDEO_CALL"
    - "UPDATE_TASK_STATUS"
    - "CANCEL_MEETING"
@@ -828,7 +831,8 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "INVITE_ORG_MEMBER": { "email"?: string, "memberName"?: string, "role"?: "MEMBER" | "ORG_ADMIN", "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string }
    - "SCHEDULE_MEETING": { "title": string, "startTime": string (ISO 8601), "durationMinutes"?: number, "teamId"?: string }
    - "RESCHEDULE_MEETING": { "meetingCode"?: string, "code"?: string, "meetingTitle"?: string, "startTime": string (ISO 8601), "durationMinutes"?: number }
-   - "START_VIDEO_CALL": { "title"?: string, "participantUserIds"?: string[], "participantNames"?: string[], "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string, "durationMinutes"?: number, "sendChatMessage"?: boolean }
+   - "CREATE_MEETING": { "title"?: string, "participantUserIds"?: string[], "participantNames"?: string[], "participantEmails"?: string[], "emails"?: string[], "invitees"?: string[], "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string, "durationMinutes"?: number, "sendChatMessage"?: boolean }
+   - "START_VIDEO_CALL": { "title"?: string, "participantUserIds"?: string[], "participantNames"?: string[], "participantEmails"?: string[], "emails"?: string[], "invitees"?: string[], "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string, "durationMinutes"?: number, "sendChatMessage"?: boolean }
    - "SHARE_DOCUMENT": { "documentId": string, "teamId"?: string, "memberIds"?: string[] }
    - "CREATE_DOCUMENT": { "title": string, "scopeType"?: "PERSONAL" | "ORGANIZATION" | "TEAM" | "PROJECT", "content"?: string, "organizationId"?: string, "teamId"?: string, "projectId"?: string }
    - "CREATE_TASK": { "title": string, "description"?: string, "dueDate"?: string, "teamId"?: string, "teamName"?: string, "assigneeId"?: string, "assigneeName"?: string, "organizationId"?: string, "organizationName"?: string }
@@ -855,10 +859,10 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "CREATE_CALENDAR_EVENT": { "title": string, "description"?: string, "startDate": string (ISO 8601), "endDate"?: string, "eventType"?: "REMINDER" | "MEETING" | "DEADLINE" | "GENERAL", "isAllDay"?: boolean, "hasReminder"?: boolean, "reminderMinutes"?: number, "attendeeEmails"?: string[] }
    - "DELETE_CALENDAR_EVENT": { "eventId"?: string, "title"?: string }
 6. ACTION SELECTION RULES:
-   - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". DO NOT use "CREATE_TEAM" for organizations or companies.
+   - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". The creator is ALWAYS the organization owner and ORG_ADMIN. Any other members added or invited default to "MEMBER". DO NOT use "CREATE_TEAM" for organizations or companies.
    - When the user asks to add or invite someone/a member to a team (e.g. "add tanvi to team dev team(frontend)", "add user to team"), you MUST use "ADD_TEAM_MEMBER". DO NOT use "CREATE_TEAM" when adding members to an existing team. Match the team from the provided "teams" list to set "teamId" and "teamName", match the organization from the user prompt or "organizations" list to set "organizationId" and "organizationName", and match the member from "members" to set "memberId" and "memberName".
    - When the user asks to remove or kick someone from a team (e.g. "remove tanvi from team frontend", "kick member from team dev"), you MUST use "REMOVE_TEAM_MEMBER". Match team from "teams" and member from "members".
-   - When the user asks to invite someone to an organization or company (e.g. "invite user@example.com to organization", "invite tanvi to company"), you MUST use "INVITE_ORG_MEMBER".
+   - When the user asks to invite someone to an organization or company (e.g. "invite user@example.com to organization", "invite tanvi to company"), you MUST use "INVITE_ORG_MEMBER". Invited users default to role "MEMBER". NEVER invite or downgrade the organization creator/owner.
    - Use "CREATE_TEAM" ONLY when creating a NEW team, squad, department, or group within an organization.
    - When the user asks to create, make, or write a document or notes (e.g. "create a document named PRD", "make team document for sprint planning"), you MUST use "CREATE_DOCUMENT".
    - When the user asks to archive a document (e.g. "archive document PRD", "archive doc sprint planning"), you MUST use "ARCHIVE_DOCUMENT". Match document from "documents".
@@ -881,7 +885,8 @@ CRITICAL SECURITY & PRIVACY RULES:
    - When the user asks to unpin a message in chat (e.g. "unpin message in team dev", "unpin last message to Tanvi"), you MUST use "UNPIN_CHAT_MESSAGE".
    - When the user asks to cancel, end, or abort a meeting or call (e.g. "cancel meeting team sync", "cancel meeting code abc-def-ghi", "cancel call"), you MUST use "CANCEL_MEETING".
    - When the user asks to reschedule, move, postpone, or change the time of a meeting (e.g. "reschedule meeting team sync to 5 PM", "move meeting abc-def-ghi to tomorrow 10am"), you MUST use "RESCHEDULE_MEETING".
-   - When the user asks to start, make, or launch an instant video call or call someone/a group right now (e.g. "start a video call with Tanvi", "make a video call inviting Aniket and Tanvi", "call team dev", "instant meeting with dev team"), you MUST use "START_VIDEO_CALL". Match participants from "members" and team from "teams".
+   - When the user asks to create a meet, create a meeting, start a meeting, make a meeting, start a video call, or launch an instant meeting right now (e.g. "create a meet", "create a meeting", "create meeting with dev team", "start meeting with Tanvi", "make a video call", "instant meet", "launch video call", "start a video call also invite yogendrasingh975926@gmail.com and Princy"), you MUST use "CREATE_MEETING" or "START_VIDEO_CALL". Put all specified participant names and emails into "participantNames", "participantEmails", or "invitees". Match team from "teams".
+   - Use "SCHEDULE_MEETING" ONLY when the user explicitly provides a FUTURE date or time to schedule a meeting for (e.g. "schedule a meeting tomorrow at 3pm", "schedule team sync for Friday 10am", "schedule meeting at 7pm"). NEVER use "SCHEDULE_MEETING" when the user asks to "create a meet", "create a meeting", or "start a meeting" without a future scheduled time.
    - When the user asks to change, update, or set their status or presence (e.g. "change my status to DND", "set status to available", "set status to busy saying coding", "change status to away", "set status to be right back for 30 minutes"), you MUST use "SET_USER_STATUS". Map "DND" to "DO_NOT_DISTURB", "online" to "AVAILABLE", "brb" to "BE_RIGHT_BACK".
    - When the user asks to add an event, reminder, or calendar item (e.g. "remind me to submit timesheet on Friday 5pm", "add calendar event sprint review on Monday"), you MUST use "CREATE_CALENDAR_EVENT".
    - When the user asks to delete, cancel, or remove an event, reminder, or calendar item (e.g. "cancel calendar event sprint review", "delete reminder timesheet", "remove event sprint planning"), you MUST use "DELETE_CALENDAR_EVENT".
@@ -960,8 +965,30 @@ Generate the JSON execution plan:`;
     if ((rawStep as any).action === 'DELETE_POST' || (rawStep as any).action === 'REMOVE_COMMUNITY_POST') {
       (rawStep as any).action = 'DELETE_COMMUNITY_POST';
     }
-    if ((rawStep as any).action === 'START_CALL' || (rawStep as any).action === 'START_MEETING' || (rawStep as any).action === 'MAKE_VIDEO_CALL' || (rawStep as any).action === 'INSTANT_CALL') {
-      (rawStep as any).action = 'START_VIDEO_CALL';
+    if (
+      (rawStep as any).action === 'START_CALL' ||
+      (rawStep as any).action === 'START_MEETING' ||
+      (rawStep as any).action === 'MAKE_VIDEO_CALL' ||
+      (rawStep as any).action === 'INSTANT_CALL' ||
+      (rawStep as any).action === 'START_VIDEO_CALL' ||
+      (rawStep as any).action === 'MAKE_MEETING' ||
+      (rawStep as any).action === 'INSTANT_MEETING' ||
+      (rawStep as any).action === 'LAUNCH_MEETING' ||
+      (rawStep as any).action === 'CREATE_MEET' ||
+      (rawStep as any).action === 'START_MEET'
+    ) {
+      (rawStep as any).action = 'CREATE_MEETING';
+    }
+    if ((rawStep as any).action === 'SCHEDULE_MEETING') {
+      const promptLower = rawPrompt.toLowerCase();
+      const hasExplicitScheduleKeywords = /(?:schedule|tomorrow|next\s+week|at\s+\d|pm\b|am\b|on\s+monday|on\s+tuesday|on\s+wednesday|on\s+thursday|on\s+friday|on\s+saturday|on\s+sunday|\b\d{1,2}:\d{2}\b)/i.test(promptLower);
+      const isCreateMeetPrompt = /(?:create\s+(?:a\s+)?meet|create\s+(?:a\s+)?meeting|start\s+(?:a\s+)?meet|start\s+(?:a\s+)?meeting|instant\s+meet|make\s+(?:a\s+)?meet)/i.test(promptLower);
+      if (isCreateMeetPrompt && !hasExplicitScheduleKeywords) {
+        (rawStep as any).action = 'CREATE_MEETING';
+        if (rawStep.params) {
+          delete rawStep.params.startTime;
+        }
+      }
     }
     if ((rawStep as any).action === 'ADD_MEMBER' || (rawStep as any).action === 'INVITE_MEMBER') {
       (rawStep as any).action = 'ADD_TEAM_MEMBER';
@@ -1403,6 +1430,46 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             });
           }
 
+          if (org) {
+            await prisma.organizationMember.upsert({
+              where: {
+                organizationId_userId: {
+                  organizationId: org.id,
+                  userId,
+                },
+              },
+              update: {
+                role: OrgRole.ORG_ADMIN,
+              },
+              create: {
+                organizationId: org.id,
+                userId,
+                role: OrgRole.ORG_ADMIN,
+              },
+            });
+
+            const rawMemberIds = Array.isArray(resolvedParams.memberIds) ? resolvedParams.memberIds : [];
+            for (const mId of rawMemberIds) {
+              const cleanId = String(mId).trim();
+              if (cleanId && cleanId !== userId) {
+                await prisma.organizationMember.upsert({
+                  where: {
+                    organizationId_userId: {
+                      organizationId: org.id,
+                      userId: cleanId,
+                    },
+                  },
+                  update: {},
+                  create: {
+                    organizationId: org.id,
+                    userId: cleanId,
+                    role: OrgRole.MEMBER,
+                  },
+                });
+              }
+            }
+          }
+
           orgId = org.id;
           variables.set(`$step${step.step}.organizationId`, org.id);
           variables.set(`$step${step.step}.orgId`, org.id);
@@ -1419,6 +1486,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
               name: org.name,
               slug: org.slug,
               description: org.description,
+              userRole: OrgRole.ORG_ADMIN,
+              isOwner: true,
             },
           });
         } else if (step.action === 'CREATE_TEAM') {
@@ -1713,22 +1782,33 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             }
           }
 
-          variables.set(`$step${step.step}.meetingCode`, meeting.code);
-          variables.set(`$step${step.step}.meetingId`, meeting.id);
-          variables.set(`$step${step.step}.id`, meeting.id);
+          const meetingLink = meeting.link || (env.CLIENT_URL ? `${env.CLIENT_URL}/meet/${meeting.code}` : `/meet/${meeting.code}`);
+          const meetingCode = meeting.code || (meeting as any).id;
+
+          variables.set(`$step${step.step}.meetingCode`, meetingCode);
+          variables.set(`$step${step.step}.meetingId`, meetingCode);
+          variables.set(`$step${step.step}.id`, meetingCode);
+          variables.set(`$step${step.step}.link`, meetingLink);
+          variables.set(`$step${step.step}.joinUrl`, meetingLink);
+          variables.set(`$step${step.step}.meetingLink`, meetingLink);
+
+          const linkMarkdown = `\n\n📅 **[Join Scheduled Meeting (${meetingCode})](${meetingLink})**\n- **Meeting Code**: \`${meetingCode}\`\n- **Join Link**: ${meetingLink}`;
 
           results.push({
             step: step.step,
             action: step.action,
-            description: step.description,
+            description: `${step.description}${linkMarkdown}`,
             success: true,
             resource: {
-              meetingId: meeting.id,
-              meetingCode: meeting.code,
+              meetingId: meetingCode,
+              meetingCode,
+              code: meetingCode,
               title: meeting.title,
-              scheduledStartTime: meeting.scheduledStartTime,
+              scheduledStartTime: meeting.scheduledStartTime || startTime,
               durationMinutes: durationMinutes || 60,
-              link: meeting.link,
+              link: meetingLink,
+              joinUrl: meetingLink,
+              meetingLink,
             },
           });
         } else if (step.action === 'SHARE_DOCUMENT') {
@@ -2685,9 +2765,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
           if (email) {
             validateSafeUrlAndDomain(email);
           }
+          let matchedUser: { email: string; id: string } | null = null;
           if (!email && resolvedParams.memberName) {
             const queryName = String(resolvedParams.memberName).trim();
-            const matchedUser = await prisma.user.findFirst({
+            matchedUser = await prisma.user.findFirst({
               where: {
                 name: { contains: queryName, mode: 'insensitive' },
               },
@@ -2700,6 +2781,41 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
 
           if (!email) {
             throw new ApiError(400, 'Member email is required to invite to organization');
+          }
+
+          const isTargetCaller = Boolean(
+            (matchedUser && matchedUser.id === userId) ||
+            (callerOrg?.isOwner && email && callerOrg.availableMembers.some((m) => m.id === userId && m.email.toLowerCase() === email))
+          );
+
+          if (isTargetCaller) {
+            await prisma.organizationMember.upsert({
+              where: {
+                organizationId_userId: {
+                  organizationId: targetOrgId,
+                  userId,
+                },
+              },
+              update: { role: OrgRole.ORG_ADMIN },
+              create: {
+                organizationId: targetOrgId,
+                userId,
+                role: OrgRole.ORG_ADMIN,
+              },
+            });
+            results.push({
+              step: step.step,
+              action: step.action,
+              description: step.description,
+              success: true,
+              resource: {
+                organizationId: targetOrgId,
+                email,
+                role: OrgRole.ORG_ADMIN,
+                isOwner: true,
+              },
+            });
+            return;
           }
 
           const inviteResult = await createOrganizationInvite(targetOrgId, userId, {
@@ -3495,8 +3611,17 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
               result: deleteResult,
             },
           });
-        } else if (step.action === 'START_VIDEO_CALL') {
-          const callTitle = String(resolvedParams.title || 'Quick Sync Video Call').trim();
+        } else if (
+          step.action === 'CREATE_MEETING' ||
+          step.action === 'START_VIDEO_CALL' ||
+          step.action === 'START_MEETING' ||
+          step.action === 'START_CALL' ||
+          step.action === 'MAKE_VIDEO_CALL' ||
+          step.action === 'MAKE_MEETING' ||
+          step.action === 'INSTANT_MEETING' ||
+          step.action === 'LAUNCH_MEETING'
+        ) {
+          const callTitle = String(resolvedParams.title || 'Instant Meeting').trim();
           let targetOrgId = resolvedParams.organizationId ? String(resolvedParams.organizationId).trim() : orgId;
           let targetTeamId = resolvedParams.teamId ? String(resolvedParams.teamId).trim() : undefined;
 
@@ -3553,29 +3678,39 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             durationMinutes,
           });
 
-          const participantUserIds = new Set<string>();
-          if (Array.isArray(resolvedParams.participantUserIds)) {
-            resolvedParams.participantUserIds.forEach((id: any) => {
-              if (id && String(id).trim() !== userId) {
-                participantUserIds.add(String(id).trim());
-              }
-            });
-          }
+          const rawParticipants: string[] = [];
+          if (Array.isArray(resolvedParams.participantUserIds)) rawParticipants.push(...resolvedParams.participantUserIds.map(String));
+          if (Array.isArray(resolvedParams.participantNames)) rawParticipants.push(...resolvedParams.participantNames.map(String));
+          if (Array.isArray(resolvedParams.participantEmails)) rawParticipants.push(...resolvedParams.participantEmails.map(String));
+          if (Array.isArray(resolvedParams.emails)) rawParticipants.push(...resolvedParams.emails.map(String));
+          if (Array.isArray(resolvedParams.invitees)) rawParticipants.push(...resolvedParams.invitees.map(String));
+          if (Array.isArray(resolvedParams.participants)) rawParticipants.push(...resolvedParams.participants.map(String));
+          if (resolvedParams.email) rawParticipants.push(String(resolvedParams.email));
+          if (resolvedParams.memberName) rawParticipants.push(String(resolvedParams.memberName));
 
-          if (Array.isArray(resolvedParams.participantNames)) {
-            for (const rawName of resolvedParams.participantNames) {
-              const nameQuery = String(rawName).trim();
-              if (nameQuery) {
-                const matchedUser = await prisma.user.findFirst({
-                  where: {
-                    name: { contains: nameQuery, mode: 'insensitive' },
-                  },
-                  select: { id: true },
-                });
-                if (matchedUser && matchedUser.id !== userId) {
-                  participantUserIds.add(matchedUser.id);
-                }
+          const participantUserIds = new Set<string>();
+          const externalEmails = new Set<string>();
+
+          for (const item of rawParticipants) {
+            const query = item.trim();
+            if (!query) continue;
+            const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(query);
+            const matchedUser = await prisma.user.findFirst({
+              where: {
+                OR: [
+                  { id: query },
+                  { email: { equals: query, mode: 'insensitive' } },
+                  { name: { contains: query, mode: 'insensitive' } },
+                ],
+              },
+              select: { id: true, email: true },
+            });
+            if (matchedUser) {
+              if (matchedUser.id !== userId) {
+                participantUserIds.add(matchedUser.id);
               }
+            } else if (isEmail) {
+              externalEmails.add(query.toLowerCase());
             }
           }
 
@@ -3594,9 +3729,22 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
           const recipientList = Array.from(participantUserIds).slice(0, 25);
           const hostUser = await prisma.user.findUnique({
             where: { id: userId },
-            select: { name: true },
+            select: { name: true, email: true },
           });
           const hostName = hostUser?.name || 'A teammate';
+          const meetingLink = meeting.link || (env.CLIENT_URL ? `${env.CLIENT_URL}/meet/${meeting.code}` : `/meet/${meeting.code}`);
+
+          for (const extEmail of externalEmails) {
+            addScopedMeetingInviteEmailToQueue({
+              email: extEmail,
+              inviterName: hostName,
+              meetingTitle: meeting.title || 'Instant Video Call',
+              scopeName: 'Video Call',
+              scopeType: 'Instant Meeting',
+              formattedDate: 'Happening Now',
+              meetingLink,
+            }).catch((err) => logger.warn(`Failed to queue invite email for ${extEmail}`, err));
+          }
 
           if (recipientList.length > 0) {
             try {
@@ -3609,9 +3757,23 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
                   actorId: userId,
                   data: {
                     meetingCode: meeting.code,
-                    meetingLink: meeting.link,
+                    meetingLink,
                   },
                   createdAt: new Date(),
+                });
+                io.to(`user:${targetId}`).emit('meeting:incoming-call', {
+                  meetingCode: meeting.code,
+                  meetingLink,
+                  title: meeting.title,
+                  hostName,
+                  callerId: userId,
+                });
+                io.to(`user:${targetId}`).emit('call:incoming', {
+                  meetingCode: meeting.code,
+                  meetingLink,
+                  title: meeting.title,
+                  hostName,
+                  callerId: userId,
                 });
               }
 
@@ -3622,7 +3784,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
                 {
                   type: 'MEETING_STARTED',
                   meetingCode: meeting.code,
-                  meetingLink: meeting.link,
+                  meetingLink,
                 },
                 {
                   tag: `call_${meeting.code}`,
@@ -3637,14 +3799,19 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             }
 
             if (resolvedParams.sendChatMessage !== false) {
-              const callChatMessage = `📞 Started a video call: ${meeting.title}\nJoin here: ${meeting.link}`;
-              try {
-                if (recipientList.length === 1) {
-                  const directConv = await getOrCreateDirectConversation(userId, recipientList[0]);
+              const callChatMessage = `📞 Started a video call: ${meeting.title}\nJoin here: ${meetingLink}`;
+              for (const recipientId of recipientList) {
+                try {
+                  const directConv = await getOrCreateDirectConversation(userId, recipientId);
                   if (directConv) {
                     await saveMessage(userId, directConv.id, callChatMessage);
                   }
-                } else if (targetTeamId) {
+                } catch (chatErr) {
+                  logger.warn(`Failed to send video call chat link message to ${recipientId}`, chatErr);
+                }
+              }
+              if (targetTeamId) {
+                try {
                   const teamConv = await prisma.conversation.findFirst({
                     where: { teamId: targetTeamId },
                     select: { id: true },
@@ -3652,29 +3819,57 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
                   if (teamConv) {
                     await saveMessage(userId, teamConv.id, callChatMessage);
                   }
+                } catch (teamChatErr) {
+                  logger.warn('Failed to send team video call chat link message', teamChatErr);
                 }
-              } catch (chatErr) {
-                logger.warn('Failed to send video call chat link message', chatErr);
               }
             }
           }
 
+          try {
+            const io = getIO();
+            io.to(`user:${userId}`).emit('meeting:started', {
+              meetingCode: meeting.code,
+              meetingLink,
+              joinUrl: meetingLink,
+              title: meeting.title,
+            });
+            io.to(`user:${userId}`).emit('call:ready', {
+              meetingCode: meeting.code,
+              meetingLink,
+              joinUrl: meetingLink,
+              title: meeting.title,
+            });
+          } catch (ioErr) {
+            logger.warn('Failed to emit meeting:started socket event to host', ioErr);
+          }
+
           variables.set(`$step${step.step}.meetingId`, meeting.code);
           variables.set(`$step${step.step}.meetingCode`, meeting.code);
-          variables.set(`$step${step.step}.link`, meeting.link);
+          variables.set(`$step${step.step}.link`, meetingLink);
+          variables.set(`$step${step.step}.joinUrl`, meetingLink);
+          variables.set(`$step${step.step}.meetingLink`, meetingLink);
           variables.set(`$step${step.step}.id`, meeting.code);
+
+          const linkMarkdown = `\n\n🔗 **[Join Video Call (${meeting.code})](${meetingLink})**\n- **Meeting Code**: \`${meeting.code}\`\n- **Join Link**: ${meetingLink}`;
 
           results.push({
             step: step.step,
             action: step.action,
-            description: step.description,
+            description: `${step.description}${linkMarkdown}`,
             success: true,
             resource: {
               meetingCode: meeting.code,
-              link: meeting.link,
+              link: meetingLink,
+              joinUrl: meetingLink,
+              meetingLink,
+              code: meeting.code,
               title: meeting.title,
-              invitedParticipantsCount: recipientList.length,
+              status: 'ACTIVE',
+              scopeType: meeting.scopeType,
+              invitedParticipantsCount: recipientList.length + externalEmails.size,
               recipientList,
+              externalEmails: Array.from(externalEmails),
             },
           });
         } else if (step.action === 'UPDATE_TASK_STATUS' || step.action === 'COMPLETE_TASK') {

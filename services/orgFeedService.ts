@@ -298,20 +298,13 @@ const notifyOrgFeedPostRecipients = async (orgId: string, post: any, actorId: st
         }
 
         // Priority 4: Rest of the organization (for celebrations, announcements, or targeted shoutouts)
-        const shouldBroadcastOrgWide =
-            post.category !== OrgPostCategory.GENERAL ||
-            Boolean(post.targetTeamId) ||
-            Boolean(post.targetUserId);
-
-        if (shouldBroadcastOrgWide) {
-            const orgMembers = await prisma.organizationMember.findMany({
-                where: { organizationId: orgId },
-                select: { userId: true },
-            });
-            for (const member of orgMembers) {
-                if (!recipients.has(member.userId)) {
-                    recipients.set(member.userId, { ...orgMessage, audience: 'organization' });
-                }
+        const orgMembers = await prisma.organizationMember.findMany({
+            where: { organizationId: orgId },
+            select: { userId: true },
+        });
+        for (const member of orgMembers) {
+            if (!recipients.has(member.userId)) {
+                recipients.set(member.userId, { ...orgMessage, audience: 'organization' });
             }
         }
 
