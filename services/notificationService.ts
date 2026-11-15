@@ -101,6 +101,7 @@ export const getUnreadNotificationCount = async (userId: string) => {
 };
 
 export const registerDeviceToken = async (userId: string, token: string, platform: string = 'web') => {
+  logger.info(`Registering FCM device token for user ${userId} on platform ${platform}`);
   return await prisma.deviceToken.upsert({
     where: { token },
     update: { userId, platform, updatedAt: new Date() },
@@ -161,16 +162,23 @@ export const sendPushNotification = async (
     }
   }
 
-  if (targetUserIds.length === 0) return;
+  if (targetUserIds.length === 0) {
+    logger.debug('Push notification targets filtered out', { recipientUserIds });
+    return;
+  }
 
   const devices = await prisma.deviceToken.findMany({
     where: { userId: { in: targetUserIds } },
     select: { token: true, userId: true, platform: true },
   });
 
-  if (devices.length === 0) return;
+  if (devices.length === 0) {
+    logger.warn('No registered device tokens found for push notification recipients', { recipientUserIds: targetUserIds });
+    return;
+  }
 
   const tokens = devices.map((d) => d.token);
+  logger.info('Dispatching push notification to devices', { recipientCount: targetUserIds.length, tokenCount: tokens.length, title });
 
   let badge = options?.badge;
   if (badge === undefined && targetUserIds.length === 1) {
@@ -334,6 +342,7 @@ export const createAndDispatchNotification = async (input: InAppNotificationInpu
         channelId: 'quorum_chat_messages',
         category: type.includes('CHAT') ? 'MESSAGE_REPLY' : undefined,
         sound: 'default',
+        forcePush: true,
       });
     } catch (pushErr: any) {
       logger.warn('Failed to dispatch push notification for in-app notification', pushErr);
