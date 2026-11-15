@@ -22,7 +22,7 @@ import {
   unpinMessage,
   getPinnedMessages
 } from '../../services/chatService.js';
-import { sendPushToOfflineUsers } from '../../services/notificationService.js';
+import { sendPushToOfflineUsers, createAndDispatchNotification } from '../../services/notificationService.js';
 import { checkSocketMessageRateLimit } from '../../middlewares/rateLimiter.js';
 import { sendMessageSchema, readMessageSchema } from '../../validators/chatValidators.js';
 import { CHAT_EVENTS } from '../../utils/constants.js';
@@ -476,9 +476,10 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
 
         const conversationRecord = await prisma.conversation.findUnique({
           where: { id: message.conversationId },
-          select: { teamId: true }
+          select: { teamId: true, type: true }
         });
         const teamId = conversationRecord?.teamId || undefined;
+        const isDirect = conversationRecord?.type === 'direct';
         let organizationId: string | undefined;
         if (teamId) {
           const team = await prisma.team.findUnique({
@@ -499,51 +500,68 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           ...(organizationId ? { organizationId } : {})
         };
 
-        if (mentionedRecipientIds.length > 0) {
-          sendPushToOfflineUsers(
-            mentionedRecipientIds,
-            `${senderName} mentioned you`,
-            rawContent || 'Mentioned you in a message',
-            {
-              ...basePushData,
-              type: 'CHAT_MESSAGE',
-              isMention: 'true'
-            },
-            {
-              conversationId: message.conversationId,
-              tag: message.conversationId,
-              category: 'MESSAGE_REPLY',
-              imageUrl: senderAvatar,
-              channelId: 'quorum_chat_messages',
-              sound: 'default',
-              forcePush: true
-            }
+        if (isDirect) {
+          Promise.allSettled(
+            recipientUserIds.map((rId) =>
+              createAndDispatchNotification({
+                recipientId: rId,
+                actorId: senderId,
+                type: 'DIRECT_MESSAGE',
+                title: `New message from ${senderName}`,
+                body: rawContent || 'Sent an attachment',
+                data: {
+                  ...basePushData,
+                  type: 'CHAT_MESSAGE'
+                }
+              })
+            )
           ).catch((err) => {
-            logger.error('Background FCM mention notification dispatch error', { error: err.message });
+            logger.error('Background chat in-app notification dispatch error', { error: err.message });
           });
-        }
+        } else {
+          if (mentionedRecipientIds.length > 0) {
+            Promise.allSettled(
+              mentionedRecipientIds.map((rId) =>
+                createAndDispatchNotification({
+                  recipientId: rId,
+                  actorId: senderId,
+                  type: 'DIRECT_MESSAGE',
+                  title: `${senderName} mentioned you`,
+                  body: rawContent || 'Mentioned you in a message',
+                  data: {
+                    ...basePushData,
+                    type: 'CHAT_MESSAGE',
+                    isMention: 'true'
+                  }
+                })
+              )
+            ).catch((err) => {
+              logger.error('Background FCM mention notification dispatch error', { error: err.message });
+            });
+          }
 
-        if (standardRecipientIds.length > 0) {
-          sendPushToOfflineUsers(
-            standardRecipientIds,
-            `New message from ${senderName}`,
-            rawContent || 'Sent an attachment',
-            {
-              ...basePushData,
-              type: 'CHAT_MESSAGE'
-            },
-            {
-              conversationId: message.conversationId,
-              tag: message.conversationId,
-              category: 'MESSAGE_REPLY',
-              imageUrl: senderAvatar,
-              channelId: 'quorum_chat_messages',
-              sound: 'default',
-              forcePush: true
-            }
-          ).catch((err) => {
-            logger.error('Background FCM notification dispatch error', { error: err.message });
-          });
+          if (standardRecipientIds.length > 0) {
+            sendPushToOfflineUsers(
+              standardRecipientIds,
+              `New message from ${senderName}`,
+              rawContent || 'Sent an attachment',
+              {
+                ...basePushData,
+                type: 'CHAT_MESSAGE'
+              },
+              {
+                conversationId: message.conversationId,
+                tag: message.conversationId,
+                category: 'MESSAGE_REPLY',
+                imageUrl: senderAvatar,
+                channelId: 'quorum_chat_messages',
+                sound: 'default',
+                forcePush: true
+              }
+            ).catch((err) => {
+              logger.error('Background FCM notification dispatch error', { error: err.message });
+            });
+          }
         }
 
         if (callback) {

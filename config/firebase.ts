@@ -143,6 +143,15 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
           }
         }
       }
+      if (!formattedData.title) {
+        formattedData.title = title;
+      }
+      if (!formattedData.body) {
+        formattedData.body = body;
+      }
+      if (!formattedData.click_action) {
+        formattedData.click_action = 'FLUTTER_NOTIFICATION_CLICK';
+      }
       if (!formattedData.payload && (formattedData.conversationId || formattedData.messageId)) {
         formattedData.payload = JSON.stringify({
           conversationId: formattedData.conversationId || '',
@@ -162,7 +171,6 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
         data: formattedData,
         android: {
           priority: 'high',
-          collapseKey: stableTag,
           notification: {
             title,
             body,
@@ -171,9 +179,8 @@ export const sendFCMNotification = async (payload: PushPayload): Promise<SendFCM
             defaultSound: true,
             defaultVibrateTimings: true,
             priority: 'high',
-            tag: stableTag,
             clickAction: 'FLUTTER_NOTIFICATION_CLICK',
-            ...(payload.badge !== undefined ? { notificationCount: payload.badge } : {}),
+            ...(payload.badge !== undefined && payload.badge > 0 ? { notificationCount: payload.badge } : {}),
             ...(payload.imageUrl ? { imageUrl: payload.imageUrl } : {})
           }
         },
