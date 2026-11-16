@@ -67,10 +67,16 @@ export const handleAdmitParticipant = (
   const existingParticipant = roomState.participants.get(targetUserId.trim());
   if (existingParticipant) {
     activeSocketIds.forEach((sId) => existingParticipant.socketIds.add(sId));
+    if (!existingParticipant.avatar && waitingUser.avatar) {
+      existingParticipant.avatar = waitingUser.avatar;
+      existingParticipant.profilePicture = waitingUser.profilePicture || waitingUser.avatar;
+    }
   } else {
     roomState.participants.set(targetUserId.trim(), {
       userId: waitingUser.userId,
       name: waitingUser.name,
+      avatar: waitingUser.avatar || null,
+      profilePicture: waitingUser.profilePicture || waitingUser.avatar || null,
       socketIds: new Set(activeSocketIds),
       role: 'participant',
       joinedAt: new Date(),
@@ -86,6 +92,8 @@ export const handleAdmitParticipant = (
   const participantSummary: ParticipantDTO = {
     userId: admittedParticipant.userId,
     name: admittedParticipant.name,
+    avatar: admittedParticipant.avatar || null,
+    profilePicture: admittedParticipant.profilePicture || admittedParticipant.avatar || null,
     role: admittedParticipant.role,
     joinedAt: admittedParticipant.joinedAt,
     isMuted: admittedParticipant.isMuted ?? false,

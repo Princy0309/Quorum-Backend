@@ -309,9 +309,15 @@ export const handleSendMeetingMessage = (
     }
   }
 
+  const rawSenderAvatar = user.avatar || participant.avatar || participant.profilePicture;
+  const senderAvatar = typeof rawSenderAvatar === 'string' && rawSenderAvatar.trim() ? rawSenderAvatar.trim() : null;
+
   const messagePayload = {
     senderId: user.id,
-    senderName: user.name || 'Participant',
+    senderName: user.name || participant.name || 'Participant',
+    senderAvatar,
+    avatar: senderAvatar,
+    profilePicture: senderAvatar,
     content: trimmedContent,
     timestamp: new Date(),
   };
@@ -399,10 +405,16 @@ export const handleSendMeetingReaction = (
     }
   }
 
+  const rawUserAvatar = user.avatar || participant.avatar || participant.profilePicture;
+  const userAvatar = typeof rawUserAvatar === 'string' && rawUserAvatar.trim() ? rawUserAvatar.trim() : null;
+
   const reactionPayload = {
     meetingCode: normalizedCode,
     userId: user.id,
     userName: user.name || participant.name || 'Participant',
+    userAvatar,
+    avatar: userAvatar,
+    profilePicture: userAvatar,
     emoji: selectedEmoji,
     timestamp: new Date(),
   };

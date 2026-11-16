@@ -13,6 +13,8 @@ import { broadcastUserPresenceUpdate } from './handlers/presenceHandler.js';
 export interface Participant {
     userId: string;
     name: string;
+    avatar?: string | null;
+    profilePicture?: string | null;
     socketIds: Set<string>;
     role: 'host' | 'participant';
     joinedAt: Date;
@@ -25,6 +27,8 @@ export interface Participant {
 export interface ParticipantDTO {
     userId: string;
     name: string;
+    avatar?: string | null;
+    profilePicture?: string | null;
     role: 'host' | 'participant';
     joinedAt: Date;
     isMuted?: boolean;
@@ -36,6 +40,8 @@ export interface ParticipantDTO {
 export interface WaitingUser {
     userId: string;
     name: string;
+    avatar?: string | null;
+    profilePicture?: string | null;
     socketIds: Set<string>;
 }
 
@@ -71,6 +77,8 @@ export const formatParticipants = (participantsMap: Map<string, Participant>): P
     return Array.from(participantsMap.values()).map((p) => ({
         userId: p.userId,
         name: p.name,
+        avatar: p.avatar ?? null,
+        profilePicture: p.profilePicture ?? p.avatar ?? null,
         role: p.role,
         joinedAt: p.joinedAt,
         isMuted: p.isMuted ?? false,
@@ -218,14 +226,23 @@ export const handleJoinMeeting = async (
     }
 
 
+    const rawAvatar = user.avatar || (socket.handshake.auth?.avatar as string | undefined) || (socket.handshake.auth?.profilePicture as string | undefined);
+    const userAvatar = typeof rawAvatar === 'string' && rawAvatar.trim() ? rawAvatar.trim() : null;
+
     if (!isHost && roomState.waitingRoomEnabled && !roomState.participants.has(user.id)) {
         let waitingUser = roomState.waitingRoom.get(user.id);
         if (waitingUser) {
             waitingUser.socketIds.add(socket.id);
+            if (!waitingUser.avatar && userAvatar) {
+                waitingUser.avatar = userAvatar;
+                waitingUser.profilePicture = userAvatar;
+            }
         } else {
             waitingUser = {
                 userId: user.id,
                 name: user.name || 'Guest',
+                avatar: userAvatar,
+                profilePicture: userAvatar,
                 socketIds: new Set([socket.id]),
             };
             roomState.waitingRoom.set(user.id, waitingUser);
@@ -252,6 +269,8 @@ export const handleJoinMeeting = async (
                     user: {
                         userId: waitingUser!.userId,
                         name: waitingUser!.name,
+                        avatar: waitingUser!.avatar ?? null,
+                        profilePicture: waitingUser!.profilePicture ?? waitingUser!.avatar ?? null,
                         socketIds: Array.from(waitingUser!.socketIds),
                     },
                 });
@@ -265,10 +284,16 @@ export const handleJoinMeeting = async (
 
     if (existingParticipant) {
         existingParticipant.socketIds.add(socket.id);
+        if (!existingParticipant.avatar && userAvatar) {
+            existingParticipant.avatar = userAvatar;
+            existingParticipant.profilePicture = userAvatar;
+        }
     } else {
         roomState.participants.set(user.id, {
             userId: user.id,
             name: user.name || 'Participant',
+            avatar: userAvatar,
+            profilePicture: userAvatar,
             socketIds: new Set([socket.id]),
             role: participantRole,
             joinedAt: new Date(),
@@ -288,6 +313,8 @@ export const handleJoinMeeting = async (
     const waitingUsersList = Array.from(roomState.waitingRoom.values()).map((w) => ({
         userId: w.userId,
         name: w.name,
+        avatar: w.avatar ?? null,
+        profilePicture: w.profilePicture ?? w.avatar ?? null,
         socketIds: Array.from(w.socketIds),
     }));
     const currentParticipant = roomState.participants.get(user.id)!;
@@ -295,6 +322,8 @@ export const handleJoinMeeting = async (
     const participantSummary: ParticipantDTO = {
         userId: currentParticipant.userId,
         name: currentParticipant.name,
+        avatar: currentParticipant.avatar ?? null,
+        profilePicture: currentParticipant.profilePicture ?? currentParticipant.avatar ?? null,
         role: currentParticipant.role,
         joinedAt: currentParticipant.joinedAt,
         isMuted: currentParticipant.isMuted ?? false,
