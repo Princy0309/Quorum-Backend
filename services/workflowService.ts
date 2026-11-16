@@ -725,9 +725,6 @@ export const generateWorkflowPlan = async (
     if (existingPlanId) {
       const existingPlan = await getPlan(existingPlanId);
       if (existingPlan && (Date.now() - new Date(existingPlan.createdAt).getTime()) < 15000) {
-        if (autoExecute) {
-          return await executeWorkflowPlan(userId, existingPlanId, confirmed);
-        }
         return {
           planId: existingPlan.planId,
           summary: existingPlan.summary,
@@ -853,8 +850,8 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "$step1.eventId" for calendar event created in step 1
 6. Parameter requirements per action:
    - "CREATE_ORGANIZATION": { "name": string, "description"?: string }
-   - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds"?: string[], "organizationId"?: string, "organizationName"?: string }
-   - "ADD_TEAM_MEMBER": { "teamId"?: string, "teamName"?: string, "memberId"?: string, "memberIds"?: string[], "memberName"?: string, "organizationId"?: string, "organizationName"?: string }
+   - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds"?: string[], "memberNames"?: string[], "members"?: string[], "memberEmails"?: string[], "organizationId"?: string, "organizationName"?: string }
+   - "ADD_TEAM_MEMBER": { "teamId"?: string, "teamName"?: string, "memberId"?: string, "memberIds"?: string[], "memberName"?: string, "memberNames"?: string[], "memberEmail"?: string, "memberEmails"?: string[], "organizationId"?: string, "organizationName"?: string }
    - "REMOVE_TEAM_MEMBER": { "teamId"?: string, "teamName"?: string, "memberId"?: string, "memberName"?: string, "memberEmail"?: string, "organizationId"?: string, "organizationName"?: string }
    - "INVITE_ORG_MEMBER": { "email"?: string, "memberName"?: string, "role"?: "MEMBER" | "ORG_ADMIN", "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string }
    - "SCHEDULE_MEETING": { "title": string, "startTime": string (ISO 8601), "durationMinutes"?: number, "teamId"?: string }
@@ -885,7 +882,7 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "CREATE_CALENDAR_EVENT": { "title": string, "description"?: string, "startDate": string (ISO 8601), "endDate"?: string, "eventType"?: "REMINDER" | "MEETING" | "DEADLINE" | "GENERAL", "isAllDay"?: boolean, "hasReminder"?: boolean, "reminderMinutes"?: number, "attendeeEmails"?: string[] }
 7. ACTION SELECTION RULES:
    - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". The creator is ALWAYS the organization owner and ORG_ADMIN. Any other members added or invited default to "MEMBER". DO NOT use "CREATE_TEAM" for organizations or companies.
-   - When the user asks to add or invite someone/a member to a team (e.g. "add tanvi to team dev team(frontend)", "add user to team"), you MUST use "ADD_TEAM_MEMBER". DO NOT use "CREATE_TEAM" when adding members to an existing team. Match the team from the provided "teams" list to set "teamId" and "teamName", match the organization from the user prompt or "organizations" list to set "organizationId" and "organizationName", and match the member from "members" to set "memberId" and "memberName".
+   - When the user asks to add or invite someone/a member to a team (e.g. "add tanvi to team dev team(frontend)", "add user to team", "add me to team"), you MUST use "ADD_TEAM_MEMBER". DO NOT use "CREATE_TEAM" when adding members to an existing team. Match the team from the provided "teams" list to set "teamId" and "teamName", match the organization from the user prompt or "organizations" list to set "organizationId" and "organizationName", and match the member from "members" to set "memberId", "memberName", or "memberNames".
    - When the user asks to remove or kick someone from a team (e.g. "remove tanvi from team frontend", "kick member from team dev"), you MUST use "REMOVE_TEAM_MEMBER". Match team from "teams" and member from "members".
    - When the user asks to invite someone to an organization or company (e.g. "invite user@example.com to organization", "invite tanvi to company"), you MUST use "INVITE_ORG_MEMBER". Invited users default to role "MEMBER". NEVER invite or downgrade the organization creator/owner.
    - Use "CREATE_TEAM" ONLY when creating a NEW team, squad, department, or group within an organization.
@@ -1010,7 +1007,7 @@ Generate the JSON execution plan:`;
         }
       }
     }
-    if ((rawStep as any).action === 'ADD_MEMBER' || (rawStep as any).action === 'INVITE_MEMBER') {
+    if ((rawStep as any).action === 'ADD_MEMBER' || (rawStep as any).action === 'INVITE_MEMBER' || (rawStep as any).action === 'ADD_TO_TEAM') {
       (rawStep as any).action = 'ADD_TEAM_MEMBER';
     }
     if ((rawStep as any).action === 'ASSIGN_TASK') {
@@ -1265,17 +1262,11 @@ Generate the JSON execution plan:`;
     await redis.set(idempotencyKey, planId, 'EX', 15);
   } catch {}
 
-  const hasDestructiveAction = sanitizedSteps.some((s) => DESTRUCTIVE_ACTIONS.has(s.action));
-
-  if (autoExecute && (!hasDestructiveAction || confirmed)) {
-    return await executeWorkflowPlan(userId, planId, confirmed);
-  }
-
   return {
     planId,
     summary: storedPlan.summary,
     steps: storedPlan.steps,
-    requiresConfirmation: hasDestructiveAction,
+    requiresConfirmation: true,
   };
 };
 
@@ -1537,7 +1528,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             throw new ApiError(403, 'You are not a member of this organization');
           }
 
-          const callerRole = callerOrg.userRole;
+          const callerRole = callerOrg.isOwner ? OrgRole.ORG_ADMIN : callerOrg.userRole;
           const canCreateTeam = callerOrg.isOwner || callerRole === OrgRole.ORG_ADMIN || callerRole === OrgRole.TEAM_HEAD;
           if (!canCreateTeam) {
             throw new ApiError(403, 'Only organization owners, admins, or team heads can create teams');
@@ -1577,49 +1568,107 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
           variables.set(`$step${step.step}.id`, team.id);
           variables.set(`$step${step.step}.name`, team.name);
 
-          const memberIds = Array.isArray(resolvedParams.memberIds) ? resolvedParams.memberIds : [];
-          let addedCount = 1;
-          const failedMemberIds: string[] = [];
-          for (const targetId of memberIds) {
-            if (targetId && targetId !== userId) {
-              try {
-                const existingMember = await prisma.teamMember.findFirst({
-                  where: { teamId: team.id, userId: targetId }
-                });
-                if (!existingMember) {
-                  await addTeamMember(targetOrgId, team.id, userId, callerRole, targetId, 'member');
-                }
-                addedCount++;
-              } catch (memberErr) {
-                failedMemberIds.push(targetId);
-                logger.warn(`Could not add member ${targetId} to team ${team.id}:`, memberErr);
-              }
+          const rawMemberQueries: string[] = [];
+          if (Array.isArray(resolvedParams.memberIds)) rawMemberQueries.push(...resolvedParams.memberIds.map(String));
+          if (Array.isArray(resolvedParams.memberNames)) rawMemberQueries.push(...resolvedParams.memberNames.map(String));
+          if (Array.isArray(resolvedParams.members)) rawMemberQueries.push(...resolvedParams.members.map(String));
+          if (Array.isArray(resolvedParams.memberEmails)) rawMemberQueries.push(...resolvedParams.memberEmails.map(String));
+          if (Array.isArray(resolvedParams.emails)) rawMemberQueries.push(...resolvedParams.emails.map(String));
+          if (resolvedParams.memberId) rawMemberQueries.push(String(resolvedParams.memberId));
+          if (resolvedParams.memberName) rawMemberQueries.push(String(resolvedParams.memberName));
+          if (resolvedParams.memberEmail) rawMemberQueries.push(String(resolvedParams.memberEmail));
+          if (resolvedParams.email) rawMemberQueries.push(String(resolvedParams.email));
+
+          const resolvedTargetUserIds = new Set<string>();
+          for (const rawQuery of rawMemberQueries) {
+            const trimmed = rawQuery.trim();
+            if (!trimmed) continue;
+            const lower = trimmed.toLowerCase();
+            if (lower === 'me' || lower === 'myself' || lower === 'self' || trimmed === userId) {
+              resolvedTargetUserIds.add(userId);
+              continue;
+            }
+            const foundUser = await prisma.user.findFirst({
+              where: {
+                OR: [
+                  { id: trimmed },
+                  { email: { equals: trimmed, mode: 'insensitive' } },
+                  { name: { contains: trimmed, mode: 'insensitive' } },
+                ],
+              },
+              select: { id: true },
+            });
+            if (foundUser) {
+              resolvedTargetUserIds.add(foundUser.id);
+            } else if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) {
+              resolvedTargetUserIds.add(trimmed);
             }
           }
 
-          const hasMemberFailures = failedMemberIds.length > 0;
-          if (hasMemberFailures) {
-            if (createdTeamId) {
-              try {
-                await prisma.team.delete({ where: { id: createdTeamId } });
-              } catch (delErr) {
-                logger.warn(`Failed to clean up team ${createdTeamId} after member failure`, delErr);
+          let addedCount = 1;
+          const failedMemberIds: string[] = [];
+          for (const targetId of resolvedTargetUserIds) {
+            try {
+              await prisma.organizationMember.upsert({
+                where: {
+                  organizationId_userId: {
+                    organizationId: targetOrgId,
+                    userId: targetId,
+                  },
+                },
+                create: {
+                  organizationId: targetOrgId,
+                  userId: targetId,
+                  role: OrgRole.MEMBER,
+                },
+                update: {},
+              });
+
+              const existingMember = await prisma.teamMember.findFirst({
+                where: { teamId: team.id, userId: targetId }
+              });
+              if (!existingMember) {
+                if (targetId === userId) {
+                  await prisma.teamMember.create({
+                    data: {
+                      teamId: team.id,
+                      userId: targetId,
+                      role: 'LEAD',
+                    },
+                  });
+                } else {
+                  await addTeamMember(targetOrgId, team.id, userId, callerRole, targetId, 'member');
+                }
               }
+              addedCount++;
+            } catch (memberErr) {
+              failedMemberIds.push(targetId);
+              logger.warn(`Could not add member ${targetId} to team ${team.id}:`, memberErr);
             }
-            variables.delete(`$step${step.step}.teamId`);
-            variables.delete(`$step${step.step}.id`);
-            variables.delete(`$step${step.step}.name`);
+          }
+
+          const existingCaller = await prisma.teamMember.findFirst({
+            where: { teamId: team.id, userId },
+          });
+          if (!existingCaller) {
+            await prisma.teamMember.create({
+              data: {
+                teamId: team.id,
+                userId,
+                role: 'LEAD',
+              },
+            });
           }
 
           results.push({
             step: step.step,
             action: step.action,
             description: step.description,
-            success: !hasMemberFailures,
-            ...(hasMemberFailures ? { error: `Failed to add member(s): ${failedMemberIds.join(', ')}` } : {}),
+            success: true,
             resource: {
               teamId: team.id,
               name: team.name,
+              organizationId: targetOrgId,
               memberCount: addedCount,
               ...(failedMemberIds.length > 0 ? { failedMemberIds } : {}),
             },
@@ -1667,8 +1716,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             throw new ApiError(403, 'You are not a member of this organization');
           }
 
-          const callerRole = callerOrg.userRole;
-          const isLeadOrAdmin = callerOrg.isOwner || callerRole === OrgRole.ORG_ADMIN;
+          const callerRole = callerOrg.isOwner ? OrgRole.ORG_ADMIN : callerOrg.userRole;
+          const isLeadOrAdmin = callerOrg.isOwner || callerRole === OrgRole.ORG_ADMIN || callerRole === OrgRole.TEAM_HEAD;
           let isTeamLead = false;
           if (!isLeadOrAdmin) {
             const callerTeamMembership = await prisma.teamMember.findUnique({
@@ -1688,36 +1737,80 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             throw new ApiError(403, 'You are not an admin or team head so you cannot add members to this team');
           }
 
-          let targetMemberIds: string[] = [];
-          if (Array.isArray(resolvedParams.memberIds)) {
-            targetMemberIds = resolvedParams.memberIds.map(String);
-          } else if (resolvedParams.memberId) {
-            targetMemberIds = [String(resolvedParams.memberId).trim()];
-          }
+          const rawMemberQueries: string[] = [];
+          if (Array.isArray(resolvedParams.memberIds)) rawMemberQueries.push(...resolvedParams.memberIds.map(String));
+          if (Array.isArray(resolvedParams.memberNames)) rawMemberQueries.push(...resolvedParams.memberNames.map(String));
+          if (Array.isArray(resolvedParams.members)) rawMemberQueries.push(...resolvedParams.members.map(String));
+          if (Array.isArray(resolvedParams.memberEmails)) rawMemberQueries.push(...resolvedParams.memberEmails.map(String));
+          if (Array.isArray(resolvedParams.emails)) rawMemberQueries.push(...resolvedParams.emails.map(String));
+          if (resolvedParams.memberId) rawMemberQueries.push(String(resolvedParams.memberId));
+          if (resolvedParams.memberName) rawMemberQueries.push(String(resolvedParams.memberName));
+          if (resolvedParams.memberEmail) rawMemberQueries.push(String(resolvedParams.memberEmail));
+          if (resolvedParams.email) rawMemberQueries.push(String(resolvedParams.email));
 
-          if (targetMemberIds.length === 0 && resolvedParams.memberName) {
-            const memberQuery = String(resolvedParams.memberName).trim();
-            const matchedOrgMember = await prisma.organizationMember.findFirst({
+          const resolvedTargetUserIds = new Set<string>();
+          for (const rawQuery of rawMemberQueries) {
+            const trimmed = rawQuery.trim();
+            if (!trimmed) continue;
+            const lower = trimmed.toLowerCase();
+            if (lower === 'me' || lower === 'myself' || lower === 'self' || trimmed === userId) {
+              resolvedTargetUserIds.add(userId);
+              continue;
+            }
+            const foundUser = await prisma.user.findFirst({
               where: {
-                organizationId: finalOrgId,
-                user: {
-                  name: { contains: memberQuery, mode: 'insensitive' },
-                },
+                OR: [
+                  { id: trimmed },
+                  { email: { equals: trimmed, mode: 'insensitive' } },
+                  { name: { contains: trimmed, mode: 'insensitive' } },
+                ],
               },
-              select: { userId: true },
+              select: { id: true },
             });
-            if (matchedOrgMember) {
-              targetMemberIds.push(matchedOrgMember.userId);
+            if (foundUser) {
+              resolvedTargetUserIds.add(foundUser.id);
+            } else if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) {
+              resolvedTargetUserIds.add(trimmed);
             }
           }
 
-          if (targetMemberIds.length === 0) {
+          if (resolvedTargetUserIds.size === 0) {
             throw new ApiError(400, 'Member to add could not be found or was not specified');
           }
 
           let addedCount = 0;
-          for (const targetId of targetMemberIds) {
-            await addTeamMember(finalOrgId, team.id, userId, callerRole, targetId, 'member');
+          for (const targetId of resolvedTargetUserIds) {
+            await prisma.organizationMember.upsert({
+              where: {
+                organizationId_userId: {
+                  organizationId: finalOrgId,
+                  userId: targetId,
+                },
+              },
+              create: {
+                organizationId: finalOrgId,
+                userId: targetId,
+                role: OrgRole.MEMBER,
+              },
+              update: {},
+            });
+
+            const existingMember = await prisma.teamMember.findFirst({
+              where: { teamId: team.id, userId: targetId },
+            });
+            if (!existingMember) {
+              if (targetId === userId) {
+                await prisma.teamMember.create({
+                  data: {
+                    teamId: team.id,
+                    userId: targetId,
+                    role: 'MEMBER',
+                  },
+                });
+              } else {
+                await addTeamMember(finalOrgId, team.id, userId, callerRole, targetId, 'member');
+              }
+            }
             addedCount++;
           }
 
