@@ -315,7 +315,7 @@ export const stopMeetingRecording = async (
     const updated = await tx.meetingRecording.update({
       where: { id: lockedRecording.id },
       data: {
-        status: hasFileUrl ? RecordingStatus.COMPLETED : RecordingStatus.PROCESSING,
+        status: RecordingStatus.COMPLETED,
         endedAt: now,
         durationSeconds: duration,
         expiresAt,
@@ -396,8 +396,8 @@ export const completeMeetingRecording = async (
     throw new ApiError(403, 'Not authorized to complete this recording');
   }
 
-  if (recording.status !== RecordingStatus.PROCESSING) {
-    throw new ApiError(400, `Recording must be stopped before it can be completed (current status: ${recording.status})`);
+  if (recording.status === RecordingStatus.FAILED) {
+    throw new ApiError(400, 'Recording has failed and cannot be completed');
   }
 
   if (!isS3Configured()) {
@@ -486,23 +486,24 @@ export const getRecordingUploadUrl = async (userId: string, rawMeetingCode: stri
     throw new ApiError(404, 'Meeting not found');
   }
 
-  if (meeting.status === MeetingStatus.ENDED || meeting.status === MeetingStatus.CANCELLED) {
-    throw new ApiError(400, 'Cannot request upload credentials for a meeting that has ended or been cancelled');
-  }
-
-  if (meeting.hostId !== userId) {
-    throw new ApiError(403, 'Only the host can request upload credentials for this meeting');
+  if (meeting.status === MeetingStatus.CANCELLED) {
+    throw new ApiError(400, 'Cannot request upload credentials for a meeting that has been cancelled');
   }
 
   const activeRecording = await prisma.meetingRecording.findFirst({
     where: {
       meetingCode,
-      status: { in: [RecordingStatus.RECORDING, RecordingStatus.PROCESSING] },
+      status: { in: [RecordingStatus.RECORDING, RecordingStatus.PROCESSING, RecordingStatus.COMPLETED] },
     },
+    orderBy: { createdAt: 'desc' },
   });
 
   if (!activeRecording) {
-    throw new ApiError(400, 'No active recording session found for this meeting');
+    throw new ApiError(400, 'No recording session found for this meeting');
+  }
+
+  if (meeting.hostId !== userId && activeRecording.recordedById !== userId) {
+    throw new ApiError(403, 'Only the host or recorder can request upload credentials for this meeting');
   }
 
   const sanitizedFileName = (fileName || 'recording.mp4').trim().replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -769,7 +770,7 @@ export const stopActiveRecordingForMeeting = async (
   const updated = await prisma.meetingRecording.update({
     where: { id: activeRecording.id },
     data: {
-      status: hasFileUrl ? RecordingStatus.COMPLETED : RecordingStatus.PROCESSING,
+      status: RecordingStatus.COMPLETED,
       endedAt: now,
       durationSeconds: duration,
       expiresAt,
@@ -995,10 +996,6 @@ export const postRecordingToTeamChat = async (recordingId: string) => {
   let contentText = durationText
     ? `🎥 Meeting Recording: ${meetingTitle} (${durationText})`
     : `🎥 Meeting Recording: ${meetingTitle}`;
-
-  if (!recording.fileUrl && recording.status === RecordingStatus.PROCESSING) {
-    contentText += `\nStatus: Processing recording...`;
-  }
 
   if (recording.summary) {
     contentText += `\n\nSummary:\n${recording.summary}`;
