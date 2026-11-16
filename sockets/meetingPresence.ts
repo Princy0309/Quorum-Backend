@@ -9,6 +9,7 @@ import logger from '../utils/logger.js';
 import { canUserJoinMeeting } from '../services/meetingPermissionService.js';
 import { setMeetingPresence, setScreenSharePresence } from '../services/presenceService.js';
 import { broadcastUserPresenceUpdate } from './handlers/presenceHandler.js';
+import { stopActiveRecordingForMeeting } from '../services/recordingService.js';
 
 export interface Participant {
     userId: string;
@@ -424,6 +425,7 @@ export const handleLeaveMeeting = (
     }
 
     if (roomState.participants.size === 0 && roomState.waitingRoom.size === 0) {
+        stopActiveRecordingForMeeting(normalizedCode).catch(() => {});
         meetingRooms.delete(normalizedCode);
     }
 
@@ -433,6 +435,12 @@ export const handleLeaveMeeting = (
 export const closeMeetingRoom = async (meetingCode: string) => {
     const normalizedCode = normalizeMeetingCode(meetingCode);
     if (!normalizedCode) return;
+
+    try {
+        await stopActiveRecordingForMeeting(normalizedCode);
+    } catch (recErr) {
+        logger.warn(`Failed to stop active recording in closeMeetingRoom for ${normalizedCode}:`, recErr);
+    }
 
     const roomState = meetingRooms.get(normalizedCode);
     if (roomState) {
@@ -477,7 +485,7 @@ export const closeMeetingRoom = async (meetingCode: string) => {
 export const handleEndMeeting = async (
     io: Server,
     socket: Socket,
-    payload: { meetingCode: string },
+    payload: { meetingCode: string; [key: string]: any },
     ack?: (res: SocketAckResponse) => void
 ) => {
     const user = socket.data.user;
@@ -488,7 +496,7 @@ export const handleEndMeeting = async (
         return;
     }
 
-    const { meetingCode } = payload || {};
+    const { meetingCode, ...extraData } = payload || {};
     const normalizedCode = normalizeMeetingCode(meetingCode);
     if (!normalizedCode) {
         const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code is required' };
@@ -509,13 +517,14 @@ export const handleEndMeeting = async (
     }
 
     if (normalizedCode.startsWith('test-')) {
-        closeMeetingRoom(normalizedCode);
+        await stopActiveRecordingForMeeting(normalizedCode, extraData).catch(() => {});
+        await closeMeetingRoom(normalizedCode);
         ack?.({ success: true, message: 'Meeting ended successfully' });
         return;
     }
 
     try {
-        await endMeeting(normalizedCode, user.id);
+        await endMeeting(normalizedCode, user.id, extraData);
         ack?.({ success: true, message: 'Meeting ended successfully' });
     } catch (err: any) {
         const statusCode = err.statusCode || 500;

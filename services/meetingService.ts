@@ -516,7 +516,7 @@ export const getMeeting = async (code: string, userId?: string) => {
   };
 };
 
-export const endMeeting = async (code: string, hostId: string) => {
+export const endMeeting = async (code: string, hostId: string, extraData?: any) => {
   const meeting = await prisma.meeting.findFirst({
     where: { code },
   });
@@ -539,10 +539,15 @@ export const endMeeting = async (code: string, hostId: string) => {
   });
 
   await cleanupMeetingCalendarEventsAndReminders(code);
-  stopActiveRecordingForMeeting(code).catch(() => {});
 
   try {
-    closeMeetingRoom(code);
+    await stopActiveRecordingForMeeting(code, extraData);
+  } catch (recErr) {
+    logger.warn(`Failed to stop active recording on endMeeting for ${code}:`, recErr);
+  }
+
+  try {
+    await closeMeetingRoom(code);
   } catch (err) {
     console.error('Failed to teardown meeting socket room:', err);
   }
@@ -873,10 +878,15 @@ export const cancelMeeting = async (code: string, userId: string) => {
   });
 
   await cleanupMeetingCalendarEventsAndReminders(code);
-  stopActiveRecordingForMeeting(code).catch(() => {});
 
   try {
-    closeMeetingRoom(code);
+    await stopActiveRecordingForMeeting(code);
+  } catch (recErr) {
+    logger.warn(`Failed to stop active recording on cancelMeeting for ${code}:`, recErr);
+  }
+
+  try {
+    await closeMeetingRoom(code);
   } catch (err) {
     logger.error('[MeetingService] Failed to teardown cancelled meeting socket room:', err);
   }

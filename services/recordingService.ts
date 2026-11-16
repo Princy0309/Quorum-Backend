@@ -729,7 +729,10 @@ export const deleteRecording = async (userId: string, recordingId: string) => {
   return { success: true, message: 'Recording deleted successfully' };
 };
 
-export const stopActiveRecordingForMeeting = async (rawMeetingCode: string) => {
+export const stopActiveRecordingForMeeting = async (
+  rawMeetingCode: string,
+  extraData?: Partial<StopRecordingInput>
+) => {
   await ensureRecordingSchema();
   const meetingCode = normalizeMeetingCode(rawMeetingCode);
 
@@ -738,31 +741,68 @@ export const stopActiveRecordingForMeeting = async (rawMeetingCode: string) => {
       meetingCode,
       status: RecordingStatus.RECORDING,
     },
+    include: {
+      recordedBy: { select: { id: true, name: true, avatar: true } },
+    },
   });
 
   if (!activeRecording) return null;
 
+  if (extraData?.teamId) {
+    await prisma.meeting.updateMany({
+      where: { code: meetingCode },
+      data: { teamId: extraData.teamId, scopeType: MeetingScopeType.TEAM },
+    });
+  }
+
   const now = new Date();
-  const duration = Math.max(1, Math.floor((now.getTime() - activeRecording.startedAt.getTime()) / 1000));
+  const duration = extraData?.durationSeconds !== undefined
+    ? extraData.durationSeconds
+    : Math.max(1, Math.floor((now.getTime() - activeRecording.startedAt.getTime()) / 1000));
   const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const resolvedFileUrl = extraData?.fileUrl || activeRecording.fileUrl;
+  const hasFileUrl = typeof resolvedFileUrl === 'string' && resolvedFileUrl.trim().length > 0;
+  const finalFileSize = extraData?.fileSizeBytes !== undefined
+    ? BigInt(extraData.fileSizeBytes)
+    : activeRecording.fileSizeBytes;
 
   const updated = await prisma.meetingRecording.update({
     where: { id: activeRecording.id },
     data: {
-      status: RecordingStatus.PROCESSING,
+      status: hasFileUrl ? RecordingStatus.COMPLETED : RecordingStatus.PROCESSING,
       endedAt: now,
       durationSeconds: duration,
       expiresAt,
+      ...(hasFileUrl ? { fileUrl: resolvedFileUrl } : {}),
+      ...(extraData?.thumbnailUrl ? { thumbnailUrl: extraData.thumbnailUrl } : {}),
+      ...(extraData?.transcriptUrl ? { transcriptUrl: extraData.transcriptUrl } : {}),
+      ...(extraData?.summary ? { summary: extraData.summary } : {}),
+      ...(finalFileSize !== undefined ? { fileSizeBytes: finalFileSize } : {}),
+    },
+    include: {
+      recordedBy: { select: { id: true, name: true, avatar: true } },
     },
   });
+
+  const roomState = meetingRooms.get(meetingCode);
+  if (roomState) {
+    (roomState as any).isRecording = false;
+    (roomState as any).recordingId = undefined;
+    (roomState as any).recordingStartedAt = undefined;
+    (roomState as any).recordingStartedBy = undefined;
+  }
 
   try {
     getIO().to(meetingCode).emit('meeting:recording-status', {
       isRecording: false,
-      status: RecordingStatus.PROCESSING,
+      status: updated.status,
       recordingId: updated.id,
       meetingCode,
       durationSeconds: duration,
+      stoppedBy: {
+        id: updated.recordedBy?.id || updated.recordedById || 'Host',
+        name: updated.recordedBy?.name || 'Host',
+      },
       endedAt: now,
     });
   } catch (err) {
