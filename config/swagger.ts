@@ -10,7 +10,7 @@ export const swaggerDocument = {
   },
   "servers": [
     {
-      "url": process.env.API_BASE_URL || "/",
+      "url": "/",
       "description": "API Server"
     }
   ],
@@ -2377,7 +2377,12 @@ export const swaggerDocument = {
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["PENDING", "ACCEPTED", "REJECTED", "CANCELLED"],
+              "enum": [
+                "PENDING",
+                "ACCEPTED",
+                "REJECTED",
+                "CANCELLED"
+              ],
               "default": "PENDING"
             },
             "description": "Filter by join request status"
@@ -5572,45 +5577,129 @@ export const swaggerDocument = {
     },
     "/api/saved-items": {
       "post": {
-        "tags": ["Saved Items"],
+        "tags": [
+          "Saved Items"
+        ],
         "summary": "Save an item (Bookmark)",
         "description": "Saves a message, file, chat conversation, document, or resource. Idempotent upsert.",
-        "security": [{ "BearerAuth": [] }, { "CSRFAuth": [] }],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["itemType", "itemId"],
+                "required": [
+                  "itemType",
+                  "itemId"
+                ],
                 "properties": {
-                  "itemType": { "type": "string", "enum": ["MESSAGE", "FILE", "CHAT", "DOCUMENT", "RESOURCE"] },
-                  "itemId": { "type": "string" },
-                  "note": { "type": "string", "nullable": true },
-                  "collectionId": { "type": "string", "format": "uuid", "nullable": true }
+                  "itemType": {
+                    "type": "string",
+                    "enum": [
+                      "MESSAGE",
+                      "FILE",
+                      "CHAT",
+                      "DOCUMENT",
+                      "RESOURCE"
+                    ]
+                  },
+                  "itemId": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "collectionId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "201": { "description": "Item saved successfully" },
-          "400": { "description": "Invalid item or missing attachment" },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Item not found or inaccessible" }
+          "201": {
+            "description": "Item saved successfully"
+          },
+          "400": {
+            "description": "Invalid item or missing attachment"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Item not found or inaccessible"
+          }
         }
       },
       "get": {
-        "tags": ["Saved Items"],
+        "tags": [
+          "Saved Items"
+        ],
         "summary": "List saved items",
         "description": "Retrieves cursor-paginated saved items enriched with original metadata.",
-        "security": [{ "BearerAuth": [] }],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "itemType", "in": "query", "schema": { "type": "string", "enum": ["MESSAGE", "FILE", "CHAT", "DOCUMENT", "RESOURCE"] } },
-          { "name": "collectionId", "in": "query", "schema": { "type": "string", "format": "uuid" } },
-          { "name": "search", "in": "query", "schema": { "type": "string" } },
-          { "name": "cursor", "in": "query", "schema": { "type": "string", "format": "uuid" } },
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } }
+          {
+            "name": "itemType",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "MESSAGE",
+                "FILE",
+                "CHAT",
+                "DOCUMENT",
+                "RESOURCE"
+              ]
+            }
+          },
+          {
+            "name": "collectionId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -5620,7 +5709,10 @@ export const swaggerDocument = {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": { "type": "boolean", "example": true },
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
                     "data": {
                       "type": "object",
                       "properties": {
@@ -5629,29 +5721,75 @@ export const swaggerDocument = {
                           "items": {
                             "type": "object",
                             "properties": {
-                              "id": { "type": "string", "format": "uuid" },
-                              "itemType": { "type": "string", "enum": ["MESSAGE", "FILE", "CHAT", "DOCUMENT", "RESOURCE"] },
-                              "itemId": { "type": "string" },
-                              "note": { "type": "string", "nullable": true },
-                              "isAccessible": { "type": "boolean", "example": true },
-                              "title": { "type": "string", "example": "Important message" },
-                              "content": { "type": "object", "nullable": true },
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "itemType": {
+                                "type": "string",
+                                "enum": [
+                                  "MESSAGE",
+                                  "FILE",
+                                  "CHAT",
+                                  "DOCUMENT",
+                                  "RESOURCE"
+                                ]
+                              },
+                              "itemId": {
+                                "type": "string"
+                              },
+                              "note": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "isAccessible": {
+                                "type": "boolean",
+                                "example": true
+                              },
+                              "title": {
+                                "type": "string",
+                                "example": "Important message"
+                              },
+                              "content": {
+                                "type": "object",
+                                "nullable": true
+                              },
                               "collection": {
                                 "type": "object",
                                 "nullable": true,
                                 "properties": {
-                                  "id": { "type": "string", "format": "uuid" },
-                                  "name": { "type": "string" },
-                                  "color": { "type": "string", "nullable": true }
+                                  "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "color": {
+                                    "type": "string",
+                                    "nullable": true
+                                  }
                                 }
                               },
-                              "createdAt": { "type": "string", "format": "date-time" },
-                              "updatedAt": { "type": "string", "format": "date-time" }
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "updatedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
                             }
                           }
                         },
-                        "nextCursor": { "type": "string", "nullable": true, "format": "uuid" },
-                        "hasNextPage": { "type": "boolean" }
+                        "nextCursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "format": "uuid"
+                        },
+                        "hasNextPage": {
+                          "type": "boolean"
+                        }
                       }
                     }
                   }
@@ -5659,18 +5797,37 @@ export const swaggerDocument = {
               }
             }
           },
-          "401": { "description": "Unauthorized" }
+          "401": {
+            "description": "Unauthorized"
+          }
         }
       }
     },
     "/api/saved-items/{id}": {
       "patch": {
-        "tags": ["Saved Items"],
+        "tags": [
+          "Saved Items"
+        ],
         "summary": "Update saved item",
         "description": "Updates note or collection assignment of a saved item.",
-        "security": [{ "BearerAuth": [] }, { "CSRFAuth": [] }],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -5678,81 +5835,169 @@ export const swaggerDocument = {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "note": { "type": "string", "nullable": true },
-                  "collectionId": { "type": "string", "format": "uuid", "nullable": true }
+                  "note": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "collectionId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Saved item updated" },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Saved item not found" }
+          "200": {
+            "description": "Saved item updated"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Saved item not found"
+          }
         }
       },
       "delete": {
-        "tags": ["Saved Items"],
+        "tags": [
+          "Saved Items"
+        ],
         "summary": "Remove saved item",
         "description": "Deletes a saved item bookmark.",
-        "security": [{ "BearerAuth": [] }, { "CSRFAuth": [] }],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Saved item removed" },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Saved item not found" }
+          "200": {
+            "description": "Saved item removed"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Saved item not found"
+          }
         }
       }
     },
     "/api/saved-items/collections": {
       "post": {
-        "tags": ["Saved Items"],
+        "tags": [
+          "Saved Items"
+        ],
         "summary": "Create collection",
         "description": "Creates a new personal saved collection/folder.",
-        "security": [{ "BearerAuth": [] }, { "CSRFAuth": [] }],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["name"],
+                "required": [
+                  "name"
+                ],
                 "properties": {
-                  "name": { "type": "string" },
-                  "description": { "type": "string", "nullable": true },
-                  "color": { "type": "string", "nullable": true }
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "color": {
+                    "type": "string",
+                    "nullable": true
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "201": { "description": "Collection created" },
-          "401": { "description": "Unauthorized" },
-          "409": { "description": "Collection name conflict" }
+          "201": {
+            "description": "Collection created"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "409": {
+            "description": "Collection name conflict"
+          }
         }
       },
       "get": {
-        "tags": ["Saved Items"],
+        "tags": [
+          "Saved Items"
+        ],
         "summary": "List collections",
         "description": "Retrieves all personal collections for the user with item counts.",
-        "security": [{ "BearerAuth": [] }],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
         "responses": {
-          "200": { "description": "List of collections" },
-          "401": { "description": "Unauthorized" }
+          "200": {
+            "description": "List of collections"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
         }
       }
     },
     "/api/saved-items/collections/{id}": {
       "patch": {
-        "tags": ["Saved Items"],
+        "tags": [
+          "Saved Items"
+        ],
         "summary": "Update collection",
         "description": "Updates collection name, description, or color.",
-        "security": [{ "BearerAuth": [] }, { "CSRFAuth": [] }],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -5760,33 +6005,72 @@ export const swaggerDocument = {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": "string" },
-                  "description": { "type": "string", "nullable": true },
-                  "color": { "type": "string", "nullable": true }
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "color": {
+                    "type": "string",
+                    "nullable": true
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Collection updated" },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Collection not found" },
-          "409": { "description": "Collection name conflict" }
+          "200": {
+            "description": "Collection updated"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Collection not found"
+          },
+          "409": {
+            "description": "Collection name conflict"
+          }
         }
       },
       "delete": {
-        "tags": ["Saved Items"],
+        "tags": [
+          "Saved Items"
+        ],
         "summary": "Delete collection",
         "description": "Deletes a collection. Its saved items remain intact without collection.",
-        "security": [{ "BearerAuth": [] }, { "CSRFAuth": [] }],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CSRFAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Collection deleted" },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Collection not found" }
+          "200": {
+            "description": "Collection deleted"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Collection not found"
+          }
         }
       }
     },
@@ -9259,9 +9543,3471 @@ export const swaggerDocument = {
           }
         }
       }
+    },
+    "/api/office/{teamId}": {
+      "get": {
+        "tags": [
+          "Virtual Office"
+        ],
+        "summary": "Get Virtual Office floor state",
+        "description": "Retrieves current floor layout, zones, desk occupancy, seated teammates, active war rooms, and real-time status messages for a team.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Team UUID or slug"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Virtual office floor state retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "teamId": {
+                          "type": "string"
+                        },
+                        "teamName": {
+                          "type": "string"
+                        },
+                        "members": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "userId": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "avatarUrl": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "presenceStatus": {
+                                "type": "string",
+                                "example": "AVAILABLE"
+                              },
+                              "zoneId": {
+                                "type": "string",
+                                "example": "OPEN_WORKSPACE"
+                              },
+                              "deskId": {
+                                "type": "string",
+                                "example": "desk-1"
+                              },
+                              "isInMeeting": {
+                                "type": "boolean",
+                                "example": false
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            }
+                          }
+                        },
+                        "desks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "warRoomMeeting": {
+                          "type": "object",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Team not found"
+          }
+        }
+      }
+    },
+    "/api/office/{teamId}/join": {
+      "post": {
+        "tags": [
+          "Virtual Office"
+        ],
+        "summary": "Join Virtual Office floor",
+        "description": "Enter the team office floor and automatically be seated at an available Open Workspace desk.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Team UUID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Joined office floor successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/office/{teamId}/leave": {
+      "post": {
+        "tags": [
+          "Virtual Office"
+        ],
+        "summary": "Leave Virtual Office floor",
+        "description": "Vacate current desk, leave the office floor, and broadcast departure to teammates via WebSocket.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Left office floor successfully"
+          }
+        }
+      }
+    },
+    "/api/office/{teamId}/knock": {
+      "post": {
+        "tags": [
+          "Virtual Office"
+        ],
+        "summary": "Knock on a desk or zone",
+        "description": "Sends a real-time visual and audio knock notification to a seated teammate or zone.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "targetUserId"
+                ],
+                "properties": {
+                  "targetUserId": {
+                    "type": "string",
+                    "example": "usr_abc123"
+                  },
+                  "deskId": {
+                    "type": "string",
+                    "example": "desk-2"
+                  },
+                  "message": {
+                    "type": "string",
+                    "example": "Quick question about API"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Knock sent successfully"
+          }
+        }
+      }
+    },
+    "/api/office/{teamId}/desk/claim": {
+      "post": {
+        "tags": [
+          "Virtual Office"
+        ],
+        "summary": "Claim or move to a specific desk",
+        "description": "Select and claim a specific desk ID in the Open Workspace zone.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "deskId"
+                ],
+                "properties": {
+                  "deskId": {
+                    "type": "string",
+                    "example": "desk-5"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Desk claimed successfully"
+          },
+          "409": {
+            "description": "Desk already occupied"
+          }
+        }
+      }
+    },
+    "/api/office/{teamId}/zone": {
+      "post": {
+        "tags": [
+          "Virtual Office"
+        ],
+        "summary": "Move between office zones",
+        "description": "Move avatar to OPEN_WORKSPACE, FOCUS_POD (auto DND), COFFEE_LOUNGE (auto Be Right Back), or WAR_ROOM.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "zoneId"
+                ],
+                "properties": {
+                  "zoneId": {
+                    "type": "string",
+                    "enum": [
+                      "OPEN_WORKSPACE",
+                      "WAR_ROOM",
+                      "FOCUS_POD",
+                      "COFFEE_LOUNGE"
+                    ],
+                    "example": "COFFEE_LOUNGE"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Zone changed successfully"
+          }
+        }
+      }
+    },
+    "/api/office/{teamId}/meeting/start": {
+      "post": {
+        "tags": [
+          "Virtual Office"
+        ],
+        "summary": "Start an instant War Room meeting",
+        "description": "Launches a collaborative video meeting inside the team war room zone.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "War room meeting started"
+          }
+        }
+      }
+    },
+    "/api/office/{teamId}/meeting/end": {
+      "post": {
+        "tags": [
+          "Virtual Office"
+        ],
+        "summary": "End active War Room meeting",
+        "description": "Ends the active war room meeting and returns participants to their desks.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "War room meeting ended"
+          }
+        }
+      }
+    },
+    "/api/integrations/github/authorize-url": {
+      "get": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "Get GitHub OAuth authorization URL",
+        "description": "Generates GitHub OAuth 2.0 app consent URL with repo and user scopes.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorization URL generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "example": "https://github.com/login/oauth/authorize?..."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/github/oauth/callback": {
+      "get": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "GitHub OAuth callback handler",
+        "description": "Exchanges authorization code for GitHub user access token and saves credentials.",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GitHub authenticated successfully"
+          }
+        }
+      }
+    },
+    "/api/integrations/github/status": {
+      "get": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "Check GitHub connection status",
+        "description": "Returns whether the user or team has an active, authenticated GitHub account linked.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "isConnected": {
+                          "type": "boolean",
+                          "example": true
+                        },
+                        "username": {
+                          "type": "string",
+                          "example": "octocat"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/github/disconnect": {
+      "post": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "Disconnect GitHub integration",
+        "description": "Revokes access tokens and deletes GitHub OAuth connection for the user.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Disconnected successfully"
+          }
+        }
+      }
+    },
+    "/api/integrations/github/user/repos": {
+      "get": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "List user GitHub repositories",
+        "description": "Fetches accessible public and private GitHub repositories for repository linking.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of repositories",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "number"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "fullName": {
+                            "type": "string",
+                            "example": "org/repo-name"
+                          },
+                          "private": {
+                            "type": "boolean"
+                          },
+                          "htmlUrl": {
+                            "type": "string"
+                          },
+                          "defaultBranch": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/github/teams/{teamId}/repo": {
+      "get": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "Get linked team GitHub repository",
+        "description": "Retrieves the GitHub repository linked to a specific team workspace.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Linked repository details"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "Link GitHub repository to team",
+        "description": "Attaches a GitHub repository to a team for issue tracking, PR reviews, and commit views.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "repoFullName"
+                ],
+                "properties": {
+                  "repoFullName": {
+                    "type": "string",
+                    "example": "facebook/react"
+                  },
+                  "repoUrl": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Repository linked successfully"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "Unlink GitHub repository from team",
+        "description": "Removes repository link from team workspace.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Repository unlinked successfully"
+          }
+        }
+      }
+    },
+    "/api/integrations/github/teams/{teamId}/issues": {
+      "get": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "List issues for team repository",
+        "description": "Retrieves open and closed GitHub issues from the linked team repository.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "closed",
+                "all"
+              ],
+              "default": "open"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Issues list retrieved"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "Create issue in linked repository",
+        "description": "Creates a new GitHub issue in the team repository.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Fix authentication error"
+                  },
+                  "body": {
+                    "type": "string",
+                    "example": "Steps to reproduce..."
+                  },
+                  "labels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "assignees": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Issue created successfully"
+          }
+        }
+      }
+    },
+    "/api/integrations/github/teams/{teamId}/issues/{issueNumber}": {
+      "patch": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "Update GitHub issue",
+        "description": "Updates state, title, body, or assignees of a team repository issue.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "issueNumber",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "open",
+                      "closed"
+                    ]
+                  },
+                  "labels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "assignees": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Issue updated successfully"
+          }
+        }
+      }
+    },
+    "/api/integrations/github/teams/{teamId}/pulls": {
+      "get": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "List pull requests for team repository",
+        "description": "Fetches active pull requests with branch details and review statuses.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "closed",
+                "all"
+              ],
+              "default": "open"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pull requests retrieved"
+          }
+        }
+      }
+    },
+    "/api/integrations/github/teams/{teamId}/commits": {
+      "get": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "List commits for team repository",
+        "description": "Fetches recent commit history from default or specified branch.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Commits list retrieved"
+          }
+        }
+      }
+    },
+    "/api/integrations/github/teams/{teamId}/branches": {
+      "get": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "List branches for team repository",
+        "description": "Fetches all repository branches and protection statuses.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Branches retrieved"
+          }
+        }
+      }
+    },
+    "/api/integrations/github/teams/{teamId}/collaborators": {
+      "get": {
+        "tags": [
+          "GitHub Integration"
+        ],
+        "summary": "List team repository collaborators",
+        "description": "Fetches assignable collaborators and permission roles.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Collaborators retrieved"
+          }
+        }
+      }
+    },
+    "/api/users/status": {
+      "patch": {
+        "tags": [
+          "User Presence & Status"
+        ],
+        "summary": "Set custom user presence status",
+        "description": "Update user status to AVAILABLE, DO_NOT_DISTURB, BUSY, BE_RIGHT_BACK, AWAY, or OFFLINE with optional message and duration.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "AVAILABLE",
+                      "DO_NOT_DISTURB",
+                      "BUSY",
+                      "BE_RIGHT_BACK",
+                      "AWAY",
+                      "OFFLINE"
+                    ],
+                    "example": "DO_NOT_DISTURB"
+                  },
+                  "statusMessage": {
+                    "type": "string",
+                    "example": "Deep work on backend"
+                  },
+                  "clearAfterMinutes": {
+                    "type": "integer",
+                    "example": 60
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated successfully"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "User Presence & Status"
+        ],
+        "summary": "Clear custom user status",
+        "description": "Clears custom status message and resets user presence to automatic detection.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status cleared successfully"
+          }
+        }
+      }
+    },
+    "/api/users/presence": {
+      "get": {
+        "tags": [
+          "User Presence & Status"
+        ],
+        "summary": "Get current user presence",
+        "description": "Returns real-time presence, online state, meeting status, and screen-sharing state.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Presence retrieved successfully"
+          }
+        }
+      }
+    },
+    "/api/users/presence/batch": {
+      "post": {
+        "tags": [
+          "User Presence & Status"
+        ],
+        "summary": "Batch fetch user presences",
+        "description": "Retrieves current online/presence records for an array of user IDs in a single call.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userIds"
+                ],
+                "properties": {
+                  "userIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "usr_1",
+                      "usr_2"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Batch presence map returned"
+          }
+        }
+      }
+    },
+    "/api/users/{userId}/presence": {
+      "get": {
+        "tags": [
+          "User Presence & Status"
+        ],
+        "summary": "Get single user presence",
+        "description": "Fetches real-time status and activity details for a specific user ID.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User presence returned"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/transfer-ownership": {
+      "post": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Transfer organization ownership",
+        "description": "Transfers the primary owner role to another member. Current owner can remain as ORG_ADMIN or leave.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "newOwnerId"
+                ],
+                "properties": {
+                  "newOwnerId": {
+                    "type": "string",
+                    "example": "usr_new_owner"
+                  },
+                  "leaveOrganization": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ownership transferred successfully"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/feed": {
+      "get": {
+        "tags": [
+          "Organization Feeds"
+        ],
+        "summary": "Get organization announcement feed",
+        "description": "Retrieves paginated company-wide posts with author information, reaction counts, and comment totals.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Feed posts retrieved"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Organization Feeds"
+        ],
+        "summary": "Create organization feed post",
+        "description": "Publishes an announcement post to the entire organization.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "content"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Quarterly Town Hall Announcement"
+                  },
+                  "content": {
+                    "type": "string",
+                    "example": "Join us live on Friday at 3 PM."
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Feed post created"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/feed/{postId}": {
+      "get": {
+        "tags": [
+          "Organization Feeds"
+        ],
+        "summary": "Get single feed post",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Post details"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Organization Feeds"
+        ],
+        "summary": "Edit feed post",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Post updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Organization Feeds"
+        ],
+        "summary": "Delete feed post",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Post deleted"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/feed/{postId}/pin": {
+      "post": {
+        "tags": [
+          "Organization Feeds"
+        ],
+        "summary": "Pin or unpin feed post",
+        "description": "Toggles pinned status of an organization announcement post.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pin status toggled"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/feed/{postId}/react": {
+      "post": {
+        "tags": [
+          "Organization Feeds"
+        ],
+        "summary": "React to feed post",
+        "description": "Adds or removes an emoji reaction to a feed post.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "emoji"
+                ],
+                "properties": {
+                  "emoji": {
+                    "type": "string",
+                    "example": "🚀"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reaction toggled"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/feed/{postId}/comments": {
+      "get": {
+        "tags": [
+          "Organization Feeds"
+        ],
+        "summary": "List comments on feed post",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comments list"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Organization Feeds"
+        ],
+        "summary": "Comment on feed post",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "content"
+                ],
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "example": "Great update!"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Comment created"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/feed/{postId}/comments/{commentId}": {
+      "patch": {
+        "tags": [
+          "Organization Feeds"
+        ],
+        "summary": "Update feed post comment",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "commentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "content"
+                ],
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Comment updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Organization Feeds"
+        ],
+        "summary": "Delete feed post comment",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "commentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comment deleted"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/teams/{teamId}/tasks": {
+      "get": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "List team tasks",
+        "description": "Fetches sprint and backlog tasks assigned within a specific team workspace.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Team tasks retrieved"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Create team task",
+        "description": "Creates a new task assigned to team members.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Setup CI/CD pipeline"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "assigneeId": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "LOW",
+                      "MEDIUM",
+                      "HIGH",
+                      "URGENT"
+                    ],
+                    "default": "MEDIUM"
+                  },
+                  "dueDate": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Task created"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/teams/{teamId}/tasks/{taskId}/status": {
+      "patch": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Update team task status",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "TODO",
+                      "IN_PROGRESS",
+                      "IN_REVIEW",
+                      "DONE"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Task status updated"
+          }
+        }
+      }
+    },
+    "/api/organizations/{id}/tasks/my": {
+      "get": {
+        "tags": [
+          "Organizations & Teams"
+        ],
+        "summary": "Get current user organization tasks",
+        "description": "Lists all open and completed tasks across all teams in the organization assigned to the authenticated user.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "My tasks list"
+          }
+        }
+      }
+    },
+    "/api/meetings/scoped": {
+      "post": {
+        "tags": [
+          "Meetings & Video Calling"
+        ],
+        "summary": "Create or schedule scoped meeting",
+        "description": "Launches or schedules a video call scoped to an Organization, Team, or Community.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "scopeType"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Engineering Sync"
+                  },
+                  "scopeType": {
+                    "type": "string",
+                    "enum": [
+                      "ORGANIZATION",
+                      "TEAM",
+                      "COMMUNITY",
+                      "PERSONAL"
+                    ]
+                  },
+                  "organizationId": {
+                    "type": "string"
+                  },
+                  "teamId": {
+                    "type": "string"
+                  },
+                  "communityId": {
+                    "type": "string"
+                  },
+                  "scheduledStartTime": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "isRecorded": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Scoped meeting created successfully"
+          }
+        }
+      }
+    },
+    "/api/meetings/upcoming": {
+      "get": {
+        "tags": [
+          "Meetings & Video Calling"
+        ],
+        "summary": "Get user upcoming meetings",
+        "description": "Fetches scheduled and recurring meetings across all teams and organizations for the authenticated user.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upcoming meetings list"
+          }
+        }
+      }
+    },
+    "/api/meetings/organization/{organizationId}": {
+      "get": {
+        "tags": [
+          "Meetings & Video Calling"
+        ],
+        "summary": "List organization meetings",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization meetings list"
+          }
+        }
+      }
+    },
+    "/api/meetings/team/{teamId}": {
+      "get": {
+        "tags": [
+          "Meetings & Video Calling"
+        ],
+        "summary": "List team meetings",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Team meetings list"
+          }
+        }
+      }
+    },
+    "/api/meetings/{code}/cancel": {
+      "patch": {
+        "tags": [
+          "Meetings & Video Calling"
+        ],
+        "summary": "Cancel a scheduled meeting",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meeting cancelled"
+          }
+        }
+      }
+    },
+    "/api/meetings/{code}/whiteboards": {
+      "get": {
+        "tags": [
+          "Collaborative Whiteboards"
+        ],
+        "summary": "Get whiteboards linked to meeting",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meeting whiteboards retrieved"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Collaborative Whiteboards"
+        ],
+        "summary": "Create whiteboard for meeting",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Sprint Architecture Diagram"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Whiteboard created and linked to meeting"
+          }
+        }
+      }
+    },
+    "/api/meetings/{code}/whiteboards/{whiteboardId}/open": {
+      "post": {
+        "tags": [
+          "Collaborative Whiteboards"
+        ],
+        "summary": "Broadcast whiteboard open in live meeting",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "whiteboardId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whiteboard opened for all meeting participants"
+          }
+        }
+      }
+    },
+    "/api/projects/my-projects": {
+      "get": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Get my projects",
+        "description": "Lists projects where the authenticated user is an owner, lead, member, or external freelancer.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "My projects retrieved"
+          }
+        }
+      }
+    },
+    "/api/projects/invites/preview/{token}": {
+      "get": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Preview project invitation",
+        "description": "Public endpoint to view project title, organization, and role before accepting.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invite preview retrieved"
+          }
+        }
+      }
+    },
+    "/api/projects/invites/accept": {
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Accept project invitation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Project invite accepted"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/members/invite": {
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Invite project member or freelancer",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "role"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "PROJECT_LEAD",
+                      "MEMBER",
+                      "FREELANCER",
+                      "VIEWER"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Invite sent"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/members/{userId}": {
+      "patch": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Update member role in project",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "PROJECT_LEAD",
+                      "MEMBER",
+                      "FREELANCER",
+                      "VIEWER"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Member role updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Remove member from project",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Member removed"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/resources": {
+      "get": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "List project resources",
+        "description": "Retrieves external links, documents, and deliverables attached to the project.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resources list"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Add project resource",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "url"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Figma Design System"
+                  },
+                  "url": {
+                    "type": "string",
+                    "example": "https://figma.com/file/..."
+                  },
+                  "type": {
+                    "type": "string",
+                    "example": "LINK"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Resource added"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/resources/{resourceId}": {
+      "delete": {
+        "tags": [
+          "Projects & Freelancer Collaboration"
+        ],
+        "summary": "Delete project resource",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "resourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resource deleted"
+          }
+        }
+      }
+    },
+    "/api/recordings/{id}/complete": {
+      "post": {
+        "tags": [
+          "Meeting Recordings"
+        ],
+        "summary": "Finalize meeting recording",
+        "description": "Notifies the backend that browser/client chunk uploads are finished and triggers post-processing and transcription.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recording finalized successfully"
+          }
+        }
+      }
+    },
+    "/api/webhooks/jira": {
+      "post": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Atlassian Jira webhook receiver",
+        "description": "Receives and syncs real-time Jira Cloud issue updates and comment events.",
+        "responses": {
+          "200": {
+            "description": "Webhook processed"
+          }
+        }
+      }
+    },
+    "/api/integrations/jira/teams/{teamId}/tickets": {
+      "get": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "List Jira tickets for team",
+        "description": "Fetches Jira Cloud issues linked to the team project.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Jira tickets list"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Create Jira ticket from team workspace",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "summary",
+                  "issueType"
+                ],
+                "properties": {
+                  "summary": {
+                    "type": "string",
+                    "example": "Implement auth token refresh"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "issueType": {
+                    "type": "string",
+                    "example": "Task"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "example": "Medium"
+                  },
+                  "assigneeAccountId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Jira ticket created"
+          }
+        }
+      }
+    },
+    "/api/integrations/jira/teams/{teamId}/tickets/{key}": {
+      "get": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Get single Jira ticket details",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "QUOR-101"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticket details retrieved"
+          }
+        }
+      }
+    },
+    "/api/integrations/jira/teams/{teamId}/tickets/{key}/transition": {
+      "post": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "Transition Jira ticket status",
+        "description": "Advances Jira issue status through project workflow transitions (e.g. In Progress, Done).",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "transitionId"
+                ],
+                "properties": {
+                  "transitionId": {
+                    "type": "string",
+                    "example": "31"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transition executed"
+          }
+        }
+      }
+    },
+    "/api/integrations/jira/teams/{teamId}/assignees": {
+      "get": {
+        "tags": [
+          "Jira Integration"
+        ],
+        "summary": "List Jira assignable users for team",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Assignable users list"
+          }
+        }
+      }
+    },
+    "/api/conversations/messages/forward": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Forward messages to other conversations",
+        "description": "Forwards one or more messages to target conversations or direct chats.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "messageIds",
+                  "targetConversationIds"
+                ],
+                "properties": {
+                  "messageIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "targetConversationIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Messages forwarded successfully"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/messages/poll": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Create an interactive chat poll",
+        "description": "Creates a multi-option poll within the conversation.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "question",
+                  "options"
+                ],
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "example": "What time should we hold the demo?"
+                  },
+                  "options": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "2 PM",
+                      "4 PM",
+                      "Tomorrow"
+                    ]
+                  },
+                  "allowMultiple": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Poll created"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/messages/{messageId}/poll/vote": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Vote in conversation poll",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "optionIndexes"
+                ],
+                "properties": {
+                  "optionIndexes": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "example": [
+                      0
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Vote cast"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/read": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Mark conversation as read",
+        "description": "Marks all unread messages in the conversation as read and updates badge counters.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation marked as read"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/clear": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Clear conversation history",
+        "description": "Clears visible chat history for the authenticated user without deleting messages for others.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "History cleared"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/mute": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Mute conversation alerts",
+        "description": "Mutes push and sound alerts for this conversation permanently or until specified date.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mutedUntil": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Conversation muted"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/unmute": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Unmute conversation alerts",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation unmuted"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/block": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Block direct conversation",
+        "description": "Blocks communications from the other participant in this 1-on-1 direct chat.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation blocked"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/unblock": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Unblock direct conversation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation unblocked"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/messages/{messageId}/pin": {
+      "post": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Pin message to conversation",
+        "description": "Pins an important message to the top banner of the chat.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Message pinned"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Unpin message from conversation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Message unpinned"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/pinned": {
+      "get": {
+        "tags": [
+          "Conversations & Chat"
+        ],
+        "summary": "Get pinned messages in conversation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pinned messages list"
+          }
+        }
+      }
+    },
+    "/api/communities/discover": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Discover public communities",
+        "description": "Explore and search publicly discoverable communities with preview statistics.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public communities returned"
+          }
+        }
+      }
+    },
+    "/api/communities/invitations/{identifier}/accept": {
+      "post": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Accept community invitation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Community invitation accepted"
+          }
+        }
+      }
+    },
+    "/api/communities/invitations/{identifier}/decline": {
+      "post": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Decline community invitation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Community invitation declined"
+          }
+        }
+      }
+    },
+    "/api/communities/{id}/search-users": {
+      "get": {
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Search users to invite to community",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invitable users list"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/open-in-meeting": {
+      "post": {
+        "tags": [
+          "Collaborative Documents"
+        ],
+        "summary": "Open document live inside active meeting",
+        "description": "Presents and synchronizes document real-time editor state for all participants in a meeting room.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "meetingCode"
+                ],
+                "properties": {
+                  "meetingCode": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document presented in meeting"
+          }
+        }
+      }
     }
   },
   "tags": [
+    {
+      "name": "User Presence & Status",
+      "description": "Real-time online presence, custom status messages (Available, DND, Busy, Be Right Back, Away), auto-expiration, and presence batch queries."
+    },
+    {
+      "name": "Organization Feeds",
+      "description": "Company-wide announcement feeds, rich posts, reactions, nested comments, and pinned items."
+    },
+    {
+      "name": "GitHub Integration",
+      "description": "GitHub OAuth 2.0 app authorization, repository mapping, issue tracking, pull requests, commits, and branch synchronization."
+    },
+    {
+      "name": "Virtual Office",
+      "description": "Real-time interactive 2.5D virtual office floor, desk occupancy, proximity zones (Open Workspace, War Room, Focus Pods, Coffee Lounge), and desk knocking."
+    },
     {
       "name": "Meeting Recordings",
       "description": "Meeting video recordings, real-time capture status, Cloudflare R2 / S3 storage, and 7-day auto-purge lifecycle."
