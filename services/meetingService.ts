@@ -508,7 +508,7 @@ export const getMeeting = async (code: string, userId?: string) => {
     scheduledStartTime: meeting.scheduledStartTime,
     waitingRoom: meeting.waitingRoom,
     hostId: meeting.hostId,
-    host: meeting.host,
+    host: meeting.host ? { ...meeting.host, profilePicture: meeting.host.avatar || null } : meeting.host,
     organizationId: meeting.organizationId,
     organization: meeting.organization,
     teamId: meeting.teamId,
@@ -516,7 +516,7 @@ export const getMeeting = async (code: string, userId?: string) => {
   };
 };
 
-export const endMeeting = async (code: string, hostId: string) => {
+export const endMeeting = async (code: string, hostId: string, extraData?: any) => {
   const meeting = await prisma.meeting.findFirst({
     where: { code },
   });
@@ -539,10 +539,15 @@ export const endMeeting = async (code: string, hostId: string) => {
   });
 
   await cleanupMeetingCalendarEventsAndReminders(code);
-  stopActiveRecordingForMeeting(code).catch(() => {});
 
   try {
-    closeMeetingRoom(code);
+    await stopActiveRecordingForMeeting(code, extraData);
+  } catch (recErr) {
+    logger.warn(`Failed to stop active recording on endMeeting for ${code}:`, recErr);
+  }
+
+  try {
+    await closeMeetingRoom(code);
   } catch (err) {
     console.error('Failed to teardown meeting socket room:', err);
   }
@@ -613,7 +618,7 @@ export const getOrganizationMeetings = async (
     scopeType: m.scopeType,
     status: m.status,
     scheduledStartTime: m.scheduledStartTime,
-    host: m.host,
+    host: m.host ? { ...m.host, profilePicture: m.host.avatar || null } : m.host,
     team: m.team,
     link: `${env.CLIENT_URL}/meet/${m.code}`,
   }));
@@ -706,7 +711,7 @@ export const getTeamMeetings = async (teamId: string, userId: string) => {
     scopeType: m.scopeType,
     status: m.status,
     scheduledStartTime: m.scheduledStartTime,
-    host: m.host,
+    host: m.host ? { ...m.host, profilePicture: m.host.avatar || null } : m.host,
     team: m.team,
     link: `${env.CLIENT_URL}/meet/${m.code}`,
   }));
@@ -812,7 +817,7 @@ export const getUserUpcomingMeetings = async (userId: string) => {
     scopeType: m.scopeType,
     status: m.status,
     scheduledStartTime: m.scheduledStartTime,
-    host: m.host,
+    host: m.host ? { ...m.host, profilePicture: m.host.avatar || null } : m.host,
     organization: m.organization,
     team: m.team,
     link: `${env.CLIENT_URL}/meet/${m.code}`,
@@ -873,10 +878,15 @@ export const cancelMeeting = async (code: string, userId: string) => {
   });
 
   await cleanupMeetingCalendarEventsAndReminders(code);
-  stopActiveRecordingForMeeting(code).catch(() => {});
 
   try {
-    closeMeetingRoom(code);
+    await stopActiveRecordingForMeeting(code);
+  } catch (recErr) {
+    logger.warn(`Failed to stop active recording on cancelMeeting for ${code}:`, recErr);
+  }
+
+  try {
+    await closeMeetingRoom(code);
   } catch (err) {
     logger.error('[MeetingService] Failed to teardown cancelled meeting socket room:', err);
   }

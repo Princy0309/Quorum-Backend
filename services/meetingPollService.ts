@@ -46,7 +46,7 @@ export const formatMeetingPoll = (poll: any, requestingUserId?: string) => {
             : (opt.votes || []).map((v: any) => ({
                 userId: v.userId,
                 createdAt: v.createdAt,
-                user: v.user ? { id: v.user.id, name: v.user.name, avatar: v.user.avatar } : undefined,
+                user: v.user ? { id: v.user.id, name: v.user.name, avatar: v.user.avatar, profilePicture: v.user.avatar || null } : undefined,
               }));
 
           return {
@@ -66,7 +66,7 @@ export const formatMeetingPoll = (poll: any, requestingUserId?: string) => {
     id: poll.id,
     meetingId: poll.meetingId,
     creatorId: poll.creatorId,
-    creator: poll.creator ? { id: poll.creator.id, name: poll.creator.name, avatar: poll.creator.avatar } : undefined,
+    creator: poll.creator ? { id: poll.creator.id, name: poll.creator.name, avatar: poll.creator.avatar, profilePicture: poll.creator.avatar || null } : undefined,
     question: poll.question,
     allowMultipleAnswers: poll.allowMultipleAnswers,
     isAnonymous: poll.isAnonymous,

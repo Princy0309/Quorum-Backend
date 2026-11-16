@@ -33,12 +33,21 @@ export const updateOrgProfilePictureSchema = z.object({
 export const createTeamSchema = z.object({
   name: z.string().trim().min(2, 'Team name must be between 2 and 50 characters').max(50, 'Team name must be between 2 and 50 characters'),
   description: z.string().trim().max(300, 'Team description cannot exceed 300 characters').optional().nullable(),
+  avatar: z.string().trim().optional().nullable(),
 }).passthrough();
 
 export const updateTeamSchema = z.object({
   name: z.string().trim().min(2, 'Team name must be between 2 and 50 characters').max(50, 'Team name must be between 2 and 50 characters').optional(),
   description: z.string().trim().max(300, 'Team description cannot exceed 300 characters').optional().nullable(),
+  avatar: z.string().trim().optional().nullable(),
 }).passthrough().refine(
   (data) => Object.keys(data).length > 0,
   { message: 'At least one field must be provided to update' }
 );
+
+export const updateTeamProfilePictureSchema = z.object({
+  avatar: z.string().trim().optional().nullable(),
+  profilePicture: z.string().trim().optional().nullable(),
+  logo: z.string().trim().optional().nullable(),
+}).passthrough();
+

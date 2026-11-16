@@ -72,7 +72,7 @@ export const handleStopRecording = async (
   }
 
   try {
-    const recording = await stopMeetingRecording(user.id, normalizedCode);
+    const recording = await stopMeetingRecording(user.id, normalizedCode, payload);
     ack?.({ success: true, data: recording });
   } catch (err: any) {
     logger.error('Error stopping recording via socket', { error: err.message, meetingCode: normalizedCode });

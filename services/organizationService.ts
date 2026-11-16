@@ -10,6 +10,7 @@ import env from '../config/env.js';
 import { uploadBufferToS3 } from './uploadService.js';
 import { deleteS3Object } from '../config/s3.js';
 import { createSystemOrgFeedPost } from './orgFeedService.js';
+import { acceptProjectInvite, ensureProjectSchema } from './projectService.js';
 
 function slugify(text: string): string {
   return text
@@ -910,7 +911,56 @@ export const getInvitePreview = async (token: string) => {
   });
 
   if (!invite) {
-    throw new ApiError(404, 'Invalid or non-existent invite link');
+    await ensureProjectSchema();
+    const projectInvite = await prisma.projectInvite.findUnique({
+      where: { token },
+      include: {
+        project: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            organization: { select: { id: true, name: true, slug: true, logo: true, description: true } },
+          },
+        },
+        inviter: {
+          select: { id: true, name: true, email: true, avatar: true },
+        },
+        company: {
+          select: { id: true, name: true, slug: true, logo: true },
+        },
+      },
+    });
+
+    if (!projectInvite) {
+      throw new ApiError(404, 'Invalid or non-existent invite link');
+    }
+
+    if (projectInvite.isAccepted) {
+      throw new ApiError(400, 'This invite link has already been used');
+    }
+
+    if (projectInvite.expiresAt < new Date()) {
+      throw new ApiError(400, 'This invite link has expired');
+    }
+
+    return {
+      id: projectInvite.id,
+      isProjectInvite: true,
+      projectId: projectInvite.projectId,
+      projectName: projectInvite.project.name,
+      projectDescription: projectInvite.project.description,
+      organization: projectInvite.project.organization,
+      inviter: projectInvite.inviter,
+      role: projectInvite.role,
+      company: projectInvite.company,
+      companyName: projectInvite.companyName,
+      teamId: null,
+      teamName: projectInvite.project.name,
+      teamRole: projectInvite.role,
+      email: projectInvite.email,
+      expiresAt: projectInvite.expiresAt,
+    };
   }
 
   if (invite.isRevoked) {
@@ -949,6 +999,19 @@ export const acceptOrganizationInvite = async (
   });
 
   if (!invite) {
+    await ensureProjectSchema();
+    const projectInvite = await prisma.projectInvite.findUnique({
+      where: { token },
+    });
+
+    if (projectInvite) {
+      const projectJoinResult = await acceptProjectInvite(userId, token);
+      return {
+        ...projectJoinResult.member,
+        ...projectJoinResult,
+      };
+    }
+
     throw new ApiError(404, 'Invalid or non-existent invite link');
   }
 

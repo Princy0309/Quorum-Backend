@@ -211,15 +211,43 @@ const checkAndAdjustMeetingConflict = async (
   return adjustedStart;
 };
 
+const isDeleteAction = (action: string): boolean => {
+  const upper = String(action || '').toUpperCase().trim();
+  return (
+    upper.includes('DELETE') ||
+    upper === 'CANCEL_EVENT' ||
+    upper === 'REMOVE_EVENT' ||
+    upper === 'REMOVE_COMMUNITY_POST'
+  );
+};
+
+const isExplicitDeleteRequest = (prompt: string): boolean => {
+  const text = prompt.trim();
+  if (/^\s*(?:please\s+|can\s+you\s+|could\s+you\s+|i\s+want\s+to\s+|help\s+me\s+)?delete\b/i.test(text)) {
+    return true;
+  }
+  if (/\b(?:and|then|,)\s*(?:please\s+)?(?:delete|remove\s+(?:the|my|this|that)?\s*(?:post|message|chat|event|task|team|doc|document|meeting))\b/i.test(text)) {
+    return true;
+  }
+  if (/\b(?:unsend|erase)\s+(?:my|the|this|that|all)?\s*(?:message|chat)\b/i.test(text)) {
+    return true;
+  }
+  if (/^\s*(?:please\s+|can\s+you\s+)?(?:remove|take\s+down)\s+(?:my|the|this|that|all)?\s*(?:post|message|chat|event|meeting|task|document|doc|team|community|project)\b/i.test(text)) {
+    return true;
+  }
+  const isCreationIntent = /^\s*(?:create|make|add|schedule|send|write|start|invite|share|pin|update|set)\b/i.test(text);
+  if (!isCreationIntent && /\bdelete\b/i.test(text)) {
+    return true;
+  }
+  return false;
+};
+
 const DESTRUCTIVE_ACTIONS = new Set([
-  'DELETE_CHAT_MESSAGE',
-  'DELETE_COMMUNITY_POST',
   'REMOVE_TEAM_MEMBER',
   'REMOVE_COMMUNITY_MEMBER',
   'CANCEL_MEETING',
   'ARCHIVE_DOCUMENT',
   'UNPIN_CHAT_MESSAGE',
-  'DELETE_CALENDAR_EVENT',
 ]);
 
 interface StoredWorkflowPlan {
@@ -686,6 +714,10 @@ export const generateWorkflowPlan = async (
   const sanitizedPrompt = sanitizeAiInput(rawPrompt);
   validateNoPromptInjection(sanitizedPrompt);
 
+  if (isExplicitDeleteRequest(sanitizedPrompt)) {
+    throw new ApiError(400, 'Deleting items is not permitted via one-command execution. Please delete items directly from their respective screens.');
+  }
+
   const promptHash = crypto.createHash('sha256').update(`${userId}:${sanitizedPrompt}:${organizationId || ''}`).digest('hex');
   const idempotencyKey = `workflow:idempotency:${userId}:${promptHash}`;
   try {
@@ -789,8 +821,6 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "INVITE_COMMUNITY_MEMBER"
    - "REMOVE_COMMUNITY_MEMBER"
    - "SEND_CHAT_MESSAGE"
-   - "DELETE_CHAT_MESSAGE"
-   - "DELETE_COMMUNITY_POST"
    - "CREATE_MEETING"
    - "START_VIDEO_CALL"
    - "UPDATE_TASK_STATUS"
@@ -804,9 +834,9 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "UNPIN_CHAT_MESSAGE"
    - "CREATE_CALENDAR_EVENT"
    - "UPDATE_MEMBER_ROLE"
-   - "DELETE_CALENDAR_EVENT"
-3. For entity resolution, match names and email addresses mentioned in the prompt to the provided workspace members, communities, and documents. If a member, community, or document cannot be matched with certainty, omit or use best matched ID from the provided context.
-4. When an action relies on a resource produced in a previous step, reference it using variable syntax:
+3. Deletion operations are strictly forbidden: You must NEVER generate steps to delete or remove messages, posts, calendar events, tasks, documents, teams, projects, communities, or any other resources. If the user asks to delete anything, do not generate any deletion steps.
+4. For entity resolution, match names and email addresses mentioned in the prompt to the provided workspace members, communities, and documents. If a member, community, or document cannot be matched with certainty, omit or use best matched ID from the provided context.
+5. When an action relies on a resource produced in a previous step, reference it using variable syntax:
    - "$step1.organizationId" or "$step1.orgId" or "$step1.id" for organization created in step 1
    - "$step1.teamId" or "$step1.id" for team created in step 1
    - "$step2.meetingId" or "$step2.meetingCode" or "$step2.link" for meeting/call created in step 2
@@ -819,11 +849,9 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "$step1.communityId" or "$step1.id" for community created in step 1
    - "$step1.messageId" or "$step1.id" for chat message created or pinned in step 1
    - "$step1.inviteId" or "$step1.id" for invite created in step 1
-   - "$step1.deletedMessageId" for deleted message in step 1
-   - "$step1.deletedPostId" for deleted post in step 1
    - "$step1.status" for user presence status updated in step 1
    - "$step1.eventId" for calendar event created in step 1
-5. Parameter requirements per action:
+6. Parameter requirements per action:
    - "CREATE_ORGANIZATION": { "name": string, "description"?: string }
    - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds"?: string[], "organizationId"?: string, "organizationName"?: string }
    - "ADD_TEAM_MEMBER": { "teamId"?: string, "teamName"?: string, "memberId"?: string, "memberIds"?: string[], "memberName"?: string, "organizationId"?: string, "organizationName"?: string }
@@ -846,19 +874,16 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "NOTIFY_MEMBERS": { "userIds": string[], "title": string, "message": string }
    - "CREATE_COMMUNITY": { "name": string, "description"?: string }
    - "CREATE_COMMUNITY_POST": { "communityId"?: string, "communityName"?: string, "content": string }
-   - "DELETE_COMMUNITY_POST": { "postId"?: string, "communityId"?: string, "communityName"?: string, "contentQuery"?: string }
    - "INVITE_COMMUNITY_MEMBER": { "communityId"?: string, "communityName"?: string, "userId"?: string, "memberName"?: string, "email"?: string, "role"?: "MEMBER" | "ADMIN" }
    - "REMOVE_COMMUNITY_MEMBER": { "communityId"?: string, "communityName"?: string, "targetUserId"?: string, "memberName"?: string, "memberEmail"?: string }
    - "SEND_CHAT_MESSAGE": { "content": string, "recipientUserId"?: string, "recipientName"?: string, "groupName"?: string, "teamId"?: string, "conversationId"?: string }
-   - "DELETE_CHAT_MESSAGE": { "messageId"?: string, "conversationId"?: string, "recipientName"?: string, "recipientUserId"?: string, "groupName"?: string, "teamId"?: string, "contentQuery"?: string, "deleteForEveryone"?: boolean }
    - "PIN_CHAT_MESSAGE": { "messageId"?: string, "conversationId"?: string, "recipientName"?: string, "recipientUserId"?: string, "groupName"?: string, "teamId"?: string, "contentQuery"?: string }
    - "UNPIN_CHAT_MESSAGE": { "messageId"?: string, "conversationId"?: string, "recipientName"?: string, "recipientUserId"?: string, "groupName"?: string, "teamId"?: string, "contentQuery"?: string }
    - "CANCEL_MEETING": { "meetingCode"?: string, "code"?: string, "meetingTitle"?: string }
    - "ARCHIVE_DOCUMENT": { "documentId"?: string, "documentTitle"?: string, "title"?: string }
    - "SET_USER_STATUS": { "status": "AVAILABLE" | "DO_NOT_DISTURB" | "BUSY" | "BE_RIGHT_BACK" | "AWAY" | "OFFLINE", "statusMessage"?: string, "clearAfterMinutes"?: number }
    - "CREATE_CALENDAR_EVENT": { "title": string, "description"?: string, "startDate": string (ISO 8601), "endDate"?: string, "eventType"?: "REMINDER" | "MEETING" | "DEADLINE" | "GENERAL", "isAllDay"?: boolean, "hasReminder"?: boolean, "reminderMinutes"?: number, "attendeeEmails"?: string[] }
-   - "DELETE_CALENDAR_EVENT": { "eventId"?: string, "title"?: string }
-6. ACTION SELECTION RULES:
+7. ACTION SELECTION RULES:
    - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". The creator is ALWAYS the organization owner and ORG_ADMIN. Any other members added or invited default to "MEMBER". DO NOT use "CREATE_TEAM" for organizations or companies.
    - When the user asks to add or invite someone/a member to a team (e.g. "add tanvi to team dev team(frontend)", "add user to team"), you MUST use "ADD_TEAM_MEMBER". DO NOT use "CREATE_TEAM" when adding members to an existing team. Match the team from the provided "teams" list to set "teamId" and "teamName", match the organization from the user prompt or "organizations" list to set "organizationId" and "organizationName", and match the member from "members" to set "memberId" and "memberName".
    - When the user asks to remove or kick someone from a team (e.g. "remove tanvi from team frontend", "kick member from team dev"), you MUST use "REMOVE_TEAM_MEMBER". Match team from "teams" and member from "members".
@@ -877,10 +902,8 @@ CRITICAL SECURITY & PRIVACY RULES:
    - When the user asks to invite or add someone to a community (e.g. "invite tanvi to community college", "add user to community developers"), you MUST use "INVITE_COMMUNITY_MEMBER". Match community from "communities" and member from "members".
    - When the user asks to remove or kick someone from a community (e.g. "remove tanvi from community college", "kick user from community"), you MUST use "REMOVE_COMMUNITY_MEMBER". Match community from "communities".
    - When the user asks to post, share, or publish a message, announcement, or post in a community (e.g. "make a post on community named college saying hello guys", "post in community college hello guys"), you MUST use "CREATE_COMMUNITY_POST". Match the community by name against the provided "communities" list in contextData to set "communityId" and include "communityName" and "content". DO NOT use "NOTIFY_MEMBERS" or "CREATE_TEAM" for community posts.
-   - When the user asks to delete, remove, or take down a post in a community (e.g. "delete my post in community college", "delete post saying xyz in tech community"), you MUST use "DELETE_COMMUNITY_POST". Match community from "communities".
    - When the user asks to create or make a community (e.g. "make a community named xyz", "create community"), use "CREATE_COMMUNITY".
    - When the user asks to write, send, text, or ping a message to a person or someone (e.g. "write a message to Aniket saying hello", "send message to John"), or to a group or team (e.g. "write a message in frontend group saying meeting starts now", "send a message to team dev"), you MUST use "SEND_CHAT_MESSAGE". Match the person against workspace members for "recipientUserId"/"recipientName", or match the group against "teams" for "groupName"/"teamId". DO NOT use "NOTIFY_MEMBERS" or "CREATE_COMMUNITY_POST" for direct or group chat messages.
-   - When the user asks to delete, unsend, or erase a message in chat (e.g. "delete my last message to Tanvi", "delete message saying hello in dev team", "unsend message"), you MUST use "DELETE_CHAT_MESSAGE". Match recipient or team from context.
    - When the user asks to pin a message in chat (e.g. "pin message saying meeting starts now", "pin my last message to Tanvi", "pin message in dev team"), you MUST use "PIN_CHAT_MESSAGE".
    - When the user asks to unpin a message in chat (e.g. "unpin message in team dev", "unpin last message to Tanvi"), you MUST use "UNPIN_CHAT_MESSAGE".
    - When the user asks to cancel, end, or abort a meeting or call (e.g. "cancel meeting team sync", "cancel meeting code abc-def-ghi", "cancel call"), you MUST use "CANCEL_MEETING".
@@ -889,7 +912,6 @@ CRITICAL SECURITY & PRIVACY RULES:
    - Use "SCHEDULE_MEETING" ONLY when the user explicitly provides a FUTURE date or time to schedule a meeting for (e.g. "schedule a meeting tomorrow at 3pm", "schedule team sync for Friday 10am", "schedule meeting at 7pm"). NEVER use "SCHEDULE_MEETING" when the user asks to "create a meet", "create a meeting", or "start a meeting" without a future scheduled time.
    - When the user asks to change, update, or set their status or presence (e.g. "change my status to DND", "set status to available", "set status to busy saying coding", "change status to away", "set status to be right back for 30 minutes"), you MUST use "SET_USER_STATUS". Map "DND" to "DO_NOT_DISTURB", "online" to "AVAILABLE", "brb" to "BE_RIGHT_BACK".
    - When the user asks to add an event, reminder, or calendar item (e.g. "remind me to submit timesheet on Friday 5pm", "add calendar event sprint review on Monday"), you MUST use "CREATE_CALENDAR_EVENT".
-   - When the user asks to delete, cancel, or remove an event, reminder, or calendar item (e.g. "cancel calendar event sprint review", "delete reminder timesheet", "remove event sprint planning"), you MUST use "DELETE_CALENDAR_EVENT".
    - If a prompt requests creating an organization AND then creating teams or meetings in it, step 1 must be "CREATE_ORGANIZATION", and subsequent steps should reference "$step1.organizationId".
 
 CRITICAL STEP LIMIT RULE:
@@ -953,17 +975,15 @@ Generate the JSON execution plan:`;
       continue;
     }
 
+    if (isDeleteAction((rawStep as any).action)) {
+      throw new ApiError(400, 'Deleting items is not permitted via one-command execution. Please delete items directly from their respective screens.');
+    }
+
     if ((rawStep as any).action === 'POST_COMMUNITY' || (rawStep as any).action === 'CREATE_POST') {
       (rawStep as any).action = 'CREATE_COMMUNITY_POST';
     }
     if ((rawStep as any).action === 'SEND_MESSAGE' || (rawStep as any).action === 'WRITE_MESSAGE') {
       (rawStep as any).action = 'SEND_CHAT_MESSAGE';
-    }
-    if ((rawStep as any).action === 'DELETE_MESSAGE' || (rawStep as any).action === 'DELETE_CHAT') {
-      (rawStep as any).action = 'DELETE_CHAT_MESSAGE';
-    }
-    if ((rawStep as any).action === 'DELETE_POST' || (rawStep as any).action === 'REMOVE_COMMUNITY_POST') {
-      (rawStep as any).action = 'DELETE_COMMUNITY_POST';
     }
     if (
       (rawStep as any).action === 'START_CALL' ||
@@ -1023,7 +1043,7 @@ Generate the JSON execution plan:`;
     if ((rawStep as any).action === 'COMPLETE_TASK' || (rawStep as any).action === 'MARK_TASK_DONE') {
       (rawStep as any).action = 'UPDATE_TASK_STATUS';
     }
-    if ((rawStep as any).action === 'CANCEL_CALL' || (rawStep as any).action === 'DELETE_MEETING') {
+    if ((rawStep as any).action === 'CANCEL_CALL') {
       (rawStep as any).action = 'CANCEL_MEETING';
     }
     if ((rawStep as any).action === 'PIN_MESSAGE') {
@@ -1032,7 +1052,7 @@ Generate the JSON execution plan:`;
     if ((rawStep as any).action === 'INVITE_PROJECT_MEMBER' || (rawStep as any).action === 'ASSIGN_PROJECT_MEMBER') {
       (rawStep as any).action = 'ADD_PROJECT_MEMBER';
     }
-    if ((rawStep as any).action === 'DELETE_DOCUMENT' || (rawStep as any).action === 'ARCHIVE_DOC') {
+    if ((rawStep as any).action === 'ARCHIVE_DOC') {
       (rawStep as any).action = 'ARCHIVE_DOCUMENT';
     }
     if ((rawStep as any).action === 'UPDATE_USER_STATUS' || (rawStep as any).action === 'CHANGE_STATUS') {
@@ -1052,9 +1072,6 @@ Generate the JSON execution plan:`;
     }
     if ((rawStep as any).action === 'CHANGE_MEMBER_ROLE' || (rawStep as any).action === 'SET_MEMBER_ROLE') {
       (rawStep as any).action = 'UPDATE_MEMBER_ROLE';
-    }
-    if ((rawStep as any).action === 'CANCEL_EVENT' || (rawStep as any).action === 'REMOVE_EVENT' || (rawStep as any).action === 'DELETE_EVENT') {
-      (rawStep as any).action = 'DELETE_CALENDAR_EVENT';
     }
 
     if ((rawStep as any).action === 'SET_USER_STATUS' && (rawStep as any).params) {
@@ -1078,6 +1095,9 @@ Generate the JSON execution plan:`;
     });
 
     if (parseResult.success) {
+      if (isDeleteAction(parseResult.data.action)) {
+        throw new ApiError(400, 'Deleting items is not permitted via one-command execution. Please delete items directly from their respective screens.');
+      }
       const newStepNumber = sanitizedSteps.length + 1;
       stepNumberMap.set(originalStep, newStepNumber);
       const stepData = {
@@ -1200,10 +1220,16 @@ Generate the JSON execution plan:`;
   }
 
   if (sanitizedSteps.length === 0) {
+    if (isExplicitDeleteRequest(rawPrompt)) {
+      throw new ApiError(400, 'Deleting items is not permitted via one-command execution. Please delete items directly from their respective screens.');
+    }
     throw new ApiError(400, 'No supported or valid workflow actions found in the prompt');
   }
 
   for (const step of sanitizedSteps) {
+    if (isDeleteAction(step.action)) {
+      throw new ApiError(400, `Deleting items is not permitted via one-command execution (Step ${step.step}). Please delete items directly from their respective screens.`);
+    }
     if (step.action === 'INVITE_ORG_MEMBER') {
       const targetOrg = step.params.organizationId || orgContext?.organizationId;
       if (targetOrg && !targetOrg.startsWith('$')) {
@@ -1299,6 +1325,12 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
 
   if (plan.userId !== userId) {
     throw new ApiError(403, 'Not authorized to execute this workflow plan');
+  }
+
+  for (const step of plan.steps) {
+    if (isDeleteAction(step.action)) {
+      throw new ApiError(400, `Deleting items is not permitted via one-command execution (Step ${step.step}: ${step.action}). Please delete items directly from their respective screens.`);
+    }
   }
 
   const hasDestructive = plan.steps.some((s) => DESTRUCTIVE_ACTIONS.has(s.action));
@@ -3417,200 +3449,9 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             },
           });
         } else if (step.action === 'DELETE_CHAT_MESSAGE') {
-          let messageId = resolvedParams.messageId ? String(resolvedParams.messageId).trim() : undefined;
-          let targetConvId: string | undefined = resolvedParams.conversationId
-            ? String(resolvedParams.conversationId).trim()
-            : undefined;
-
-          if (!targetConvId || targetConvId.startsWith('$')) {
-            if (resolvedParams.teamId) {
-              const teamConv = await prisma.conversation.findFirst({
-                where: { teamId: String(resolvedParams.teamId).trim() },
-                select: { id: true },
-              });
-              if (teamConv) {
-                targetConvId = teamConv.id;
-              }
-            }
-            if (!targetConvId && resolvedParams.recipientUserId) {
-              const targetUserId = String(resolvedParams.recipientUserId).trim();
-              if (targetUserId !== userId) {
-                const directConv = await getOrCreateDirectConversation(userId, targetUserId);
-                if (directConv) {
-                  targetConvId = directConv.id;
-                }
-              }
-            }
-            if (!targetConvId && resolvedParams.recipientName) {
-              const queryName = String(resolvedParams.recipientName).trim();
-              const matchedUser = await prisma.user.findFirst({
-                where: { name: { contains: queryName, mode: 'insensitive' } },
-                select: { id: true },
-              });
-              if (matchedUser && matchedUser.id !== userId) {
-                const directConv = await getOrCreateDirectConversation(userId, matchedUser.id);
-                if (directConv) {
-                  targetConvId = directConv.id;
-                }
-              }
-            }
-            if (!targetConvId && resolvedParams.groupName) {
-              const queryGroup = String(resolvedParams.groupName).trim();
-              const matchingConv = await prisma.conversation.findFirst({
-                where: {
-                  participants: { some: { userId } },
-                  name: { contains: queryGroup, mode: 'insensitive' },
-                },
-                select: { id: true },
-              });
-              if (matchingConv) {
-                targetConvId = matchingConv.id;
-              }
-            }
-          }
-
-          if (!messageId) {
-            if (!targetConvId) {
-              const lastUserMessage = await prisma.message.findFirst({
-                where: {
-                  senderId: userId,
-                  isDeleted: false,
-                },
-                orderBy: { createdAt: 'desc' },
-                select: { id: true, conversationId: true },
-              });
-              if (lastUserMessage) {
-                messageId = lastUserMessage.id;
-                targetConvId = lastUserMessage.conversationId;
-              }
-            } else {
-              const contentQuery = resolvedParams.contentQuery ? String(resolvedParams.contentQuery).trim() : undefined;
-              const targetMessage = await prisma.message.findFirst({
-                where: {
-                  conversationId: targetConvId,
-                  senderId: userId,
-                  isDeleted: false,
-                  ...(contentQuery ? { content: { contains: contentQuery, mode: 'insensitive' } } : {}),
-                },
-                orderBy: { createdAt: 'desc' },
-                select: { id: true },
-              });
-              if (targetMessage) {
-                messageId = targetMessage.id;
-              }
-            }
-          }
-
-          if (!messageId || !targetConvId) {
-            throw new ApiError(404, 'Could not find a matching message to delete');
-          }
-
-          const msg = await prisma.message.findUnique({
-            where: { id: messageId },
-            select: { senderId: true, conversationId: true },
-          });
-
-          if (!msg) {
-            throw new ApiError(404, 'Message not found');
-          }
-
-          if (msg.senderId !== userId) {
-            throw new ApiError(403, 'You do not have permission to delete another person\'s chat message');
-          }
-
-          const deleteForEveryone = resolvedParams.deleteForEveryone !== false;
-          const deleteResult = await deleteMessage(userId, targetConvId, messageId, deleteForEveryone);
-
-          variables.set(`$step${step.step}.deletedMessageId`, messageId);
-          variables.set(`$step${step.step}.id`, messageId);
-
-          results.push({
-            step: step.step,
-            action: step.action,
-            description: step.description,
-            success: true,
-            resource: {
-              messageId,
-              conversationId: targetConvId,
-              deleteForEveryone,
-              result: deleteResult,
-            },
-          });
+          throw new ApiError(400, 'Deleting chat messages is not permitted via one-command execution. Please delete messages directly from the chat screen.');
         } else if (step.action === 'DELETE_COMMUNITY_POST') {
-          let postId = resolvedParams.postId ? String(resolvedParams.postId).trim() : undefined;
-
-          if (!postId || postId.startsWith('$')) {
-            let targetCommunityId = resolvedParams.communityId ? String(resolvedParams.communityId).trim() : undefined;
-            if ((!targetCommunityId || targetCommunityId.startsWith('$')) && resolvedParams.communityName) {
-              const queryName = String(resolvedParams.communityName).trim();
-              const comm = await prisma.community.findFirst({
-                where: { name: { contains: queryName, mode: 'insensitive' } },
-                select: { id: true },
-              });
-              if (comm) {
-                targetCommunityId = comm.id;
-              }
-            }
-
-            const contentQuery = resolvedParams.contentQuery ? String(resolvedParams.contentQuery).trim() : undefined;
-            const targetPost = await prisma.communityPost.findFirst({
-              where: {
-                authorId: userId,
-                ...(targetCommunityId ? { communityId: targetCommunityId } : {}),
-                ...(contentQuery ? { content: { contains: contentQuery, mode: 'insensitive' } } : {}),
-              },
-              orderBy: { createdAt: 'desc' },
-              select: { id: true, communityId: true },
-            });
-
-            if (targetPost) {
-              postId = targetPost.id;
-            }
-          }
-
-          if (!postId) {
-            throw new ApiError(404, `Could not find a post to delete in ${resolvedParams.communityName || 'the community'}`);
-          }
-
-          const post = await prisma.communityPost.findUnique({
-            where: { id: postId },
-            select: { authorId: true, communityId: true },
-          });
-
-          if (!post) {
-            throw new ApiError(404, 'Community post not found');
-          }
-
-          if (post.authorId !== userId) {
-            const callerMembership = await prisma.communityMember.findUnique({
-              where: {
-                communityId_userId: {
-                  communityId: post.communityId,
-                  userId,
-                },
-              },
-              select: { role: true },
-            });
-            if (!callerMembership || (callerMembership.role !== 'OWNER' && callerMembership.role !== 'ADMIN')) {
-              throw new ApiError(403, 'You do not have permission to delete another person\'s community post');
-            }
-          }
-
-          const deleteResult = await deleteCommunityPost(userId, postId);
-
-          variables.set(`$step${step.step}.deletedPostId`, postId);
-          variables.set(`$step${step.step}.id`, postId);
-
-          results.push({
-            step: step.step,
-            action: step.action,
-            description: step.description,
-            success: true,
-            resource: {
-              postId,
-              result: deleteResult,
-            },
-          });
+          throw new ApiError(400, 'Deleting community posts is not permitted via one-command execution. Please delete posts directly from the community screen.');
         } else if (
           step.action === 'CREATE_MEETING' ||
           step.action === 'START_VIDEO_CALL' ||
@@ -5046,53 +4887,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             });
           }
         } else if (step.action === 'DELETE_CALENDAR_EVENT' || step.action === 'CANCEL_EVENT' || step.action === 'REMOVE_EVENT' || step.action === 'DELETE_EVENT') {
-          let eventId = resolvedParams.eventId || resolvedParams.id ? String(resolvedParams.eventId || resolvedParams.id).trim() : undefined;
-          if (!eventId && resolvedParams.title) {
-            const titleQuery = String(resolvedParams.title).trim();
-            const matchedEvent = await prisma.calendarEvent.findFirst({
-              where: {
-                userId,
-                title: { contains: titleQuery, mode: 'insensitive' },
-              },
-              orderBy: { startDate: 'desc' },
-            });
-            if (matchedEvent) {
-              eventId = matchedEvent.id;
-            }
-          }
-
-          if (!eventId) {
-            const nearestEvent = await prisma.calendarEvent.findFirst({
-              where: {
-                userId,
-                startDate: { gte: new Date() },
-              },
-              orderBy: { startDate: 'asc' },
-            });
-            if (nearestEvent) {
-              eventId = nearestEvent.id;
-            }
-          }
-
-          if (!eventId) {
-            throw new ApiError(404, 'Calendar event to delete not found');
-          }
-
-          await deleteCalendarEvent(userId, eventId);
-
-          variables.set(`$step${step.step}.eventId`, eventId);
-          variables.set(`$step${step.step}.deletedEventId`, eventId);
-
-          results.push({
-            step: step.step,
-            action: 'DELETE_CALENDAR_EVENT',
-            description: step.description,
-            success: true,
-            resource: {
-              eventId,
-              deleted: true,
-            },
-          });
+          throw new ApiError(400, 'Deleting calendar events is not permitted via one-command execution. Please delete events directly from the calendar screen.');
         }
       })(), 15000, step.step);
     } catch (err: any) {

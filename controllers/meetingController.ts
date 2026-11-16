@@ -104,7 +104,7 @@ export const endMeetingController = asyncHandler(
       return next(new ApiError(400, 'Meeting code is required'));
     }
 
-    const result = await endMeeting(code, req.user.id);
+    const result = await endMeeting(code, req.user.id, req.body);
 
     return res.status(200).json({
       success: true,

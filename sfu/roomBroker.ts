@@ -58,7 +58,7 @@ export class RoomBroker extends EventEmitter {
     return room;
   }
 
-  public addPeer(roomCode: string, peerId: string, socketId: string, name?: string): Peer {
+  public addPeer(roomCode: string, peerId: string, socketId: string, name?: string, avatar?: string | null): Peer {
     const room = this.getOrCreateRoom(roomCode);
     let peer = room.peers.get(peerId);
 
@@ -66,6 +66,8 @@ export class RoomBroker extends EventEmitter {
       peer = {
         id: peerId,
         name: name || '',
+        avatar: avatar || null,
+        profilePicture: avatar || null,
         socketId,
         publishedTracks: new Map(),
       };
@@ -73,8 +75,26 @@ export class RoomBroker extends EventEmitter {
       logger.info(`[SFU Broker] Peer ${peerId} joined SFU room ${roomCode}`);
     } else {
       peer.socketId = socketId;
+      if (avatar) {
+        peer.avatar = avatar;
+        peer.profilePicture = avatar;
+      }
+      if (name) {
+        peer.name = name;
+      }
     }
     return peer;
+  }
+
+  public getRoomPeers(roomCode: string): Array<{ peerId: string; name: string; avatar: string | null; profilePicture: string | null }> {
+    const room = this.rooms.get(roomCode);
+    if (!room) return [];
+    return Array.from(room.peers.values()).map((p) => ({
+      peerId: p.id,
+      name: p.name,
+      avatar: p.avatar || null,
+      profilePicture: p.profilePicture || p.avatar || null,
+    }));
   }
 
   public acquireScreenShareLock(roomCode: string, peerId: string): boolean {

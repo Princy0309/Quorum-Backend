@@ -437,7 +437,7 @@ export const createInviteController = asyncHandler(
 
 export const getInvitePreviewController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
-    const rawToken = req.params.token;
+    const rawToken = req.params.token || req.query?.token;
     const token = typeof rawToken === 'string' ? rawToken.trim() : undefined;
 
     if (!token) {
@@ -459,7 +459,7 @@ export const acceptInviteController = asyncHandler(
       return next(new ApiError(401, 'Unauthorized, login required'));
     }
 
-    const rawToken = req.params.token;
+    const rawToken = req.params.token || req.body?.token || req.query?.token;
     const token = typeof rawToken === 'string' ? rawToken.trim() : undefined;
 
     if (!token) {

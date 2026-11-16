@@ -53,6 +53,9 @@ import {
   sendTeamMessageController,
   deleteTeamMessageController,
   pinTeamMessageController,
+  getTeamProfilePictureController,
+  updateTeamProfilePictureController,
+  deleteTeamProfilePictureController,
 } from '../controllers/teamController.js';
 import { uploadMiddleware } from '../controllers/uploadController.js';
 
@@ -99,7 +102,15 @@ import {
 const router = Router();
 
 router.get('/join/:token', getInvitePreviewController);
+router.get('/invites/:token', getInvitePreviewController);
+router.get('/invites/preview/:token', getInvitePreviewController);
+router.get('/invitations/:token', getInvitePreviewController);
+
 router.post('/join/:token', authMiddleware, acceptInviteController);
+router.post('/join', authMiddleware, acceptInviteController);
+router.post('/invites/accept', authMiddleware, acceptInviteController);
+router.post('/invites/:token/accept', authMiddleware, acceptInviteController);
+router.post('/invitations/:token/accept', authMiddleware, acceptInviteController);
 
 
 router.post('/', authMiddleware, validate(createOrganizationSchema), createOrganizationController);
@@ -272,6 +283,77 @@ router.delete(
   authMiddleware,
   requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
   deleteTeamController
+);
+
+router.get(
+  '/:id/teams/:teamId/profile-picture',
+  authMiddleware,
+  requireOrgMember(),
+  getTeamProfilePictureController
+);
+router.post(
+  '/:id/teams/:teamId/profile-picture',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  uploadMiddleware,
+  updateTeamProfilePictureController
+);
+router.put(
+  '/:id/teams/:teamId/profile-picture',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  uploadMiddleware,
+  updateTeamProfilePictureController
+);
+router.delete(
+  '/:id/teams/:teamId/profile-picture',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  deleteTeamProfilePictureController
+);
+
+router.get('/:id/teams/:teamId/avatar', authMiddleware, requireOrgMember(), getTeamProfilePictureController);
+router.post(
+  '/:id/teams/:teamId/avatar',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  uploadMiddleware,
+  updateTeamProfilePictureController
+);
+router.put(
+  '/:id/teams/:teamId/avatar',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  uploadMiddleware,
+  updateTeamProfilePictureController
+);
+router.delete(
+  '/:id/teams/:teamId/avatar',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  deleteTeamProfilePictureController
+);
+
+router.get('/:id/teams/:teamId/logo', authMiddleware, requireOrgMember(), getTeamProfilePictureController);
+router.post(
+  '/:id/teams/:teamId/logo',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  uploadMiddleware,
+  updateTeamProfilePictureController
+);
+router.put(
+  '/:id/teams/:teamId/logo',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  uploadMiddleware,
+  updateTeamProfilePictureController
+);
+router.delete(
+  '/:id/teams/:teamId/logo',
+  authMiddleware,
+  requireOrgMember([OrgRole.ORG_ADMIN, OrgRole.TEAM_HEAD]),
+  deleteTeamProfilePictureController
 );
 
 router.post(
