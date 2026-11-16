@@ -47,6 +47,7 @@ Quorum is an enterprise-grade real-time collaboration and virtual workspace plat
 8. [WebRTC / SFU Video Architecture](#webrtc--sfu-video-architecture)
 9. [Background Queues & Workers](#background-queues--workers)
 10. [Testing & Production Deployment](#testing--production-deployment)
+11. [Authors & Contributors](#authors--contributors)
 
 ---
 
@@ -634,9 +635,15 @@ Ensure your cloud security groups allow:
 
 ---
 
+## Authors & Contributors
+
+- **Princy Mishra** ([@Princy0309](https://github.com/Princy0309))
+- **Tushar Talan** ([@tusharTalan1](https://github.com/tusharTalan1))
+
+---
+
 ## Contributing & License
 
 Contributions, bug reports, and pull requests are welcome!
 
-Author: **Princy Mishra** ([@Princy0309](https://github.com/Princy0309))  
 License: ISC

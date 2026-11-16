@@ -16,16 +16,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tusharTalan1/Quorum-Backend.git"
+    "url": "git+https://github.com/Princy0309/Quorum-Backend.git"
   },
   "keywords": [],
-  "author": "",
+  "author": "Princy Mishra, Tushar Talan",
   "license": "ISC",
   "type": "module",
   "bugs": {
-    "url": "https://github.com/tusharTalan1/Quorum-Backend/issues"
+    "url": "https://github.com/Princy0309/Quorum-Backend/issues"
   },
-  "homepage": "https://github.com/tusharTalan1/Quorum-Backend#readme",
+  "homepage": "https://github.com/Princy0309/Quorum-Backend#readme",
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.10",
