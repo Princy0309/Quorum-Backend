@@ -6,6 +6,13 @@ export const startRecordingSchema = z.object({
 
 export const stopRecordingSchema = z.object({
   meetingCode: z.string().trim().min(1, 'Meeting code is required'),
+  fileUrl: z.string().url().optional(),
+  thumbnailUrl: z.string().url().optional(),
+  transcriptUrl: z.string().url().optional(),
+  summary: z.string().optional(),
+  durationSeconds: z.number().int().nonnegative().optional(),
+  fileSizeBytes: z.number().int().nonnegative().optional(),
+  teamId: z.string().uuid().optional(),
 });
 
 export const getRecordingsQuerySchema = z.object({
@@ -28,6 +35,7 @@ export const completeRecordingSchema = z.object({
   summary: z.string().optional(),
   durationSeconds: z.number().int().nonnegative().optional(),
   fileSizeBytes: z.number().int().nonnegative().optional(),
+  teamId: z.string().uuid().optional(),
 });
 
 export type StartRecordingInput = z.infer<typeof startRecordingSchema>;

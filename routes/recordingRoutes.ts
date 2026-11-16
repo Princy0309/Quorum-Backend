@@ -7,6 +7,7 @@ import {
   completeRecordingController,
   deleteRecordingController,
   summarizeRecordingController,
+  shareRecordingToTeamChatController,
 } from '../controllers/recordingController.js';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
 
@@ -21,6 +22,8 @@ router.get('/:id', getRecordingByIdController);
 router.put('/:id', completeRecordingController);
 router.post('/:id/complete', completeRecordingController);
 router.post('/:id/summarize', summarizeRecordingController);
+router.post('/:id/share-team', shareRecordingToTeamChatController);
+router.post('/:id/share-to-team', shareRecordingToTeamChatController);
 router.delete('/:id', deleteRecordingController);
 
 export default router;

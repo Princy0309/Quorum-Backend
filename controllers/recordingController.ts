@@ -9,6 +9,7 @@ import {
   getRecordingById,
   deleteRecording,
   summarizeMeetingRecording,
+  postRecordingToTeamChat,
 } from '../services/recordingService.js';
 import {
   completeRecordingSchema,
@@ -43,7 +44,7 @@ export const stopMeetingRecordingController = async (req: Request, res: Response
     const meetingCode = Array.isArray(req.params.code) ? req.params.code[0] : (req.params.code || req.body?.meetingCode);
     if (!meetingCode) throw new ApiError(400, 'Meeting code is required');
 
-    const recording = await stopMeetingRecording(userId, meetingCode);
+    const recording = await stopMeetingRecording(userId, meetingCode, req.body);
     res.status(200).json({
       success: true,
       message: 'Recording stopped successfully',
@@ -164,6 +165,29 @@ export const summarizeRecordingController = async (req: Request, res: Response, 
       success: true,
       message: 'Meeting summary generated successfully',
       data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const shareRecordingToTeamChatController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) throw new ApiError(401, 'Unauthorized');
+
+    const recordingId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!recordingId) throw new ApiError(400, 'Recording ID is required');
+
+    const message = await postRecordingToTeamChat(recordingId);
+    if (!message) {
+      throw new ApiError(400, 'Meeting is not associated with a team or recording not found');
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Recording shared to team chat successfully',
+      data: message,
     });
   } catch (err) {
     next(err);

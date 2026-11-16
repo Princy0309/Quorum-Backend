@@ -15,7 +15,9 @@ import {
 import redis from '../config/redis.js';
 import logger from '../utils/logger.js';
 import { generateRawCompletion } from './aiService.js';
-import { CompleteRecordingInput, SummarizeRecordingInput } from '../validators/recordingValidators.js';
+import { CompleteRecordingInput, SummarizeRecordingInput, StopRecordingInput } from '../validators/recordingValidators.js';
+import { CHAT_EVENTS } from '../utils/constants.js';
+import { sendPushToOfflineUsers } from './notificationService.js';
 
 let schemaInitialized = false;
 
@@ -246,7 +248,11 @@ export const startMeetingRecording = async (userId: string, rawMeetingCode: stri
   return serializeRecording(recording);
 };
 
-export const stopMeetingRecording = async (userId: string, rawMeetingCode: string) => {
+export const stopMeetingRecording = async (
+  userId: string,
+  rawMeetingCode: string,
+  extraData?: Partial<StopRecordingInput>
+) => {
   await ensureRecordingSchema();
   const meetingCode = normalizeMeetingCode(rawMeetingCode);
 
@@ -257,6 +263,14 @@ export const stopMeetingRecording = async (userId: string, rawMeetingCode: strin
 
     if (!meeting) {
       throw new ApiError(404, 'Meeting not found');
+    }
+
+    if (extraData?.teamId && !meeting.teamId) {
+      await tx.meeting.update({
+        where: { id: meeting.id },
+        data: { teamId: extraData.teamId, scopeType: MeetingScopeType.TEAM },
+      });
+      meeting.teamId = extraData.teamId;
     }
 
     const activeRecording = await tx.meetingRecording.findFirst({
@@ -291,16 +305,25 @@ export const stopMeetingRecording = async (userId: string, rawMeetingCode: strin
     }
 
     const now = new Date();
-    const duration = Math.max(1, Math.floor((now.getTime() - lockedRecording.startedAt.getTime()) / 1000));
+    const duration = extraData?.durationSeconds !== undefined
+      ? extraData.durationSeconds
+      : Math.max(1, Math.floor((now.getTime() - lockedRecording.startedAt.getTime()) / 1000));
     const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const hasFileUrl = typeof extraData?.fileUrl === 'string' && extraData.fileUrl.trim().length > 0;
+    const finalFileSize = extraData?.fileSizeBytes !== undefined ? BigInt(extraData.fileSizeBytes) : undefined;
 
     const updated = await tx.meetingRecording.update({
       where: { id: lockedRecording.id },
       data: {
-        status: RecordingStatus.PROCESSING,
+        status: hasFileUrl ? RecordingStatus.COMPLETED : RecordingStatus.PROCESSING,
         endedAt: now,
         durationSeconds: duration,
         expiresAt,
+        ...(hasFileUrl ? { fileUrl: extraData!.fileUrl } : {}),
+        ...(extraData?.thumbnailUrl ? { thumbnailUrl: extraData.thumbnailUrl } : {}),
+        ...(extraData?.transcriptUrl ? { transcriptUrl: extraData.transcriptUrl } : {}),
+        ...(extraData?.summary ? { summary: extraData.summary } : {}),
+        ...(finalFileSize !== undefined ? { fileSizeBytes: finalFileSize } : {}),
       },
       include: {
         recordedBy: { select: { id: true, name: true, avatar: true } }
@@ -326,7 +349,7 @@ export const stopMeetingRecording = async (userId: string, rawMeetingCode: strin
   try {
     getIO().to(meetingCode).emit('meeting:recording-status', {
       isRecording: false,
-      status: RecordingStatus.PROCESSING,
+      status: updatedRecording.status,
       recordingId: updatedRecording.id,
       meetingCode,
       durationSeconds: duration,
@@ -338,6 +361,12 @@ export const stopMeetingRecording = async (userId: string, rawMeetingCode: strin
     });
   } catch (emitErr) {
     logger.warn('Socket broadcast for recording-status stop failed:', emitErr);
+  }
+
+  try {
+    await postRecordingToTeamChat(updatedRecording.id);
+  } catch (chatErr) {
+    logger.warn('Failed to post recording to team chat on stop:', chatErr);
   }
 
   return serializeRecording(updatedRecording);
@@ -412,6 +441,13 @@ export const completeMeetingRecording = async (
   const completedAt = new Date();
   const expiresAt = new Date(completedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
 
+  if (data.teamId && recording.meeting && !recording.meeting.teamId) {
+    await prisma.meeting.update({
+      where: { id: recording.meeting.id },
+      data: { teamId: data.teamId, scopeType: MeetingScopeType.TEAM },
+    });
+  }
+
   const updated = await prisma.meetingRecording.update({
     where: { id: recordingId },
     data: {
@@ -428,6 +464,12 @@ export const completeMeetingRecording = async (
       recordedBy: { select: { id: true, name: true, avatar: true } }
     }
   });
+
+  try {
+    await postRecordingToTeamChat(updated.id);
+  } catch (chatErr) {
+    logger.warn('Failed to post recording to team chat on complete:', chatErr);
+  }
 
   return serializeRecording(updated);
 };
@@ -620,6 +662,12 @@ export const summarizeMeetingRecording = async (
     }
   });
 
+  try {
+    await postRecordingToTeamChat(updated.id);
+  } catch (chatErr) {
+    logger.warn('Failed to post recording to team chat on summarize:', chatErr);
+  }
+
   return {
     recordingId: updated.id,
     meetingCode: updated.meetingCode,
@@ -674,6 +722,10 @@ export const deleteRecording = async (userId: string, recordingId: string) => {
     where: { id: recordingId },
   });
 
+  await prisma.message.deleteMany({
+    where: { clientMessageId: `recording_${recordingId}` },
+  }).catch(() => {});
+
   return { success: true, message: 'Recording deleted successfully' };
 };
 
@@ -715,6 +767,12 @@ export const stopActiveRecordingForMeeting = async (rawMeetingCode: string) => {
     });
   } catch (err) {
     logger.warn('Socket emit on meeting shutdown failed:', err);
+  }
+
+  try {
+    await postRecordingToTeamChat(updated.id);
+  } catch (chatErr) {
+    logger.warn('Failed to post recording to team chat on active stop:', chatErr);
   }
 
   return serializeRecording(updated);
@@ -801,4 +859,275 @@ export const startRecordingCleanupTask = () => {
   runCleanup();
   const interval = setInterval(runCleanup, 6 * 60 * 60 * 1000);
   return () => clearInterval(interval);
+};
+
+export const postRecordingToTeamChat = async (recordingId: string) => {
+  await ensureRecordingSchema();
+
+  const recording = await prisma.meetingRecording.findUnique({
+    where: { id: recordingId },
+    include: {
+      recordedBy: { select: { id: true, name: true, avatar: true, email: true } },
+    },
+  });
+
+  if (!recording) return null;
+
+  const meeting = await prisma.meeting.findFirst({
+    where: {
+      OR: [
+        { id: recording.meetingId || undefined },
+        { code: recording.meetingCode },
+      ],
+    },
+    include: {
+      team: { select: { id: true, name: true, organizationId: true } },
+      host: { select: { id: true, name: true, avatar: true, email: true } },
+    },
+  });
+
+  const teamId = meeting?.teamId;
+  if (!teamId) return null;
+
+  const senderId = recording.recordedById || meeting?.hostId;
+  if (!senderId) return null;
+
+  let conversation = await prisma.conversation.findUnique({
+    where: { teamId },
+  });
+
+  if (!conversation) {
+    conversation = await prisma.conversation.create({
+      data: {
+        type: 'team',
+        teamId,
+        name: meeting.team?.name || 'Team Chat',
+        ownerId: meeting.hostId || senderId,
+      },
+    });
+  }
+
+  const teamMembers = await prisma.teamMember.findMany({
+    where: { teamId },
+    select: { userId: true, role: true },
+  });
+
+  for (const tm of teamMembers) {
+    await prisma.conversationParticipant.upsert({
+      where: {
+        conversationId_userId: {
+          conversationId: conversation.id,
+          userId: tm.userId,
+        },
+      },
+      update: {},
+      create: {
+        conversationId: conversation.id,
+        userId: tm.userId,
+        role: tm.role === 'LEAD' ? 'admin' : 'member',
+      },
+    });
+  }
+
+  await prisma.conversationParticipant.upsert({
+    where: {
+      conversationId_userId: {
+        conversationId: conversation.id,
+        userId: senderId,
+      },
+    },
+    update: {},
+    create: {
+      conversationId: conversation.id,
+      userId: senderId,
+      role: 'member',
+    },
+  });
+
+  const meetingTitle = meeting.title?.trim() || `Meeting ${meeting.code}`;
+  const durationSec = recording.durationSeconds || 0;
+  const mins = Math.floor(durationSec / 60);
+  const secs = durationSec % 60;
+  const durationText = durationSec > 0 ? (mins > 0 ? `${mins}m ${secs}s` : `${secs}s`) : '';
+
+  let contentText = durationText
+    ? `🎥 Meeting Recording: ${meetingTitle} (${durationText})`
+    : `🎥 Meeting Recording: ${meetingTitle}`;
+
+  if (!recording.fileUrl && recording.status === RecordingStatus.PROCESSING) {
+    contentText += `\nStatus: Processing recording...`;
+  }
+
+  if (recording.summary) {
+    contentText += `\n\nSummary:\n${recording.summary}`;
+  }
+
+  const clientMessageId = `recording_${recording.id}`;
+  const sanitizedTitle = meetingTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const fileName = `${sanitizedTitle}_recording.mp4`;
+  const fileSizeNum = recording.fileSizeBytes
+    ? Math.min(Number(recording.fileSizeBytes), 2147483647)
+    : null;
+
+  const existingMessage = await prisma.message.findUnique({
+    where: {
+      conversationId_senderId_clientMessageId: {
+        conversationId: conversation.id,
+        senderId,
+        clientMessageId,
+      },
+    },
+    include: {
+      sender: {
+        select: { id: true, name: true, email: true, avatar: true },
+      },
+    },
+  });
+
+  let message: any;
+  const participantRooms = teamMembers.map((m) => `user:${m.userId}`);
+
+  if (existingMessage) {
+    message = await prisma.message.update({
+      where: { id: existingMessage.id },
+      data: {
+        content: contentText,
+        fileUrl: recording.fileUrl || existingMessage.fileUrl,
+        fileType: 'video',
+        fileName: fileName || existingMessage.fileName,
+        fileSize: fileSizeNum || existingMessage.fileSize,
+        updatedAt: new Date(),
+      },
+      include: {
+        sender: {
+          select: { id: true, name: true, email: true, avatar: true },
+        },
+      },
+    });
+
+    const formattedMessage = {
+      ...message,
+      reactions: [],
+      poll: null,
+      mentionedUsers: [],
+    };
+
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(`conversation:${conversation.id}`)
+          .to(conversation.id)
+          .to(participantRooms)
+          .emit('chat:message:update', formattedMessage);
+        io.to(`conversation:${conversation.id}`)
+          .to(conversation.id)
+          .to(participantRooms)
+          .emit(CHAT_EVENTS.MESSAGE_UPDATED, formattedMessage);
+      }
+    } catch (socketErr) {
+      logger.warn('Failed to emit recording message update to socket', socketErr);
+    }
+  } else {
+    message = await prisma.$transaction(async (tx) => {
+      const lastMessage = await tx.message.findFirst({
+        where: { conversationId: conversation.id },
+        orderBy: { seq: 'desc' },
+        select: { seq: true },
+      });
+
+      const currentMaxSeq = Math.max(conversation.lastSeq || 0, lastMessage?.seq || 0);
+      const nextSeq = currentMaxSeq + 1;
+
+      const created = await tx.message.create({
+        data: {
+          conversationId: conversation.id,
+          senderId,
+          content: contentText,
+          fileUrl: recording.fileUrl || null,
+          fileType: 'video',
+          fileName,
+          fileSize: fileSizeNum,
+          clientMessageId,
+          seq: nextSeq,
+        },
+        include: {
+          sender: {
+            select: { id: true, name: true, email: true, avatar: true },
+          },
+        },
+      });
+
+      await tx.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          lastSeq: nextSeq,
+          updatedAt: new Date(),
+        },
+      });
+
+      return created;
+    });
+
+    const formattedMessage = {
+      ...message,
+      reactions: [],
+      poll: null,
+      mentionedUsers: [],
+    };
+
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(`conversation:${conversation.id}`)
+          .to(conversation.id)
+          .to(participantRooms)
+          .emit('chat:message:new', formattedMessage);
+        io.to(`conversation:${conversation.id}`)
+          .to(conversation.id)
+          .to(participantRooms)
+          .emit(CHAT_EVENTS.MESSAGE_NEW, formattedMessage);
+      }
+    } catch (socketErr) {
+      logger.warn('Failed to emit recording message to socket', socketErr);
+    }
+
+    try {
+      const recipientIds = teamMembers
+        .map((m) => m.userId)
+        .filter((uid) => uid !== senderId);
+
+      if (recipientIds.length > 0) {
+        const teamName = meeting.team?.name || 'Team';
+        const preview = contentText.length > 100 ? `${contentText.slice(0, 97)}...` : contentText;
+
+        sendPushToOfflineUsers(
+          recipientIds,
+          `${teamName} • ${message.sender?.name || 'Meeting Recording'}`,
+          preview,
+          {
+            conversationId: conversation.id,
+            messageId: message.id,
+            teamId,
+            teamName,
+            type: 'CHAT_MESSAGE',
+          },
+          {
+            conversationId: conversation.id,
+            tag: conversation.id,
+            category: 'MESSAGE_REPLY',
+            imageUrl: message.sender?.avatar || undefined,
+            channelId: 'quorum_chat_messages',
+            sound: 'default',
+            forcePush: true,
+          }
+        ).catch((err: any) => {
+          logger.warn('Failed to send team recording message push', err);
+        });
+      }
+    } catch (pushErr) {
+      logger.warn('Failed to dispatch push notification for team recording', pushErr);
+    }
+  }
+
+  return message;
 };
