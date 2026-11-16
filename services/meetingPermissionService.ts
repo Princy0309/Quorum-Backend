@@ -168,6 +168,7 @@ export const canUserJoinMeeting = async (
         organizationId: true,
         teamId: true,
         scheduledStartTime: true,
+        admitted: true,
       },
     });
 
@@ -183,7 +184,10 @@ export const canUserJoinMeeting = async (
       return { allowed: false, reason: 'This meeting has ended', statusCode: 410 };
     }
 
-    if (meeting.hostId === userId) {
+    if (
+      meeting.hostId === userId ||
+      (Array.isArray(meeting.admitted) && meeting.admitted.includes(userId))
+    ) {
       return { allowed: true };
     }
 

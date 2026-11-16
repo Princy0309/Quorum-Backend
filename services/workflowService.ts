@@ -3503,22 +3503,6 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             }
           }
 
-          const durationMinutes = resolvedParams.durationMinutes !== undefined && resolvedParams.durationMinutes !== null
-            ? Number(resolvedParams.durationMinutes)
-            : 60;
-
-          const scopeType = targetTeamId
-            ? MeetingScopeType.TEAM
-            : (targetOrgId ? MeetingScopeType.ORGANIZATION : MeetingScopeType.PERSONAL);
-
-          const meeting = await createScopedMeeting(userId, {
-            title: callTitle,
-            scopeType,
-            organizationId: targetOrgId,
-            teamId: targetTeamId,
-            durationMinutes,
-          });
-
           const rawParticipants: string[] = [];
           if (Array.isArray(resolvedParams.participantUserIds)) rawParticipants.push(...resolvedParams.participantUserIds.map(String));
           if (Array.isArray(resolvedParams.participantNames)) rawParticipants.push(...resolvedParams.participantNames.map(String));
@@ -3567,7 +3551,40 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             });
           }
 
+          const hasExplicitOrg = Boolean(resolvedParams.organizationName);
+          const hasIndividualInvitees = participantUserIds.size > 0 && !targetTeamId;
+          const isPersonalCall = hasIndividualInvitees && !hasExplicitOrg;
+
+          const effectiveOrgId = isPersonalCall ? undefined : targetOrgId;
+          const scopeType = targetTeamId
+            ? MeetingScopeType.TEAM
+            : (hasExplicitOrg ? MeetingScopeType.ORGANIZATION : (isPersonalCall ? MeetingScopeType.PERSONAL : (effectiveOrgId ? MeetingScopeType.ORGANIZATION : MeetingScopeType.PERSONAL)));
+
+          const durationMinutes = resolvedParams.durationMinutes !== undefined && resolvedParams.durationMinutes !== null
+            ? Number(resolvedParams.durationMinutes)
+            : 60;
+
+          const meeting = await createScopedMeeting(userId, {
+            title: callTitle,
+            scopeType,
+            organizationId: effectiveOrgId,
+            teamId: targetTeamId,
+            durationMinutes,
+          });
+
           const recipientList = Array.from(participantUserIds).slice(0, 25);
+          if (recipientList.length > 0) {
+            try {
+              await prisma.meeting.update({
+                where: { id: meeting.id },
+                data: {
+                  admitted: {
+                    push: recipientList,
+                  },
+                },
+              });
+            } catch {}
+          }
           const hostUser = await prisma.user.findUnique({
             where: { id: userId },
             select: { name: true, email: true },
