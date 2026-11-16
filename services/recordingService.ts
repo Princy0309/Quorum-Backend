@@ -887,7 +887,7 @@ export const postRecordingToTeamChat = async (recordingId: string) => {
   });
 
   const teamId = meeting?.teamId;
-  if (!teamId) return null;
+  if (!teamId || meeting?.scopeType !== MeetingScopeType.TEAM) return null;
 
   const senderId = recording.recordedById || meeting?.hostId;
   if (!senderId) return null;
@@ -895,6 +895,8 @@ export const postRecordingToTeamChat = async (recordingId: string) => {
   let conversation = await prisma.conversation.findUnique({
     where: { teamId },
   });
+
+  if (conversation && conversation.type !== 'team') return null;
 
   if (!conversation) {
     conversation = await prisma.conversation.create({
@@ -985,7 +987,6 @@ export const postRecordingToTeamChat = async (recordingId: string) => {
   });
 
   let message: any;
-  const participantRooms = teamMembers.map((m) => `user:${m.userId}`);
 
   if (existingMessage) {
     message = await prisma.message.update({
@@ -1017,12 +1018,17 @@ export const postRecordingToTeamChat = async (recordingId: string) => {
       if (io) {
         io.to(`conversation:${conversation.id}`)
           .to(conversation.id)
-          .to(participantRooms)
           .emit('chat:message:update', formattedMessage);
         io.to(`conversation:${conversation.id}`)
           .to(conversation.id)
-          .to(participantRooms)
           .emit(CHAT_EVENTS.MESSAGE_UPDATED, formattedMessage);
+
+        teamMembers.forEach((tm) => {
+          io.to(`user:${tm.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+            conversationId: conversation.id,
+            lastMessage: formattedMessage,
+          });
+        });
       }
     } catch (socketErr) {
       logger.warn('Failed to emit recording message update to socket', socketErr);
@@ -1080,12 +1086,17 @@ export const postRecordingToTeamChat = async (recordingId: string) => {
       if (io) {
         io.to(`conversation:${conversation.id}`)
           .to(conversation.id)
-          .to(participantRooms)
           .emit('chat:message:new', formattedMessage);
         io.to(`conversation:${conversation.id}`)
           .to(conversation.id)
-          .to(participantRooms)
           .emit(CHAT_EVENTS.MESSAGE_NEW, formattedMessage);
+
+        teamMembers.forEach((tm) => {
+          io.to(`user:${tm.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+            conversationId: conversation.id,
+            lastMessage: formattedMessage,
+          });
+        });
       }
     } catch (socketErr) {
       logger.warn('Failed to emit recording message to socket', socketErr);
