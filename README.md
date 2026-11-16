@@ -10,7 +10,7 @@
 [![WebRTC SFU](https://img.shields.io/badge/WebRTC-SFU%20Engine-orange.svg)](#webrtc--sfu-video-architecture)
 [![Swagger](https://img.shields.io/badge/OpenAPI-3.0-brightgreen.svg)](https://swagger.io/)
 
-Quorum is an enterprise-grade real-time collaboration and workspace platform. It unites team chat, multi-tenant organizations, scoped teams, community forums with channels, collaborative calendars, AI-assisted productivity, and high-capacity WebRTC multi-party video conferencing backed by a custom Selective Forwarding Unit (SFU).
+Quorum is an enterprise-grade real-time collaboration and virtual workspace platform. It unites interactive 2.5D virtual offices, team chat, multi-tenant organizations, scoped teams, community forums with channels, collaborative whiteboards and rich-text documents, cross-organization project collaboration, calendar scheduling, automated AI workflows, and high-capacity WebRTC multi-party video conferencing backed by a custom Selective Forwarding Unit (SFU).
 
 ---
 
@@ -22,22 +22,27 @@ Quorum is an enterprise-grade real-time collaboration and workspace platform. It
 4. [Prerequisites & Getting Started](#prerequisites--getting-started)
 5. [Environment Variables Reference](#environment-variables-reference)
 6. [Complete REST API Catalog](#complete-rest-api-catalog)
-   - [Health & Security](#1-health--security)
-   - [Authentication & Sessions](#2-authentication--sessions)
-   - [OTP & Email Verification](#3-otp--email-verification)
-   - [User Management](#4-user-management)
-   - [Direct & Group Conversations (Chat)](#5-direct--group-conversations-chat)
-   - [Communities, Channels & Invites](#6-communities-channels--invites)
-   - [Community Posts & Comments](#7-community-posts--comments)
-   - [Organizations, Teams & Tasks](#8-organizations-teams--tasks)
-   - [Calendar & Events](#9-calendar--events)
-   - [Meetings & SFU Video Calling](#10-meetings--sfu-video-calling)
-   - [Media & S3 File Storage](#11-media--s3-file-storage)
-   - [Notifications & Device Tokens](#12-notifications--device-tokens)
-   - [AI Workplace Assistant](#13-ai-workplace-assistant)
-   - [Personal Saved Items & Collections](#14-personal-saved-items--collections)
-   - [Collaborative Whiteboards](#15-collaborative-whiteboards)
-   - [Jira Cloud Integration](#16-jira-cloud-integration)
+   - [1. Health & Security](#1-health--security)
+   - [2. Authentication & Sessions](#2-authentication--sessions)
+   - [3. OTP & Email Verification](#3-otp--email-verification)
+   - [4. User Management & Presence Status](#4-user-management--presence-status)
+   - [5. Virtual Office Floor & Desks](#5-virtual-office-floor--desks)
+   - [6. Direct & Group Conversations (Chat & Polls)](#6-direct--group-conversations-chat--polls)
+   - [7. Communities, Channels & Invites](#7-communities-channels--invites)
+   - [8. Community Posts & Comments](#8-community-posts--comments)
+   - [9. Organizations, Teams, Feeds & Tasks](#9-organizations-teams-feeds--tasks)
+   - [10. Calendar & Scheduled Reminders](#10-calendar--scheduled-reminders)
+   - [11. Meetings & SFU Video Calling](#11-meetings--sfu-video-calling)
+   - [12. Collaborative Whiteboards](#12-collaborative-whiteboards)
+   - [13. Collaborative Documents](#13-collaborative-documents)
+   - [14. Projects & Freelancer Collaboration](#14-projects--freelancer-collaboration)
+   - [15. Meeting Recordings Lifecycle](#15-meeting-recordings-lifecycle)
+   - [16. Atlassian Jira Cloud Integration](#16-atlassian-jira-cloud-integration)
+   - [17. GitHub Integration](#17-github-integration)
+   - [18. AI Assistant & Workflows](#18-ai-assistant--workflows)
+   - [19. Notifications & Delivery Preferences](#19-notifications--delivery-preferences)
+   - [20. Media & S3 File Storage](#20-media--s3-file-storage)
+   - [21. Personal Saved Items & Collections](#21-personal-saved-items--collections)
 7. [Real-Time WebSocket Architecture](#real-time-websocket-architecture)
 8. [WebRTC / SFU Video Architecture](#webrtc--sfu-video-architecture)
 9. [Background Queues & Workers](#background-queues--workers)
@@ -47,7 +52,7 @@ Quorum is an enterprise-grade real-time collaboration and workspace platform. It
 
 ## Interactive Swagger API Documentation
 
-Quorum Backend includes a fully interactive OpenAPI 3.0 specification mounted via Swagger UI:
+Quorum Backend includes a fully interactive OpenAPI 3.0 specification covering **221 endpoints and 285+ operations** mounted via Swagger UI:
 
 - **Swagger UI Interactive Console:** `http://localhost:5000/api-docs` (or `/api-docs` on your deployed server)
 - **OpenAPI 3.0 JSON Document:** `http://localhost:5000/api-docs.json` or `/api-docs/swagger.json`
@@ -61,18 +66,21 @@ Quorum Backend includes a fully interactive OpenAPI 3.0 specification mounted vi
 
 ## Key Platform Features
 
-- **Multi-Tenant Organizations & RBAC:** Hierarchical multi-tenancy with Role-Based Access Control (`ORG_ADMIN`, `TEAM_HEAD`, `MEMBER`), scoped teams, member management, tokenized join links, and team task tracking.
-- **Collaborative Whiteboard Canvas:** Real-time multi-user interactive canvas with fine-grained element-level synchronization, distributed Redis mutex locking (`SET NX PX` with Lua heartbeat renewal), optimistic concurrency versioning (`_version`), and debounced database persistence.
-- **Atlassian Jira Cloud Integration:** OAuth 2.0 (3LO) authorization flow, team issue creation, assigned ticket tracking, real-time workflow status transitions, and webhook event ingestion.
-- **Communities & Thematic Channels:** Public and private spaces, customizable discussion channels (`#announcements`, `#dev`), threaded discussions, media attachments, and real-time live feed updates.
-- **Real-Time Direct & Group Messaging:** 1-on-1 direct messaging, multi-user group chats, @user mentions with push notifications, read receipts, typing indicators, and message search.
-- **Auto-Healing WebSocket Sessions:** Transparent handshake authentication that validates active, unrevoked PostgreSQL refresh tokens whenever short-lived 15-minute access tokens expire, keeping live calls, whiteboards, and chats connected without dropouts.
-- **Selective Forwarding Unit (SFU) Video Calling:** Multi-party audio/video conferencing using native RTP packet forwarding with authentic DTLS-SRTP encryption, RTCP PLI keyframe generation, and dynamic UDP port allocation (40000–40100).
-- **Intelligent Workspace AI (Google Gemini):** Grounded workspace assistance, intelligent conversation and meeting transcript summarization, contextual quick replies, and interaction history tracking.
-- **Calendar & Scheduled Reminders:** Collaborative event management (Reminders, Meetings, Deadlines, General) integrated with BullMQ background delayed jobs for automatic email delivery.
+- **Interactive 2.5D Virtual Office:** Spatial virtual office floors with real-time desk occupancy, proximity zones (`OPEN_WORKSPACE`, `FOCUS_POD`, `COFFEE_LOUNGE`, `WAR_ROOM`), desk knocking notifications, and instant one-click War Room meeting launches.
+- **Selective Forwarding Unit (SFU) Video Engine:** Multi-party audio/video conferencing using native RTP forwarding with authentic DTLS-SRTP encryption, RTCP PLI keyframe recovery, and dynamic UDP port routing (40000–40100).
+- **Multi-Tenant Organizations & Scoped Teams:** Enterprise multi-tenancy with RBAC (`ORG_ADMIN`, `TEAM_HEAD`, `MEMBER`), scoped team workspaces, ownership transfer, company-wide announcement feeds with emoji reactions, and team task tracking.
+- **Cross-Organization Projects & Freelancer Sandboxing:** External project collaboration with tokenized invites, custom roles (`PROJECT_LEAD`, `MEMBER`, `FREELANCER`, `VIEWER`), deliverables review workflows, and resource attachments.
+- **Collaborative Whiteboards:** Element-level vector canvas synchronization, distributed Redis mutex locking (`SET NX PX` with Lua heartbeat renewal), optimistic concurrency versioning (`_version`), and debounced database persistence.
+- **Collaborative Rich-Text Documents:** Real-time multi-user document editor with live cursors, in-meeting live canvas integration, and AI copilot rewriting.
+- **Atlassian Jira Cloud Integration:** OAuth 2.0 (3LO) authorization flow, team issue creation, assigned ticket tracking, real-time workflow status transitions, and incoming webhook synchronization.
+- **GitHub Integration:** OAuth 2.0 app connection, team repository linking, issue creation, pull request reviews, commit tracking, and branch synchronization.
+- **Real-Time Direct & Group Messaging:** 1-on-1 direct messaging, group chats, interactive in-chat polls, message forwarding, pinned messages, chat muting/blocking, read receipts, and full-text search.
+- **Real-Time Presence & Status:** Live user presence tracking with automatic idle detection (`AWAY`), custom status messages with duration auto-clearing, and seamless zone routing on the Virtual Office floor.
+- **Autonomous AI Workflows & Workplace Assistant:** Multi-agent pipeline execution (`/plan` and `/execute`), contextual chat transcript summarization, grounded semantic search, and smart quick replies powered by Google Gemini.
+- **Meeting Recordings Lifecycle:** Cloud video recording capture, multi-chunk upload coordination, post-processing status tracking, and 7-day auto-purge storage.
+- **Granular Multi-Channel Notification Preferences:** Per-category notification control (`DIRECT_MESSAGE`, `COMMUNITY_POST_COMMENT`, `MEETING_STARTED`, `EVENT_REMINDER`, `ORG_INVITE`, `TEAM_INVITE`) across In-App, Push (FCM), and Email channels.
+- **Calendar & Scheduled Reminders:** Collaborative event management integrated with BullMQ delayed queues for automated email delivery.
 - **Enterprise Media Uploads:** Direct-to-S3 presigned URLs protected by a dual-tier rate limiting system (burst limiter: 10 req/min, daily quota: 100 uploads/24h).
-- **Multi-Channel Notifications:** In-app real-time notification streaming via WebSockets, email digests, and Firebase Cloud Messaging (FCM) mobile push alerts.
-- **Personal Bookmarks & Collections:** Saved items subsystem allowing users to organize messages, posts, external links, and files into color-coded collections.
 
 ---
 
@@ -84,13 +92,13 @@ Quorum Backend includes a fully interactive OpenAPI 3.0 specification mounted vi
 | **Web Framework** | Express.js 4.x, CORS, Helmet, CSRF protection | REST API routing, security middleware, validation |
 | **Database & ORM** | PostgreSQL 15+, Prisma ORM 5.x | Relational storage with multi-file modular schemas |
 | **In-Memory Cache & Mutex** | Redis 7+ (`ioredis`) | Session revocation, OTP tracking, distributed board mutex, presence, burst rate limits |
-| **Background Queues** | BullMQ 5.x | Asynchronous email dispatch, digests, scheduled calendar reminders |
-| **Real-Time Gateway** | Socket.IO 4.x | Bi-directional WebSocket events for chat, whiteboard, presence, SFU signaling |
+| **Background Queues** | BullMQ 5.x | Asynchronous email dispatch, digests, scheduled calendar reminders, notification worker |
+| **Real-Time Gateway** | Socket.IO 4.x | Bi-directional WebSocket events for chat, whiteboard, office floor, presence, SFU signaling |
 | **Media / SFU Engine** | WebRTC SFU Media Engine | Low-latency multi-party audio/video forwarding (UDP 40000–40100) |
-| **Enterprise Integrations** | Atlassian Jira Cloud (3LO OAuth 2.0) | Cross-platform issue management, status synchronization, and webhooks |
-| **Cloud Storage** | AWS S3 (`@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`) | Presigned secure file uploads and asset storage |
-| **Push Notifications** | Firebase Admin SDK (FCM) | Cross-platform mobile & web push notifications |
-| **Workplace AI** | Google Gemini (`@google/genai`) | Contextual workplace intelligence, conversation summarization |
+| **Enterprise Integrations** | Jira Cloud (3LO OAuth), GitHub (OAuth 2.0) | Cross-platform issue management, repository tracking, and webhooks |
+| **Cloud Storage** | AWS S3 / Cloudflare R2 (`@aws-sdk/client-s3`) | Presigned secure file uploads, media storage, and call recordings |
+| **Push Notifications** | Firebase Admin SDK (FCM) | Cross-platform mobile & web push notifications with preference filtering |
+| **Workplace AI** | Google Gemini (`@google/genai`) | Contextual workplace intelligence, conversation summarization, workflow planning |
 | **API Documentation** | Swagger UI (`swagger-ui-express`, OpenAPI 3.0) | Interactive API exploration and client generation |
 | **Observability** | Winston 3.x | Structured JSON logging with daily file rotation and log levels |
 
@@ -103,14 +111,14 @@ Quorum Backend includes a fully interactive OpenAPI 3.0 specification mounted vi
 - **npm** >= 10.0.0
 - **PostgreSQL** >= 15.0
 - **Redis** >= 7.0
-- **AWS S3 Bucket** (for media uploads)
+- **AWS S3 Bucket** (for media uploads and recordings)
 - **SMTP Server** (Gmail, SendGrid, Amazon SES, or Mailgun)
 
 ### Installation
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/tusharTalan1/Quorum-Backend.git
+   git clone https://github.com/Princy0309/Quorum-Backend.git
    cd Quorum-Backend
    ```
 
@@ -128,7 +136,6 @@ Quorum Backend includes a fully interactive OpenAPI 3.0 specification mounted vi
 4. **Run Prisma Migrations:**
    ```bash
    npm run db:migrate
-   # (Optional) Generate Prisma Client:
    npm run db:generate
    ```
 
@@ -177,7 +184,7 @@ SMTP_USER="your-email@example.com"
 SMTP_PASS="your-email-password"
 EMAIL_FROM="Quorum <noreply@example.com>"
 
-# AWS S3 Storage
+# AWS S3 / Cloudflare R2 Storage
 AWS_REGION="your-aws-region"
 AWS_ACCESS_KEY_ID="your-aws-access-key-id"
 AWS_SECRET_ACCESS_KEY="your-aws-secret-access-key"
@@ -188,6 +195,16 @@ GEMINI_API_KEY="your-gemini-api-key"
 
 # Firebase Cloud Messaging (Push Notifications)
 FIREBASE_SERVICE_ACCOUNT_PATH="./config/firebase-service-account.json"
+
+# Atlassian Jira Integration
+JIRA_CLIENT_ID="your-jira-client-id"
+JIRA_CLIENT_SECRET="your-jira-client-secret"
+JIRA_REDIRECT_URI="http://localhost:5000/api/integrations/jira/oauth/callback"
+
+# GitHub Integration
+GITHUB_CLIENT_ID="your-github-client-id"
+GITHUB_CLIENT_SECRET="your-github-client-secret"
+GITHUB_REDIRECT_URI="http://localhost:5000/api/integrations/github/oauth/callback"
 
 # WebRTC SFU Configuration
 ANNOUNCED_IP="127.0.0.1"
@@ -200,7 +217,7 @@ STUN_SERVER="stun:stun.l.google.com:19302"
 
 ## Complete REST API Catalog
 
-The server exposes standard REST APIs under `/api/*` (with `/api/v1/*` aliases for future-proofing). All state-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`) require the `x-xsrf-token` header retrieved from `/api/csrf-token`.
+The server exposes standard REST APIs under `/api/*` (with `/api/v1/*` aliases). All state-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`) require the `x-xsrf-token` header retrieved from `/api/csrf-token`.
 
 ### 1. Health & Security
 
@@ -229,17 +246,34 @@ The server exposes standard REST APIs under `/api/*` (with `/api/v1/*` aliases f
 | `POST` | `/api/otp/forgot-password` | None | Request password reset OTP sent to registered email. |
 | `POST` | `/api/otp/reset-password` | None | Reset user password using verified OTP token. |
 
-### 4. User Management
+### 4. User Management & Presence Status
 
 | Method | Endpoint | Auth | Description |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/users/search` | Bearer JWT | Global user directory search by name or email. |
 | `GET` | `/api/users` | Bearer JWT | List users for direct messaging directory. |
-| `GET` | `/api/users/:id` | Bearer JWT | Fetch public user profile and activity stats. |
+| `GET` | `/api/users/profile` | Bearer JWT | Fetch current user profile. |
 | `PATCH` | `/api/users/profile` | Bearer JWT | Update user bio, display name, and preferences. |
-| `PUT` | `/api/users/avatar` | Bearer JWT | Update user profile avatar image URL. |
+| `PATCH` | `/api/users/status` | Bearer JWT | Update presence status (`AVAILABLE`, `DO_NOT_DISTURB`, `BUSY`, `BE_RIGHT_BACK`, `AWAY`, `OFFLINE`). |
+| `DELETE` | `/api/users/status` | Bearer JWT | Clear custom user status message. |
+| `GET` | `/api/users/presence` | Bearer JWT | Get current user's real-time presence record. |
+| `POST` | `/api/users/presence/batch` | Bearer JWT | Batch query presence for an array of `userIds`. |
+| `GET` | `/api/users/:userId/presence` | Bearer JWT | Get presence status for a specific user. |
 
-### 5. Direct & Group Conversations (Chat)
+### 5. Virtual Office Floor & Desks
+
+| Method | Endpoint | Auth | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/office/:teamId` | Bearer JWT | Retrieve real-time floor layout, seated members, zones, and war rooms. |
+| `POST` | `/api/office/:teamId/join` | Bearer JWT | Enter the office floor and automatically be seated at an open desk. |
+| `POST` | `/api/office/:teamId/leave` | Bearer JWT | Vacate current desk and leave the office floor. |
+| `POST` | `/api/office/:teamId/knock` | Bearer JWT | Send a desk knock alert to a teammate with an optional note. |
+| `POST` | `/api/office/:teamId/desk/claim` | Bearer JWT | Select and claim a specific desk in Open Workspace. |
+| `POST` | `/api/office/:teamId/zone` | Bearer JWT | Move to `OPEN_WORKSPACE`, `FOCUS_POD` (auto DND), `COFFEE_LOUNGE` (auto BRB), or `WAR_ROOM`. |
+| `POST` | `/api/office/:teamId/meeting/start` | Bearer JWT | Launch an instant collaborative War Room video meeting. |
+| `POST` | `/api/office/:teamId/meeting/end` | Bearer JWT | End the active War Room meeting session. |
+
+### 6. Direct & Group Conversations (Chat & Polls)
 
 | Method | Endpoint | Auth | Description |
 | :--- | :--- | :--- | :--- |
@@ -250,48 +284,47 @@ The server exposes standard REST APIs under `/api/*` (with `/api/v1/*` aliases f
 | `GET` | `/api/conversations/:id` | Bearer JWT | Get conversation metadata and participant list. |
 | `GET` | `/api/conversations/:id/messages` | Bearer JWT | Fetch paginated chat history with mentions & media. |
 | `POST` | `/api/conversations/:id/messages` | Bearer JWT | Send a message (supports `@mentions`, attachments). |
-| `PATCH` | `/api/conversations/:id/messages/:messageId` | Bearer JWT | Edit chat message content (Sender only). Broadcasts `message:updated`. |
-| `DELETE` | `/api/conversations/:id/messages/:messageId` | Bearer JWT | Delete chat message (Sender or Group Admin). Broadcasts `message:deleted`. |
-| `GET` | `/api/conversations/:id/search` | Bearer JWT | Full-text message search inside a conversation. |
-| `POST` | `/api/conversations/:id/participants` | Bearer JWT | Add new participants to an existing group conversation. |
-| `DELETE` | `/api/conversations/:id/participants/:userId` | Bearer JWT | Remove a member from the group conversation (Admins only). |
-| `POST` | `/api/conversations/:id/admins/:userId` | Bearer JWT | Promote a participant to group administrator. |
-| `DELETE` | `/api/conversations/:id/admins/:userId` | Bearer JWT | Demote a group administrator back to regular member. |
+| `POST` | `/api/conversations/messages/forward` | Bearer JWT | Forward messages to multiple target conversations. |
+| `POST` | `/api/conversations/:id/messages/poll` | Bearer JWT | Create an interactive poll inside the conversation. |
+| `POST` | `/api/conversations/:id/messages/:messageId/poll/vote` | Bearer JWT | Cast vote in a conversation poll. |
+| `POST` | `/api/conversations/:id/messages/:messageId/pin` | Bearer JWT | Pin message to the top of the conversation. |
+| `DELETE` | `/api/conversations/:id/messages/:messageId/pin` | Bearer JWT | Unpin a message from the conversation. |
+| `GET` | `/api/conversations/:id/pinned` | Bearer JWT | List all pinned messages in the conversation. |
+| `POST` | `/api/conversations/:id/read` | Bearer JWT | Mark all messages in conversation as read. |
+| `POST` | `/api/conversations/:id/clear` | Bearer JWT | Clear conversation message history for the user. |
+| `POST` | `/api/conversations/:id/mute` | Bearer JWT | Mute conversation push and audio alerts. |
+| `POST` | `/api/conversations/:id/unmute` | Bearer JWT | Unmute conversation alerts. |
+| `POST` | `/api/conversations/:id/block` | Bearer JWT | Block communication in direct conversation. |
+| `POST` | `/api/conversations/:id/unblock` | Bearer JWT | Unblock direct conversation. |
 | `POST` | `/api/conversations/:id/leave` | Bearer JWT | Voluntarily leave a group conversation. |
 
-### 6. Communities, Channels & Invites
+### 7. Communities, Channels & Invites
 
 | Method | Endpoint | Auth | Description |
 | :--- | :--- | :--- | :--- |
 | `POST` | `/api/communities` | Bearer JWT | Create a new community workspace. |
-| `GET` | `/api/communities` | Bearer JWT | List communities the authenticated user is a member of. |
+| `GET` | `/api/communities` | Bearer JWT | List joined communities. |
+| `GET` | `/api/communities/discover` | Bearer JWT | Explore publicly discoverable communities. |
 | `GET` | `/api/communities/feed` | Bearer JWT | Unified aggregate feed across all joined communities. |
 | `GET` | `/api/communities/:id` | Bearer JWT | Get community metadata, rules, and member stats. |
-| `PATCH` | `/api/communities/:id` | Bearer JWT | Update community title, description, or visibility (Admins). |
+| `PATCH` | `/api/communities/:id` | Bearer JWT | Update community title, description, or visibility. |
 | `DELETE` | `/api/communities/:id` | Bearer JWT | Delete community (Owner only). |
-| `POST` | `/api/communities/:id/leave` | Bearer JWT | Leave community (transfers ownership if sole owner). |
+| `POST` | `/api/communities/:id/leave` | Bearer JWT | Leave community (auto-transfers ownership if sole owner). |
 | `POST` | `/api/communities/:id/transfer-ownership` | Bearer JWT | Transfer community ownership to another member. |
 | `GET` | `/api/communities/:id/members` | Bearer JWT | List members with roles (`OWNER`, `ADMIN`, `MODERATOR`, `MEMBER`). |
-| `PATCH` | `/api/communities/:id/members/:userId/role` | Bearer JWT | Update a member's role (Requires `ADMIN` or `OWNER`). |
+| `PATCH` | `/api/communities/:id/members/:userId/role` | Bearer JWT | Update member role. |
 | `DELETE` | `/api/communities/:id/members/:userId` | Bearer JWT | Kick a member from the community. |
-| `GET` | `/api/communities/:id/invitable-users` | Bearer JWT | Search eligible users to invite (excluding existing members). |
-| `POST` | `/api/communities/:id/invites` | Bearer JWT | Send an invitation by `email` or `{ invitedUserId, expiresInHours }`. |
-| `GET` | `/api/communities/:id/invites` | Bearer JWT | List active pending invitations for the community. |
-| `DELETE` | `/api/communities/:id/invites/:inviteId` | Bearer JWT | Revoke a pending community invitation. |
-| `GET` | `/api/communities/invitations/pending` | Bearer JWT | List all pending invitations received by the current user. |
-| `GET` | `/api/communities/join/:token` | None | Public preview metadata for a community invitation link. |
-| `POST` | `/api/communities/join/:token` | Bearer JWT | Accept invitation and join community via token. |
-| `POST` | `/api/communities/invites/:token/accept` | Bearer JWT | Accept invitation endpoint alias. |
-| `POST` | `/api/communities/invites/:token/decline` | Bearer JWT | Decline community invitation. |
-| `GET` | `/api/communities/:id/channels` | Bearer JWT | List discussion channels within the community. |
-| `POST` | `/api/communities/:id/channels` | Bearer JWT | Create a new channel (e.g. `#general`, `#dev`). |
-| `GET` | `/api/communities/:id/channels/:channelId` | Bearer JWT | Get channel details. |
-| `PATCH` | `/api/communities/:id/channels/:channelId` | Bearer JWT | Rename or update channel description. |
-| `DELETE` | `/api/communities/:id/channels/:channelId` | Bearer JWT | Delete channel and associated posts. |
+| `GET` | `/api/communities/:id/search-users` | Bearer JWT | Search eligible users to invite. |
+| `POST` | `/api/communities/:id/invites` | Bearer JWT | Create an invitation token. |
+| `GET` | `/api/communities/invitations/pending` | Bearer JWT | List all pending invitations received by current user. |
+| `POST` | `/api/communities/invitations/:identifier/accept` | Bearer JWT | Accept community invitation. |
+| `POST` | `/api/communities/invitations/:identifier/decline` | Bearer JWT | Decline community invitation. |
+| `GET` | `/api/communities/:id/channels` | Bearer JWT | List discussion channels within community. |
+| `POST` | `/api/communities/:id/channels` | Bearer JWT | Create a new discussion channel (e.g., `#dev`). |
 | `GET` | `/api/communities/:id/channels/:channelId/posts` | Bearer JWT | List paginated posts within a channel. |
-| `POST` | `/api/communities/:id/channels/:channelId/posts` | Bearer JWT | Publish a new post into a designated channel. |
+| `POST` | `/api/communities/:id/channels/:channelId/posts` | Bearer JWT | Publish a post into a channel. |
 
-### 7. Community Posts & Comments
+### 8. Community Posts & Comments
 
 | Method | Endpoint | Auth | Description |
 | :--- | :--- | :--- | :--- |
@@ -304,7 +337,7 @@ The server exposes standard REST APIs under `/api/*` (with `/api/v1/*` aliases f
 | `PATCH` | `/api/comments/:commentId` | Bearer JWT | Edit a comment. |
 | `DELETE` | `/api/comments/:commentId` | Bearer JWT | Delete a comment. |
 
-### 8. Organizations, Teams & Tasks
+### 9. Organizations, Teams, Feeds & Tasks
 
 | Method | Endpoint | Auth | Description |
 | :--- | :--- | :--- | :--- |
@@ -312,28 +345,30 @@ The server exposes standard REST APIs under `/api/*` (with `/api/v1/*` aliases f
 | `GET` | `/api/organizations` | Bearer JWT | List organizations user belongs to. |
 | `GET` | `/api/organizations/:id` | Bearer JWT | Get organization details and team hierarchy. |
 | `PATCH` | `/api/organizations/:id` | Bearer JWT | Update organization settings (Requires `ORG_ADMIN`). |
+| `POST` | `/api/organizations/:id/transfer-ownership` | Bearer JWT | Transfer primary organization ownership. |
 | `POST` | `/api/organizations/:id/leave` | Bearer JWT | Leave an organization. |
-| `GET` | `/api/organizations/:id/members` | Bearer JWT | List organization members and their roles. |
-| `PATCH` | `/api/organizations/:id/members/:userId` | Bearer JWT | Update member role (`ORG_ADMIN`, `TEAM_HEAD`, `MEMBER`). |
-| `DELETE` | `/api/organizations/:id/members/:userId` | Bearer JWT | Remove member from organization. |
+| `GET` | `/api/organizations/:id/members` | Bearer JWT | List organization members and roles. |
 | `POST` | `/api/organizations/:id/invites` | Bearer JWT | Create organization invite token. |
-| `GET` | `/api/organizations/:id/invites` | Bearer JWT | List pending organization invites. |
-| `DELETE` | `/api/organizations/:id/invites/:inviteId` | Bearer JWT | Revoke an organization invite. |
 | `GET` | `/api/organizations/join/:token` | None | Preview organization invite metadata. |
 | `POST` | `/api/organizations/join/:token` | Bearer JWT | Accept and join organization via invite token. |
-| `POST` | `/api/organizations/:id/teams` | Bearer JWT | Create a new scoped team within organization. |
-| `GET` | `/api/organizations/:id/teams` | Bearer JWT | List all teams in the organization. |
+| `POST` | `/api/organizations/:id/teams` | Bearer JWT | Create a scoped team within organization. |
+| `GET` | `/api/organizations/:id/teams` | Bearer JWT | List all teams in organization. |
 | `GET` | `/api/organizations/:id/teams/:teamId` | Bearer JWT | Get team metadata and member roster. |
-| `PATCH` | `/api/organizations/:id/teams/:teamId` | Bearer JWT | Update team details. |
-| `DELETE` | `/api/organizations/:id/teams/:teamId` | Bearer JWT | Delete a team. |
-| `POST` | `/api/organizations/:id/teams/:teamId/members` | Bearer JWT | Add member to team. |
-| `DELETE` | `/api/organizations/:id/teams/:teamId/members/:userId` | Bearer JWT | Remove member from team. |
+| `GET` | `/api/organizations/:id/feed` | Bearer JWT | Get company-wide announcement feed. |
+| `POST` | `/api/organizations/:id/feed` | Bearer JWT | Create company-wide announcement post. |
+| `POST` | `/api/organizations/:id/feed/:postId/pin` | Bearer JWT | Pin/unpin announcement post. |
+| `POST` | `/api/organizations/:id/feed/:postId/react` | Bearer JWT | Add emoji reaction to feed post. |
+| `POST` | `/api/organizations/:id/feed/:postId/comments` | Bearer JWT | Comment on company announcement. |
+| `GET` | `/api/organizations/:id/teams/:teamId/tasks` | Bearer JWT | List team tasks. |
+| `POST` | `/api/organizations/:id/teams/:teamId/tasks` | Bearer JWT | Create a new task assigned to team members. |
+| `PATCH` | `/api/organizations/:id/teams/:teamId/tasks/:taskId/status` | Bearer JWT | Update task status (`TODO`, `IN_PROGRESS`, `DONE`). |
+| `GET` | `/api/organizations/:id/tasks/my` | Bearer JWT | List all organization tasks assigned to current user. |
 
-### 9. Calendar & Events
+### 10. Calendar & Scheduled Reminders
 
 | Method | Endpoint | Auth | Description |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/calendar` | Bearer JWT | Create a calendar event (REMINDER, MEETING, DEADLINE, GENERAL) with BullMQ reminder scheduling. |
+| `POST` | `/api/calendar` | Bearer JWT | Create a calendar event (`REMINDER`, `MEETING`, `DEADLINE`, `GENERAL`) with BullMQ reminder scheduling. |
 | `GET` | `/api/calendar/month` | Bearer JWT | Query events for a specific month (`year`, `month`). |
 | `GET` | `/api/calendar/date` | Bearer JWT | Query events for a single day (`date=YYYY-MM-DD`). |
 | `GET` | `/api/calendar/upcoming` | Bearer JWT | Fetch chronologically sorted upcoming events. |
@@ -341,51 +376,140 @@ The server exposes standard REST APIs under `/api/*` (with `/api/v1/*` aliases f
 | `PATCH` | `/api/calendar/:id` | Bearer JWT | Update event details and dynamically reschedule BullMQ reminders. |
 | `DELETE` | `/api/calendar/:id` | Bearer JWT | Delete event and cancel its pending background reminder job. |
 
-### 10. Meetings & SFU Video Calling
+### 11. Meetings & SFU Video Calling
 
 | Method | Endpoint | Auth | Description |
 | :--- | :--- | :--- | :--- |
 | `POST` | `/api/meetings` | Bearer JWT | Create a new video meeting session with a unique call code. |
+| `POST` | `/api/meetings/scoped` | Bearer JWT | Create or schedule a meeting scoped to an Org, Team, or Community. |
+| `GET` | `/api/meetings/upcoming` | Bearer JWT | Get upcoming scheduled meetings across all workspaces. |
+| `GET` | `/api/meetings/organization/:organizationId` | Bearer JWT | List meetings associated with an organization. |
+| `GET` | `/api/meetings/team/:teamId` | Bearer JWT | List meetings associated with a team. |
 | `GET` | `/api/meetings/:code` | Bearer JWT | Retrieve active meeting state, participant count, and metadata. |
+| `PATCH` | `/api/meetings/:code/cancel` | Bearer JWT | Cancel a scheduled meeting. |
 | `POST` | `/api/meetings/:code/end` | Bearer JWT | Terminate meeting session and disconnect SFU peer connections. |
+| `GET` | `/api/meetings/:code/whiteboards` | Bearer JWT | List whiteboards linked to the meeting. |
+| `POST` | `/api/meetings/:code/whiteboards` | Bearer JWT | Create and link whiteboard to meeting. |
+| `POST` | `/api/meetings/:code/whiteboards/:whiteboardId/open` | Bearer JWT | Broadcast whiteboard live inside the meeting. |
 
-### 11. Media & S3 File Storage
+### 12. Collaborative Whiteboards
+
+| Method | Endpoint | Auth | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/whiteboards` | Bearer JWT | List whiteboards within the user's organizations (`organizationId`, `search`). |
+| `POST` | `/api/whiteboards` | Bearer JWT | Create a new organization whiteboard canvas (`title`, `content`). |
+| `GET` | `/api/whiteboards/:id` | Bearer JWT | Retrieve full whiteboard state, element tree, and view state. |
+| `PATCH` | `/api/whiteboards/:id` | Bearer JWT | Coordinated update protected by distributed Redis locking. |
+| `DELETE` | `/api/whiteboards/:id` | Bearer JWT | Permanently delete whiteboard and clean up Redis session keys. |
+
+### 13. Collaborative Documents
+
+| Method | Endpoint | Auth | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/documents` | Bearer JWT | List accessible rich-text collaborative documents. |
+| `POST` | `/api/documents` | Bearer JWT | Create a new document (`title`, `content`, `scopeType`). |
+| `GET` | `/api/documents/:id` | Bearer JWT | Fetch document content, version history, and collaborators. |
+| `PATCH` | `/api/documents/:id` | Bearer JWT | Update document title or content. |
+| `DELETE` | `/api/documents/:id` | Bearer JWT | Delete document. |
+| `POST` | `/api/documents/:id/open-in-meeting` | Bearer JWT | Open and present document live inside active video call. |
+
+### 14. Projects & Freelancer Collaboration
+
+| Method | Endpoint | Auth | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/projects` | Bearer JWT | List accessible project workspaces. |
+| `GET` | `/api/projects/my-projects` | Bearer JWT | List projects where the user is an owner, lead, member, or external freelancer. |
+| `POST` | `/api/projects` | Bearer JWT | Create a new cross-organization project workspace. |
+| `GET` | `/api/projects/invites/preview/:token` | None | Public preview of project invitation before joining. |
+| `POST` | `/api/projects/invites/accept` | Bearer JWT | Accept project invitation token. |
+| `POST` | `/api/projects/:id/members/invite` | Bearer JWT | Invite member or freelancer (`PROJECT_LEAD`, `MEMBER`, `FREELANCER`, `VIEWER`). |
+| `PATCH` | `/api/projects/:id/members/:userId` | Bearer JWT | Update project member role. |
+| `DELETE` | `/api/projects/:id/members/:userId` | Bearer JWT | Remove member from project. |
+| `GET` | `/api/projects/:id/resources` | Bearer JWT | List external reference links, Figma docs, and deliverables. |
+| `POST` | `/api/projects/:id/resources` | Bearer JWT | Attach a resource link or deliverable file. |
+| `DELETE` | `/api/projects/:id/resources/:resourceId` | Bearer JWT | Remove project resource attachment. |
+
+### 15. Meeting Recordings Lifecycle
+
+| Method | Endpoint | Auth | Description |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/recordings/start` | Bearer JWT | Initiate meeting recording session. |
+| `POST` | `/api/recordings/stop` | Bearer JWT | Stop active meeting recording. |
+| `POST` | `/api/recordings/upload-url` | Bearer JWT | Generate presigned URL for client recording chunk upload. |
+| `POST` | `/api/recordings/:id/complete` | Bearer JWT | Finalize recording upload and trigger background processing. |
+| `GET` | `/api/recordings/:id` | Bearer JWT | Fetch recording metadata, duration, and download URL. |
+| `POST` | `/api/recordings/:id/summarize` | Bearer JWT | Generate AI executive summary of recorded call transcript. |
+
+### 16. Atlassian Jira Cloud Integration
+
+| Method | Endpoint | Auth | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/integrations/jira/oauth/authorize-url` | Bearer JWT | Generate Atlassian OAuth 2.0 (3LO) authorization URL. |
+| `GET` | `/api/integrations/jira/oauth/callback` | None | Handle Atlassian OAuth callback and exchange authorization code. |
+| `GET` | `/api/integrations/jira/oauth/status` | Bearer JWT | Retrieve Jira Cloud connection status and site metadata. |
+| `POST` | `/api/integrations/jira/disconnect` | Bearer JWT | Revoke Jira OAuth credentials and disconnect site. |
+| `GET` | `/api/integrations/jira/teams/:teamId/tickets` | Bearer JWT | List Jira issues linked to team project. |
+| `POST` | `/api/integrations/jira/teams/:teamId/tickets` | Bearer JWT | Create a Jira issue from team context. |
+| `GET` | `/api/integrations/jira/teams/:teamId/tickets/:key` | Bearer JWT | Get full details of a team Jira issue. |
+| `POST` | `/api/integrations/jira/teams/:teamId/tickets/:key/transition` | Bearer JWT | Transition a team Jira ticket status (`In Progress`, `Done`). |
+| `GET` | `/api/integrations/jira/teams/:teamId/assignees` | Bearer JWT | List assignable Jira users for team project. |
+| `POST` | `/api/webhooks/jira` | Webhook Sig | Real-time webhook receiver for Jira Cloud issue events. |
+
+### 17. GitHub Integration
+
+| Method | Endpoint | Auth | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/integrations/github/authorize-url` | Bearer JWT | Generate GitHub OAuth 2.0 app authorization URL. |
+| `GET` | `/api/integrations/github/oauth/callback` | None | Handle GitHub OAuth callback and save access token. |
+| `GET` | `/api/integrations/github/status` | Bearer JWT | Check current GitHub integration status. |
+| `POST` | `/api/integrations/github/disconnect` | Bearer JWT | Disconnect and revoke GitHub integration. |
+| `GET` | `/api/integrations/github/user/repos` | Bearer JWT | Fetch accessible public and private GitHub repositories. |
+| `GET` | `/api/integrations/github/teams/:teamId/repo` | Bearer JWT | Get linked GitHub repository for a team. |
+| `POST` | `/api/integrations/github/teams/:teamId/repo` | Bearer JWT | Link a GitHub repository to a team workspace. |
+| `DELETE` | `/api/integrations/github/teams/:teamId/repo` | Bearer JWT | Unlink repository from team workspace. |
+| `GET` | `/api/integrations/github/teams/:teamId/issues` | Bearer JWT | List issues from linked GitHub repository. |
+| `POST` | `/api/integrations/github/teams/:teamId/issues` | Bearer JWT | Create a new issue in linked repository. |
+| `PATCH` | `/api/integrations/github/teams/:teamId/issues/:issueNumber` | Bearer JWT | Update issue state or assignees. |
+| `GET` | `/api/integrations/github/teams/:teamId/pulls` | Bearer JWT | Fetch open and closed pull requests. |
+| `GET` | `/api/integrations/github/teams/:teamId/commits` | Bearer JWT | Fetch recent commit history. |
+| `GET` | `/api/integrations/github/teams/:teamId/branches` | Bearer JWT | List branches and protection rules. |
+| `GET` | `/api/integrations/github/teams/:teamId/collaborators` | Bearer JWT | List repository collaborators. |
+
+### 18. AI Assistant & Workflows
+
+| Method | Endpoint | Auth | Description |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/ai/chat` | Bearer JWT | Context-aware chat with Gemini AI. |
+| `POST` | `/api/ai/summarize` | Bearer JWT | Generate concise summaries of workspace content. |
+| `POST` | `/api/ai/chat/:conversationId/summary` | Bearer JWT | Summarize chat transcript into key takeaways and action items. |
+| `POST` | `/api/ai/search` | Bearer JWT | Semantic search across workspace messages and documents. |
+| `POST` | `/api/ai/assist` | Bearer JWT | Context-aware writing and productivity assistance. |
+| `POST` | `/api/ai/quick-replies` | Bearer JWT | Generate smart contextual replies for messages. |
+| `POST` | `/api/ai/workflows/plan` | Bearer JWT | Plan autonomous multi-agent execution pipeline. |
+| `POST` | `/api/ai/workflows/execute` | Bearer JWT | Execute structured workflow tasks. |
+
+### 19. Notifications & Delivery Preferences
+
+| Method | Endpoint | Auth | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/notifications` | Bearer JWT | Get paginated notifications (`unreadOnly`, `page`, `limit`). |
+| `GET` | `/api/notifications/unread-count` | Bearer JWT | Get unread notification count for badge indicators. |
+| `PATCH` | `/api/notifications/read-all` | Bearer JWT | Mark all notifications as read. |
+| `PATCH` | `/api/notifications/:id/read` | Bearer JWT | Mark specific notification as read. |
+| `DELETE` | `/api/notifications/:id` | Bearer JWT | Delete a notification. |
+| `GET` | `/api/notifications/preferences` | Bearer JWT | Get user delivery preferences across all categories with defaults. |
+| `PUT` / `PATCH` / `POST` | `/api/notifications/preferences` | Bearer JWT | Update notification preferences (supports single item, array, or key-value map). |
+| `POST` | `/api/devices` | Bearer JWT | Register FCM device token for mobile push alerts. |
+| `DELETE` | `/api/devices` | Bearer JWT | Unregister FCM token on logout. |
+
+### 20. Media & S3 File Storage
 
 | Method | Endpoint | Auth | Description |
 | :--- | :--- | :--- | :--- |
 | `POST` | `/api/uploads/sign` | Bearer JWT | Generate AWS S3 presigned PUT URL with mime-type validation. Rate limited to 10 req/min (burst) and 100 uploads/24h (quota). |
 | `POST` | `/api/uploads/s3` | Bearer JWT | Direct multipart file upload endpoint to S3 with rate limit enforcement. |
 
-### 12. Notifications & Device Tokens
-
-| Method | Endpoint | Auth | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/notifications` | Bearer JWT | Get paginated notifications (`page`, `limit`, `unreadOnly`). |
-| `GET` | `/api/notifications/unread-count` | Bearer JWT | Get total unread notifications count for badge indicators. |
-| `PATCH` | `/api/notifications/read-all` | Bearer JWT | Mark all notifications as read. |
-| `PATCH` | `/api/notifications/:id/read` | Bearer JWT | Mark specific notification as read. |
-| `DELETE` | `/api/notifications/:id` | Bearer JWT | Delete a notification. |
-| `GET` | `/api/notifications/preferences` | Bearer JWT | Get notification channel preferences (email, in-app, push). |
-| `PUT` | `/api/notifications/preferences` | Bearer JWT | Update notification preferences. |
-| `POST` | `/api/devices` | Bearer JWT | Register device token for Firebase Cloud Messaging (FCM). |
-| `DELETE` | `/api/devices` | Bearer JWT | Unregister device token on logout. |
-
-### 13. AI Workplace Assistant
-
-| Method | Endpoint | Auth | Description |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/ai/chat` | Bearer JWT | Interactive streaming/non-streaming chat with Gemini AI. |
-| `POST` | `/api/ai/summarize` | Bearer JWT | Generate concise summaries of workspace content. |
-| `POST` | `/api/ai/chat/:conversationId/summary` | Bearer JWT | Summarize chat transcript into key takeaways and action items. |
-| `POST` | `/api/ai/search` | Bearer JWT | Semantic search across workspace messages and documents. |
-| `POST` | `/api/ai/assist` | Bearer JWT | Context-aware writing and productivity assistance. |
-| `POST` | `/api/ai/quick-replies` | Bearer JWT | Generate smart contextual replies for messages. |
-| `POST` | `/api/ai/project-update` | Bearer JWT | Generate project status updates based on recent activity. |
-| `GET` | `/api/ai/history` | Bearer JWT | Fetch conversation history with the AI assistant. |
-| `DELETE` | `/api/ai/history` | Bearer JWT | Clear all AI conversation history. |
-| `DELETE` | `/api/ai/history/:id` | Bearer JWT | Delete a specific AI message interaction. |
-
-### 14. Personal Saved Items & Collections
+### 21. Personal Saved Items & Collections
 
 | Method | Endpoint | Auth | Description |
 | :--- | :--- | :--- | :--- |
@@ -398,39 +522,11 @@ The server exposes standard REST APIs under `/api/*` (with `/api/v1/*` aliases f
 | `PATCH` | `/api/saved-items/collections/:id` | Bearer JWT | Edit collection name or color. |
 | `DELETE` | `/api/saved-items/collections/:id` | Bearer JWT | Delete collection (keeps saved items uncategorized). |
 
-### 15. Collaborative Whiteboards
-
-| Method | Endpoint | Auth | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/whiteboards` | Bearer JWT | List whiteboards within the user's organizations (`organizationId`, `search`, `page`, `limit`). |
-| `POST` | `/api/whiteboards` | Bearer JWT | Create a new organization whiteboard canvas (`title`, `organizationId`, `content`). |
-| `GET` | `/api/whiteboards/:id` | Bearer JWT | Retrieve full whiteboard state, element tree, view state, and linked meetings. |
-| `PATCH` | `/api/whiteboards/:id` | Bearer JWT | Coordinated update for whiteboard title or content protected by distributed Redis locking. |
-| `DELETE` | `/api/whiteboards/:id` | Bearer JWT | Permanently delete whiteboard and clean up Redis session keys. |
-| `GET` | `/api/whiteboards/meetings/:code` | Bearer JWT | List all whiteboards attached or opened inside a meeting. |
-| `POST` | `/api/whiteboards/meetings/:code` | Bearer JWT | Create and link a new whiteboard directly to a meeting session. |
-| `POST` | `/api/whiteboards/:id/meetings/:meetingCode/open` | Bearer JWT | Open an existing whiteboard in a live meeting with real-time participant broadcast. |
-
-### 16. Jira Cloud Integration
-
-| Method | Endpoint | Auth | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/integrations/jira/oauth/authorize-url` | Bearer JWT | Generate Atlassian OAuth 2.0 (3LO) authorization URL with CSRF state nonce. |
-| `GET` | `/api/integrations/jira/oauth/callback` | None | Handle Atlassian OAuth callback, exchange code for tokens, and redirect to client. |
-| `GET` | `/api/integrations/jira/oauth/status` | Bearer JWT | Retrieve Jira Cloud connection status and connected site metadata. |
-| `POST` | `/api/integrations/jira/disconnect` | Bearer JWT | Revoke Jira OAuth credentials and disconnect user account. |
-| `GET` | `/api/integrations/jira/tickets/my` | Bearer JWT | Fetch Jira tickets assigned to the authenticated user. |
-| `POST` | `/api/integrations/jira/webhook` | Webhook Sig | Ingest Jira Cloud webhook events (ticket creation, status transitions). |
-| `GET` | `/api/organizations/:id/teams/:teamId/jira/tickets` | Bearer JWT | Retrieve Jira tickets associated with a specific team. |
-| `POST` | `/api/organizations/:id/teams/:teamId/jira/tickets` | Bearer JWT | Create a new Jira ticket for a team. |
-| `GET` | `/api/organizations/:id/teams/:teamId/jira/tickets/:key` | Bearer JWT | Get full details of a team Jira issue. |
-| `PATCH` | `/api/organizations/:id/teams/:teamId/jira/tickets/:key/status` | Bearer JWT | Transition a team Jira ticket workflow status. |
-
 ---
 
 ## Real-Time WebSocket Architecture
 
-Quorum utilizes **Socket.IO** for low-latency bidirectional communication across messaging, community feeds, interactive whiteboards, and video call signaling:
+Quorum utilizes **Socket.IO** for low-latency bidirectional communication across messaging, virtual office floors, interactive whiteboards, and video call signaling:
 
 ### Client Connection & Auto-Healing Resilience
 Clients connect to `/` with JWT authorization. The gateway features **transparent session auto-healing**:
@@ -445,29 +541,25 @@ const socket = io('http://localhost:5000', {
 ```
 
 - **Expired Token Recovery:** When a short-lived (15-minute) access token expires in memory, the server inspects the active `refreshToken` cookie sent in the handshake headers.
-- **Database Verification:** It verifies the cryptographic signature and queries PostgreSQL (`prisma.refreshToken.findUnique`). If the session is active and not revoked (`!storedToken.revokedAt`), the socket is authenticated transparently.
-- **Strict Security:** Unauthenticated users, forged tokens, or revoked sessions are immediately rejected (`Authentication error: Invalid or expired token`).
+- **Database Verification:** It verifies the cryptographic signature and queries PostgreSQL (`prisma.refreshToken.findUnique`). If the session is active and not revoked (`!storedToken.revokedAt`), the socket is authenticated transparently without disconnecting the user.
 
 ### Core Event Catalog
 
 | Domain | Event Sent by Client | Event Emitted by Server | Description |
 | :--- | :--- | :--- | :--- |
+| **Virtual Office** | `office:join`, `office:leave`, `office:zone:change`, `office:desk:claim`, `office:knock` | `office:member:joined`, `office:member:left`, `office:floor:update`, `office:knock:received` | Real-time floor occupancy, desk allocations, zone movements, and proximity knocking. |
+| **User Presence** | `presence:heartbeat`, `presence:set-status` | `presence:update`, `presence:batch` | Real-time user online/activity state and custom status message broadcasts. |
 | **Chat Messaging** | `message:send` | `message:new` | Real-time direct & group message dispatch with hydrated sender metadata. |
 | **Message Updates** | `message:edit`, `message:delete` | `message:updated`, `message:deleted` | Real-time message content edits and message deletions. |
 | **Typing State** | `typing:start`, `typing:stop` | `typing:start`, `typing:stop` | Typing indicator broadcast to conversation room participants. |
 | **Read Receipts** | `message:read` | `message:read` | Read receipt timestamp broadcast to message senders. |
 | **Community Feed** | — | `new_post`, `new_comment`, `post_updated` | Live community broadcast eliminating manual browser refreshes. |
-| **Notifications** | — | `new_notification`, `unread_count_update` | Instant push notification badge increment. |
+| **Notifications** | — | `notification:new`, `unread_count_update` | Instant push notification badge increment. |
 | **Whiteboard Session** | `whiteboard:join`, `whiteboard:leave` | `whiteboard:user-joined`, `whiteboard:user-left` | Board room joining, presence tracking across cluster nodes via Redis hashes (`whiteboard:<id>:users`). |
 | **Whiteboard Drawing** | `whiteboard:draw-element`, `whiteboard:elements-change` | `whiteboard:element-updated`, `whiteboard:elements-changed` | Fine-grained element-level synchronization, version incrementing, and peer broadcast. |
-| **Whiteboard Canvas** | `whiteboard:clear`, `whiteboard:view-state` | `whiteboard:cleared`, `whiteboard:view-state` | Canvas reset and pan/zoom view state synchronization across participants. |
 | **Whiteboard Cursors** | `whiteboard:cursor-move` | `whiteboard:cursor-moved` | Ephemeral, throttled (40ms) live cursor position broadcasting. |
+| **Document Collaboration** | `doc:join`, `doc:change`, `doc:cursor` | `doc:update`, `doc:cursor:moved`, `doc:user:joined` | Multi-user live rich-text document editing and cursor presence. |
 | **SFU Video Signaling** | `join-room`, `publish-track`, `subscribe-track`, `ice-candidate` | `track-published`, `user-joined`, `user-left`, `peer-ice-candidate` | WebRTC SDP negotiation and ICE candidate exchange for custom SFU engine. |
-
-### Whiteboard Concurrency & Redis Distributed Lock
-- **Element-Level Hashes:** Whiteboard elements are tracked as individual key-value entries in Redis Hashes (`whiteboard:<id>:elements`) and local memory Maps. Simultaneous edits on different elements never conflict.
-- **Distributed Mutex (`SET NX PX` + Lua Heartbeat):** To protect database commits across multiple Node.js cluster instances, the server acquires a Redis distributed lock (`whiteboard:<id>:lock`) with automatic Lua heartbeat renewal (`pexpire`).
-- **Debounced Snapshot Flush:** Updates write instantly to Redis memory (sub-millisecond) and schedule a debounced flush (`SAVE_DEBOUNCE_MS = 2500ms`). When users finish drawing or leave the room, a single consolidated snapshot is committed to PostgreSQL under an advisory transaction lock (`pg_advisory_xact_lock`).
 
 ---
 
@@ -509,7 +601,7 @@ Quorum relies on **BullMQ** running over Redis for reliable asynchronous executi
 1. **`emailQueue`**: Asynchronous dispatch of transactional emails, OTP verification codes, and password reset instructions.
 2. **`emailDigestQueue`**: Periodic compilation and dispatch of community digest updates.
 3. **`reminderQueue`**: Precision scheduling for calendar events and meeting alerts. Schedules delayed jobs based on user-configured reminder lead times (e.g., 15 minutes before event start).
-4. **`notificationQueue`**: Push notification dispatch via Firebase Cloud Messaging (FCM).
+4. **`notificationQueue`**: Push notification dispatch via Firebase Cloud Messaging (FCM) with user preference enforcement.
 
 ---
 
@@ -546,5 +638,5 @@ Ensure your cloud security groups allow:
 
 Contributions, bug reports, and pull requests are welcome!
 
-Author: **Tushar Talan** ([@tusharTalan1](https://github.com/tusharTalan1))
+Author: **Princy Mishra** ([@Princy0309](https://github.com/Princy0309))  
 License: ISC
