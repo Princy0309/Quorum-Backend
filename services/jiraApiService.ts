@@ -138,4 +138,37 @@ export async function getJiraAssignableUsers(cloudId: string, userId: string, pr
   });
 }
 
+export async function getJiraProjectIssueTypes(
+  cloudId: string,
+  userId: string,
+  projectKey: string
+): Promise<Array<{ id: string; name: string; description?: string; iconUrl?: string; subtask?: boolean }>> {
+  // 1. Try createmeta endpoint first (official Jira v3 endpoint for issue types allowed for creation)
+  try {
+    const meta = await callJiraApi<{ values?: Array<any> }>({
+      cloudId,
+      userId,
+      endpoint: `/issue/createmeta/${encodeURIComponent(projectKey)}/issuetypes`,
+      method: 'GET',
+    });
+    if (Array.isArray(meta?.values) && meta.values.length > 0) {
+      return meta.values.filter((t) => !t.subtask);
+    }
+  } catch (err: any) {
+    logger.debug(`Jira createmeta issuetypes call failed, trying /project: ${err.message}`);
+  }
+
+  // 2. Fallback to /project/{projectKey}
+  try {
+    const project = await getJiraProject(cloudId, userId, projectKey);
+    if (Array.isArray(project?.issueTypes) && project.issueTypes.length > 0) {
+      return project.issueTypes.filter((t: any) => !t.subtask);
+    }
+  } catch (err: any) {
+    logger.debug(`Jira /project issueTypes call failed: ${err.message}`);
+  }
+
+  return [];
+}
+
 

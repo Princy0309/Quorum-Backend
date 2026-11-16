@@ -28,6 +28,7 @@ import {
   getTicketDetailsController,
   transitionTicketStatusController,
   getTeamAssigneesController,
+  getTeamIssueTypesController,
 } from '../controllers/jiraTicketController.js';
 
 
@@ -480,14 +481,14 @@ router.delete(
 );
 
 router.post(
-  '/:id/teams/:teamId/jira/tickets',
+  ['/:id/teams/:teamId/jira/tickets', '/:id/teams/:teamId/tickets'],
   authMiddleware,
   requireOrgMember(),
   createTeamTicketController
 );
 
 router.get(
-  '/:id/teams/:teamId/jira/tickets',
+  ['/:id/teams/:teamId/jira/tickets', '/:id/teams/:teamId/tickets'],
   authMiddleware,
   requireOrgMember(),
   getTeamTicketsController
@@ -522,6 +523,23 @@ router.get(
   authMiddleware,
   requireOrgMember(),
   getTeamAssigneesController
+);
+
+// 5. Get Team or Organization Jira Issue Types
+router.get(
+  [
+    '/:id/teams/:teamId/jira/issuetypes',
+    '/:id/teams/:teamId/jira/issue-types',
+    '/:id/teams/:teamId/issuetypes',
+    '/:id/teams/:teamId/issue-types',
+    '/:id/integrations/jira/issuetypes',
+    '/:id/integrations/jira/issue-types',
+    '/:id/jira/issuetypes',
+    '/:id/jira/issue-types',
+  ],
+  authMiddleware,
+  requireOrgMember(),
+  getTeamIssueTypesController
 );
 
 const orgFeedWriteLimiter = rateLimit({

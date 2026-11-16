@@ -11,14 +11,19 @@ import {
   getMyAssignedJiraTickets,
   getTeamJiraAssignees,
   getOrgJiraAssignees,
+  getTeamJiraIssueTypes,
 } from '../services/jiraTicketService.js';
 
 const createTicketSchema = z.object({
   summary: z.string().min(1, 'Ticket summary is required'),
   description: z.string().optional(),
   issueType: z.string().optional(),
+  issuetype: z.string().optional(),
+  issue_type: z.string().optional(),
   priority: z.string().optional(),
   assigneeAccountId: z.string().optional(),
+  assignee: z.string().optional(),
+  assigneeId: z.string().optional(),
 });
 
 const transitionStatusSchema = z.object({
@@ -42,7 +47,15 @@ export const createTeamTicketController = asyncHandler(async (req: Request, res:
     throw new ApiError(400, errorMsg);
   }
 
-  const ticket = await createTeamJiraTicket(userId, teamId, parsed.data);
+  const normalizedInput = {
+    summary: parsed.data.summary,
+    description: parsed.data.description,
+    issueType: parsed.data.issueType || parsed.data.issuetype || parsed.data.issue_type,
+    priority: parsed.data.priority,
+    assigneeAccountId: parsed.data.assigneeAccountId || parsed.data.assignee || parsed.data.assigneeId,
+  };
+
+  const ticket = await createTeamJiraTicket(userId, teamId, normalizedInput);
   return sendSuccess(res, 201, 'Jira ticket created successfully', ticket);
 });
 
@@ -134,6 +147,21 @@ export const getTeamAssigneesController = asyncHandler(async (req: Request, res:
   } else {
     throw new ApiError(400, 'Team ID or Organization ID is required in URL parameters');
   }
+});
+
+export const getTeamIssueTypesController = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
+  const teamId = (req.params.teamId || req.params.id) as string;
+  if (!teamId) {
+    throw new ApiError(400, 'Team ID is required in URL parameters');
+  }
+
+  const issueTypes = await getTeamJiraIssueTypes(userId, teamId);
+  return sendSuccess(res, 200, 'Team Jira issue types retrieved', issueTypes);
 });
 
 

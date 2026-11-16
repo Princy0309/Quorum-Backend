@@ -1,7 +1,12 @@
 import prisma from '../config/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import logger from '../utils/logger.js';
-import { callJiraApi, getJiraTransitions, getJiraAssignableUsers } from './jiraApiService.js';
+import {
+  callJiraApi,
+  getJiraTransitions,
+  getJiraAssignableUsers,
+  getJiraProjectIssueTypes,
+} from './jiraApiService.js';
 
 export interface CreateTicketInput {
   summary: string;
@@ -97,14 +102,77 @@ export async function createTeamJiraTicket(
     );
   }
 
+  let ticketSummary = input.summary.trim();
+
+  // Dynamically resolve valid project issue type
+  let resolvedIssueType: { id?: string; name?: string } = { name: input.issueType || 'Task' };
+  const requestedType = input.issueType?.trim();
+
+  try {
+    const availableTypes = await getJiraProjectIssueTypes(
+      orgIntegration.cloudId,
+      userId,
+      orgIntegration.projectKey
+    );
+
+    if (availableTypes.length > 0) {
+      let matched: any = null;
+
+      if (requestedType) {
+        // 1. Check ID
+        matched = availableTypes.find((t) => t.id === requestedType);
+        // 2. Check exact or case-insensitive name
+        if (!matched) {
+          matched = availableTypes.find((t) => t.name.toLowerCase() === requestedType.toLowerCase());
+        }
+        // 3. Check partial name
+        if (!matched) {
+          matched = availableTypes.find((t) => t.name.toLowerCase().includes(requestedType.toLowerCase()));
+        }
+      }
+
+      // If no requested type or requested type was not found in the project:
+      if (!matched) {
+        // In Jira Scrum projects (like SCRUM), 'Task' often does not exist, but 'Story' does.
+        // Match Task -> Story -> standard non-subtask/non-epic -> first available
+        matched =
+          availableTypes.find((t) => t.name.toLowerCase() === 'task') ||
+          availableTypes.find((t) => t.name.toLowerCase() === 'story') ||
+          availableTypes.find((t) => !['subtask', 'epic'].includes(t.name.toLowerCase())) ||
+          availableTypes[0];
+      }
+
+      if (matched) {
+        resolvedIssueType = { id: matched.id };
+        if (
+          requestedType?.toLowerCase() === 'bug' &&
+          !matched.name.toLowerCase().includes('bug') &&
+          !matched.name.toLowerCase().includes('defect')
+        ) {
+          if (!ticketSummary.toLowerCase().startsWith('[bug]')) {
+            ticketSummary = `[Bug] ${ticketSummary}`;
+          }
+        }
+        logger.info(
+          `Resolved Jira issue type for ${orgIntegration.projectKey}: ${matched.name} (id: ${matched.id})`
+        );
+      }
+    }
+  } catch (typeErr: any) {
+    logger.warn(`Could not resolve project issue types for ${orgIntegration.projectKey}: ${typeErr.message}`);
+    if (requestedType && /^\d+$/.test(requestedType)) {
+      resolvedIssueType = { id: requestedType };
+    } else {
+      resolvedIssueType = { name: requestedType || 'Task' };
+    }
+  }
+
   const fields: Record<string, any> = {
     project: {
       key: orgIntegration.projectKey,
     },
-    summary: input.summary.trim(),
-    issuetype: {
-      name: input.issueType || 'Task',
-    },
+    summary: ticketSummary,
+    issuetype: resolvedIssueType,
   };
 
   const adfDescription = toAtlassianDocument(input.description);
@@ -157,28 +225,89 @@ export async function createTeamJiraTicket(
     fields.assignee = { accountId: resolvedAccountId };
   }
 
-  let jiraIssue: { id: string; key: string; self: string };
-  try {
-    jiraIssue = await callJiraApi<{ id: string; key: string; self: string }>({
+  let jiraIssue!: { id: string; key: string; self: string };
+
+  const attemptPostIssue = async () => {
+    return callJiraApi<{ id: string; key: string; self: string }>({
       cloudId: orgIntegration.cloudId,
       userId,
       endpoint: '/issue',
       method: 'POST',
       body: { fields },
     });
+  };
+
+  try {
+    jiraIssue = await attemptPostIssue();
   } catch (err: any) {
-    // If Atlassian rejected the ticket because of the assignee, retry once as unassigned so creation succeeds!
-    if (fields.assignee) {
-      logger.warn(`Jira ticket creation failed with assignee (${resolvedAccountId}), retrying as unassigned: ${err.message}`);
+    const errMsg = (err.message || '').toLowerCase();
+    const isIssueTypeError =
+      errMsg.includes('issuetype') ||
+      errMsg.includes('issue type') ||
+      errMsg.includes('specify a valid issue type');
+    const isAssigneeError =
+      errMsg.includes('assignee') ||
+      (fields.assignee && err.statusCode === 400 && !isIssueTypeError);
+
+    if (isIssueTypeError) {
+      logger.warn(
+        `Jira ticket creation rejected issue type (${JSON.stringify(fields.issuetype)}), attempting fallback types: ${err.message}`
+      );
+
+      // Try the most standard Jira issue types in sequence
+      const fallbackTypes = ['Story', 'Task', 'Bug', 'Standard'];
+      let succeeded = false;
+
+      for (const fallback of fallbackTypes) {
+        fields.issuetype = { name: fallback };
+        try {
+          jiraIssue = await attemptPostIssue();
+          succeeded = true;
+          logger.info(`Jira ticket creation succeeded using fallback issue type: ${fallback}`);
+          break;
+        } catch (retryErr: any) {
+          const retryErrMsg = (retryErr.message || '').toLowerCase();
+          // If assignee also fails during this retry, remove assignee and retry once more
+          if (
+            fields.assignee &&
+            (retryErrMsg.includes('assignee') ||
+              (retryErr.statusCode === 400 && !retryErrMsg.includes('issuetype')))
+          ) {
+            logger.warn(`Jira ticket creation with ${fallback} failed on assignee, retrying unassigned`);
+            delete fields.assignee;
+            resolvedAccountId = null;
+            try {
+              jiraIssue = await attemptPostIssue();
+              succeeded = true;
+              logger.info(`Jira ticket creation succeeded with ${fallback} as unassigned`);
+              break;
+            } catch {
+              // continue to next fallback
+            }
+          }
+        }
+      }
+
+      if (!succeeded) {
+        throw err;
+      }
+    } else if (isAssigneeError && fields.assignee) {
+      logger.warn(
+        `Jira ticket creation failed with assignee (${resolvedAccountId}), retrying as unassigned: ${err.message}`
+      );
       delete fields.assignee;
-      jiraIssue = await callJiraApi<{ id: string; key: string; self: string }>({
-        cloudId: orgIntegration.cloudId,
-        userId,
-        endpoint: '/issue',
-        method: 'POST',
-        body: { fields },
-      });
       resolvedAccountId = null;
+      try {
+        jiraIssue = await attemptPostIssue();
+      } catch (retryErr: any) {
+        const retryErrMsg = (retryErr.message || '').toLowerCase();
+        if (retryErrMsg.includes('issuetype') || retryErrMsg.includes('issue type')) {
+          fields.issuetype = { name: 'Story' };
+          jiraIssue = await attemptPostIssue();
+        } else {
+          throw retryErr;
+        }
+      }
     } else {
       throw err;
     }
@@ -189,7 +318,7 @@ export async function createTeamJiraTicket(
       teamId,
       jiraIssueId: jiraIssue.id,
       jiraKey: jiraIssue.key,
-      jiraSummary: input.summary.trim(),
+      jiraSummary: ticketSummary,
       jiraStatus: 'To Do',
       assigneeAccountId: resolvedAccountId || null,
       reporterAccountId: userJiraLink.jiraAccountId,
@@ -631,6 +760,69 @@ export async function getOrgJiraAssignees(userId: string, organizationId: string
     }));
   } catch (err: any) {
     logger.warn(`Failed to fetch assignable users for org: ${err.message}`);
+    return [];
+  }
+}
+
+export async function getTeamJiraIssueTypes(userId: string, teamId: string) {
+  if (!teamId) {
+    throw new ApiError(400, 'Team ID is required');
+  }
+
+  const team = await prisma.team.findUnique({
+    where: { id: teamId },
+    select: { id: true, organizationId: true },
+  });
+
+  if (!team) {
+    throw new ApiError(404, 'Team not found');
+  }
+
+  const isTeamMember = await prisma.teamMember.findUnique({
+    where: {
+      teamId_userId: {
+        teamId,
+        userId,
+      },
+    },
+  });
+
+  const isOrgAdmin = await prisma.organizationMember.findFirst({
+    where: {
+      organizationId: team.organizationId,
+      userId,
+      role: 'ORG_ADMIN',
+    },
+  });
+
+  if (!isTeamMember && !isOrgAdmin) {
+    throw new ApiError(403, 'You must be a team member or Org Admin to view issue types');
+  }
+
+  const orgIntegration = await prisma.orgJiraIntegration.findUnique({
+    where: { organizationId: team.organizationId },
+  });
+
+  if (!orgIntegration || !orgIntegration.isActive) {
+    return [];
+  }
+
+  try {
+    const issueTypes = await getJiraProjectIssueTypes(
+      orgIntegration.cloudId,
+      userId,
+      orgIntegration.projectKey
+    );
+
+    return issueTypes.map((t) => ({
+      id: t.id,
+      name: t.name,
+      description: t.description || null,
+      iconUrl: t.iconUrl || null,
+      subtask: t.subtask || false,
+    }));
+  } catch (err: any) {
+    logger.warn(`Failed to fetch project issue types for team ${teamId}: ${err.message}`);
     return [];
   }
 }

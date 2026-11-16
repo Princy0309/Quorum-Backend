@@ -8,7 +8,15 @@ import {
   getJiraStatusController,
 } from '../controllers/jiraOAuthController.js';
 
-import { getMyTicketsController, createTeamTicketController, getTeamTicketsController, getTicketDetailsController, transitionTicketStatusController, getTeamAssigneesController } from '../controllers/jiraTicketController.js';
+import {
+  getMyTicketsController,
+  createTeamTicketController,
+  getTeamTicketsController,
+  getTicketDetailsController,
+  transitionTicketStatusController,
+  getTeamAssigneesController,
+  getTeamIssueTypesController,
+} from '../controllers/jiraTicketController.js';
 import { handleJiraWebhookController } from '../controllers/jiraWebhookController.js';
 
 const router = Router();
@@ -51,15 +59,17 @@ router.get(
 
 router.get('/tickets/my', authMiddleware, getMyTicketsController);
 
-router.post('/teams/:teamId/tickets', authMiddleware, createTeamTicketController);
+router.post(['/teams/:teamId/tickets', '/teams/:teamId/jira/tickets'], authMiddleware, createTeamTicketController);
 
-router.get('/teams/:teamId/tickets', authMiddleware, getTeamTicketsController);
+router.get(['/teams/:teamId/tickets', '/teams/:teamId/jira/tickets'], authMiddleware, getTeamTicketsController);
 
 router.get('/teams/:teamId/tickets/:key', authMiddleware, getTicketDetailsController);
 
 router.post('/teams/:teamId/tickets/:key/transition', authMiddleware, transitionTicketStatusController);
 
-router.get('/teams/:teamId/assignees', authMiddleware, getTeamAssigneesController);
+router.get(['/teams/:teamId/assignees', '/teams/:teamId/jira/assignees'], authMiddleware, getTeamAssigneesController);
+
+router.get(['/teams/:teamId/issuetypes', '/teams/:teamId/issue-types', '/teams/:teamId/jira/issuetypes'], authMiddleware, getTeamIssueTypesController);
 
 router.get('/organizations/:id/assignees', authMiddleware, getTeamAssigneesController);
 
