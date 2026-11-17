@@ -402,17 +402,66 @@ export const addTeamMember = async (
     },
   });
 
+  const normalizedTargetRole = role && (role.toUpperCase().includes('LEAD') || role.toUpperCase().includes('ADMIN') || role.toUpperCase().includes('HEAD')) ? 'LEAD' : 'MEMBER';
+
   if (existingTeamMember) {
+    if (existingTeamMember.role !== normalizedTargetRole) {
+      const updated = await prisma.teamMember.update({
+        where: { id: existingTeamMember.id },
+        data: { role: normalizedTargetRole },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              avatar: true,
+            },
+          },
+        },
+      });
+
+      const teamConversation = await prisma.conversation.findUnique({
+        where: { teamId },
+      });
+
+      if (teamConversation) {
+        await prisma.conversationParticipant.upsert({
+          where: {
+            conversationId_userId: {
+              conversationId: teamConversation.id,
+              userId: targetUserId,
+            },
+          },
+          create: {
+            conversationId: teamConversation.id,
+            userId: targetUserId,
+            role: normalizedTargetRole === 'LEAD' ? 'admin' : 'member',
+          },
+          update: {
+            role: normalizedTargetRole === 'LEAD' ? 'admin' : 'member',
+          },
+        });
+      }
+
+      return {
+        id: updated.id,
+        teamId: updated.teamId,
+        userId: updated.userId,
+        role: updated.role,
+        joinedAt: updated.joinedAt,
+        user: updated.user,
+      };
+    }
     throw new ApiError(409, 'User is already a member of this team');
   }
 
-  // Fully atomic transaction
   const createdMember = await prisma.$transaction(async (tx) => {
     const member = await tx.teamMember.create({
       data: {
         teamId,
         userId: targetUserId,
-        role: role.trim() || 'member',
+        role: normalizedTargetRole,
       },
       include: {
         user: {
@@ -441,10 +490,10 @@ export const addTeamMember = async (
         create: {
           conversationId: teamConversation.id,
           userId: targetUserId,
-          role: role === 'LEAD' ? 'admin' : 'member',
+          role: normalizedTargetRole === 'LEAD' ? 'admin' : 'member',
         },
         update: {
-          role: role === 'LEAD' ? 'admin' : 'member',
+          role: normalizedTargetRole === 'LEAD' ? 'admin' : 'member',
         },
       });
 

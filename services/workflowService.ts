@@ -851,8 +851,8 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "$step1.eventId" for calendar event created in step 1
 6. Parameter requirements per action:
    - "CREATE_ORGANIZATION": { "name": string, "description"?: string }
-   - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds"?: string[], "memberNames"?: string[], "members"?: string[], "memberEmails"?: string[], "organizationId"?: string, "organizationName"?: string }
-   - "ADD_TEAM_MEMBER": { "teamId"?: string, "teamName"?: string, "memberId"?: string, "memberIds"?: string[], "memberName"?: string, "memberNames"?: string[], "memberEmail"?: string, "memberEmails"?: string[], "organizationId"?: string, "organizationName"?: string }
+   - "CREATE_TEAM": { "name": string, "description"?: string, "memberIds"?: string[], "memberNames"?: string[], "members"?: string[], "memberEmails"?: string[], "role"?: "LEAD" | "MEMBER", "teamRole"?: "LEAD" | "MEMBER", "organizationId"?: string, "organizationName"?: string }
+   - "ADD_TEAM_MEMBER": { "teamId"?: string, "teamName"?: string, "memberId"?: string, "memberIds"?: string[], "memberName"?: string, "memberNames"?: string[], "memberEmail"?: string, "memberEmails"?: string[], "role"?: "LEAD" | "MEMBER", "teamRole"?: "LEAD" | "MEMBER", "organizationId"?: string, "organizationName"?: string }
    - "REMOVE_TEAM_MEMBER": { "teamId"?: string, "teamName"?: string, "memberId"?: string, "memberName"?: string, "memberEmail"?: string, "organizationId"?: string, "organizationName"?: string }
    - "INVITE_ORG_MEMBER": { "email"?: string, "memberName"?: string, "role"?: "MEMBER" | "ORG_ADMIN", "teamId"?: string, "teamName"?: string, "organizationId"?: string, "organizationName"?: string }
    - "SCHEDULE_MEETING": { "title": string, "startTime": string (ISO 8601), "durationMinutes"?: number, "teamId"?: string }
@@ -883,10 +883,10 @@ CRITICAL SECURITY & PRIVACY RULES:
    - "CREATE_CALENDAR_EVENT": { "title": string, "description"?: string, "startDate": string (ISO 8601), "endDate"?: string, "eventType"?: "REMINDER" | "MEETING" | "DEADLINE" | "GENERAL", "isAllDay"?: boolean, "hasReminder"?: boolean, "reminderMinutes"?: number, "attendeeEmails"?: string[] }
 7. ACTION SELECTION RULES:
    - When the user asks to create, make, setup, or start an organization or company (e.g. "make a new organisation", "create an organization", "create company"), you MUST use "CREATE_ORGANIZATION". The creator is ALWAYS the organization owner and ORG_ADMIN. Any other members added or invited default to "MEMBER". DO NOT use "CREATE_TEAM" for organizations or companies.
-   - When the user asks to add or invite someone/a member to a team (e.g. "add tanvi to team dev team(frontend)", "add user to team", "add me to team"), you MUST use "ADD_TEAM_MEMBER". DO NOT use "CREATE_TEAM" when adding members to an existing team. Match the team from the provided "teams" list to set "teamId" and "teamName", match the organization from the user prompt or "organizations" list to set "organizationId" and "organizationName", and match the member from "members" to set "memberId", "memberName", or "memberNames".
+   - When the user asks to add or invite someone/a member to a team (e.g. "add tanvi to team dev team(frontend)", "add user to team", "add me to team", "add yogendra as team lead"), you MUST use "ADD_TEAM_MEMBER". DO NOT use "CREATE_TEAM" when adding members to an existing team. Match the team from the provided "teams" list to set "teamId" and "teamName", match the organization from the user prompt or "organizations" list to set "organizationId" and "organizationName", and match the member from "members" to set "memberId", "memberName", or "memberNames". If the user specifies adding them as "lead", "team lead", "head", or "admin", set "role": "LEAD". If not specified or member, set "role": "MEMBER".
    - When the user asks to remove or kick someone from a team (e.g. "remove tanvi from team frontend", "kick member from team dev"), you MUST use "REMOVE_TEAM_MEMBER". Match team from "teams" and member from "members".
    - When the user asks to invite someone to an organization or company (e.g. "invite user@example.com to organization", "invite tanvi to company"), you MUST use "INVITE_ORG_MEMBER". Invited users default to role "MEMBER". NEVER invite or downgrade the organization creator/owner.
-   - Use "CREATE_TEAM" ONLY when creating a NEW team, squad, department, or group within an organization.
+   - Use "CREATE_TEAM" ONLY when creating a NEW team, squad, department, or group within an organization. If the user specifies adding members as "lead", "team lead", "head", or "admin", set "role": "LEAD".
    - When the user asks to create, make, or write a document or notes (e.g. "create a document named PRD", "make team document for sprint planning"), you MUST use "CREATE_DOCUMENT".
    - When the user asks to archive a document (e.g. "archive document PRD", "archive doc sprint planning"), you MUST use "ARCHIVE_DOCUMENT". Match document from "documents".
    - When the user asks to create or assign a task (e.g. "create task fix navbar for tanvi in team dev", "assign task deploy to tanvi"), you MUST use "CREATE_TASK".
@@ -1608,6 +1608,15 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             }
           }
 
+          const requestedRole = String(
+            resolvedParams.role ||
+            resolvedParams.teamRole ||
+            (step.description && /(?:team\s+lead|as\s+lead|as\s+team\s+lead|leader)/i.test(step.description) ? 'LEAD' : '') ||
+            (plan.summary && /(?:team\s+lead|as\s+lead|as\s+team\s+lead)/i.test(plan.summary) ? 'LEAD' : '') ||
+            ''
+          ).toUpperCase();
+          const targetMemberRole = (requestedRole.includes('LEAD') || requestedRole.includes('ADMIN') || requestedRole.includes('HEAD')) ? 'LEAD' : 'MEMBER';
+
           let addedCount = 1;
           const failedMemberIds: string[] = [];
           for (const targetId of resolvedTargetUserIds) {
@@ -1640,7 +1649,34 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
                     },
                   });
                 } else {
-                  await addTeamMember(targetOrgId, team.id, userId, callerRole, targetId, 'member');
+                  await addTeamMember(targetOrgId, team.id, userId, callerRole, targetId, targetMemberRole);
+                }
+              } else if (existingMember.role !== targetMemberRole && targetId !== userId) {
+                await prisma.teamMember.update({
+                  where: { id: existingMember.id },
+                  data: { role: targetMemberRole },
+                });
+                const teamConv = await prisma.conversation.findFirst({
+                  where: { teamId: team.id },
+                  select: { id: true },
+                });
+                if (teamConv) {
+                  await prisma.conversationParticipant.upsert({
+                    where: {
+                      conversationId_userId: {
+                        conversationId: teamConv.id,
+                        userId: targetId,
+                      },
+                    },
+                    create: {
+                      conversationId: teamConv.id,
+                      userId: targetId,
+                      role: targetMemberRole === 'LEAD' ? 'admin' : 'member',
+                    },
+                    update: {
+                      role: targetMemberRole === 'LEAD' ? 'admin' : 'member',
+                    },
+                  });
                 }
               }
               addedCount++;
@@ -1784,6 +1820,15 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             throw new ApiError(400, 'Member to add could not be found or was not specified');
           }
 
+          const requestedAddRole = String(
+            resolvedParams.role ||
+            resolvedParams.teamRole ||
+            (step.description && /(?:team\s+lead|as\s+lead|as\s+team\s+lead|leader)/i.test(step.description) ? 'LEAD' : '') ||
+            (plan.summary && /(?:team\s+lead|as\s+lead|as\s+team\s+lead)/i.test(plan.summary) ? 'LEAD' : '') ||
+            ''
+          ).toUpperCase();
+          const targetAddMemberRole = (requestedAddRole.includes('LEAD') || requestedAddRole.includes('ADMIN') || requestedAddRole.includes('HEAD')) ? 'LEAD' : 'MEMBER';
+
           let addedCount = 0;
           for (const targetId of resolvedTargetUserIds) {
             await prisma.organizationMember.upsert({
@@ -1810,11 +1855,38 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
                   data: {
                     teamId: team.id,
                     userId: targetId,
-                    role: 'MEMBER',
+                    role: targetAddMemberRole,
                   },
                 });
               } else {
-                await addTeamMember(finalOrgId, team.id, userId, callerRole, targetId, 'member');
+                await addTeamMember(finalOrgId, team.id, userId, callerRole, targetId, targetAddMemberRole);
+              }
+            } else if (existingMember.role !== targetAddMemberRole) {
+              await prisma.teamMember.update({
+                where: { id: existingMember.id },
+                data: { role: targetAddMemberRole },
+              });
+              const teamConv = await prisma.conversation.findFirst({
+                where: { teamId: team.id },
+                select: { id: true },
+              });
+              if (teamConv) {
+                await prisma.conversationParticipant.upsert({
+                  where: {
+                    conversationId_userId: {
+                      conversationId: teamConv.id,
+                      userId: targetId,
+                    },
+                  },
+                  create: {
+                    conversationId: teamConv.id,
+                    userId: targetId,
+                    role: targetAddMemberRole === 'LEAD' ? 'admin' : 'member',
+                  },
+                  update: {
+                    role: targetAddMemberRole === 'LEAD' ? 'admin' : 'member',
+                  },
+                });
               }
             }
             addedCount++;
@@ -4952,7 +5024,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             }
 
             const rawRoleStr = String(resolvedParams.teamRole || resolvedParams.role || 'member').toLowerCase();
-            const assignedRole = rawRoleStr.includes('lead') || rawRoleStr.includes('admin') || rawRoleStr.includes('leader') ? 'LEAD' : 'member';
+            const assignedRole = rawRoleStr.includes('lead') || rawRoleStr.includes('admin') || rawRoleStr.includes('leader') || rawRoleStr.includes('head') ? 'LEAD' : 'MEMBER';
 
             if (targetUserId === userId && assignedRole === 'LEAD' && !isTeamLead && !isOrgAdminOrOwner) {
               throw new ApiError(403, 'Privilege escalation blocked: You cannot self-promote to team LEAD');
