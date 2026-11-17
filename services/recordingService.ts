@@ -96,13 +96,14 @@ export const serializeRecording = (recording: any) => {
 
 export const canUserAccessMeetingRecordings = async (
   userId: string,
-  meetingCode: string,
+  rawMeetingCode: string,
   recording?: { recordedById?: string | null; meetingId?: string | null }
 ): Promise<boolean> => {
   if (recording && recording.recordedById === userId) {
     return true;
   }
 
+  const meetingCode = normalizeMeetingCode(rawMeetingCode);
   const meeting = await prisma.meeting.findUnique({
     where: { code: meetingCode },
     select: {

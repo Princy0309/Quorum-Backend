@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import { registerSfuSignaling } from './sfuSignaling.js';
-import { handleJoinMeeting, handleLeaveMeeting, handleEndMeeting, handleDisconnectCleanup } from './meetingPresence.js';
+import { handleJoinMeeting, handleLeaveMeeting, handleEndMeeting, handleDisconnectCleanup, normalizeMeetingCode } from './meetingPresence.js';
 import {
   handleToggleMic,
   handleToggleCam,
@@ -258,16 +258,18 @@ export const initSocketServer = (httpServer: any) => {
     registerSfuSignaling(io, socket);
 
     socket.on('meeting:join', (data, ack) => {
-      handleJoinMeeting(io, socket, data?.meetingCode, ack);
+      const cleanCode = normalizeMeetingCode(data?.meetingCode || '');
+      handleJoinMeeting(io, socket, cleanCode, ack);
       if (socket.data.user?.id) {
-        setMeetingPresence(socket.data.user.id, true, data?.meetingCode).then((updated) => {
+        setMeetingPresence(socket.data.user.id, true, cleanCode).then((updated) => {
           broadcastUserPresenceUpdate(io, socket.data.user.id, updated).catch(() => { });
         }).catch(() => { });
       }
     });
 
     socket.on('meeting:leave', (data, ack) => {
-      handleLeaveMeeting(io, socket, data?.meetingCode, ack);
+      const cleanCode = normalizeMeetingCode(data?.meetingCode || '');
+      handleLeaveMeeting(io, socket, cleanCode, ack);
       if (socket.data.user?.id) {
         setScreenSharePresence(socket.data.user.id, false).catch(() => { });
         setMeetingPresence(socket.data.user.id, false).then((updated) => {
@@ -276,7 +278,10 @@ export const initSocketServer = (httpServer: any) => {
       }
     });
 
-    socket.on('meeting:end', (data, ack) => handleEndMeeting(io, socket, data, ack));
+    socket.on('meeting:end', (data, ack) => {
+      const cleanCode = normalizeMeetingCode(data?.meetingCode || '');
+      handleEndMeeting(io, socket, { ...data, meetingCode: cleanCode }, ack);
+    });
 
     socket.on('meeting:screen-share', async (data: { meetingCode: string; isSharing: boolean }, ack?: (res: any) => void) => {
       const userId = socket.data.user?.id;
@@ -286,8 +291,9 @@ export const initSocketServer = (httpServer: any) => {
         const isSharing = Boolean(data?.isSharing);
         const updated = await setScreenSharePresence(userId, isSharing);
         await broadcastUserPresenceUpdate(io, userId, updated);
-        if (data?.meetingCode) {
-          io.to(data.meetingCode.trim().toLowerCase()).emit('meeting:screen-share-changed', {
+        const cleanCode = normalizeMeetingCode(data?.meetingCode || '');
+        if (cleanCode) {
+          io.to(cleanCode).emit('meeting:screen-share-changed', {
             userId,
             isSharing,
           });

@@ -10,6 +10,7 @@ import { canUserJoinMeeting } from '../services/meetingPermissionService.js';
 import { setMeetingPresence, setScreenSharePresence } from '../services/presenceService.js';
 import { broadcastUserPresenceUpdate } from './handlers/presenceHandler.js';
 import { stopActiveRecordingForMeeting } from '../services/recordingService.js';
+import { sanitizeMeetingCode } from '../validators/meetingValidators.js';
 
 export interface Participant {
     userId: string;
@@ -66,12 +67,7 @@ export const socketToMeetingsMap = new Map<string, Set<string>>();
 const meetingInitLocks = new Map<string, Promise<MeetingRoomState | null>>();
 
 export const normalizeMeetingCode = (code: string): string => {
-    let cleaned = typeof code === 'string' ? code.trim().toLowerCase() : '';
-    if (cleaned.includes('/')) {
-        const parts = cleaned.split('/').filter(Boolean);
-        cleaned = parts[parts.length - 1];
-    }
-    return cleaned;
+    return sanitizeMeetingCode(code);
 };
 
 export const formatParticipants = (participantsMap: Map<string, Participant>): ParticipantDTO[] => {

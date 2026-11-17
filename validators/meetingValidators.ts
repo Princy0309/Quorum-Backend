@@ -24,9 +24,15 @@ export const createScopedMeetingSchema = z
 export const sanitizeMeetingCode = (val: unknown): string => {
   if (typeof val !== 'string') return '';
   let decoded = String(val).trim();
-  try {
-    decoded = decodeURIComponent(decoded);
-  } catch {}
+  for (let i = 0; i < 3; i++) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    } catch {
+      break;
+    }
+  }
   const match = decoded.match(/([a-z]{3}-[a-z]{3}-[a-z]{3})/i);
   if (match) {
     return match[1].toLowerCase();

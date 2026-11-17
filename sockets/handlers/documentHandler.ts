@@ -3,6 +3,7 @@ import prisma from '../../config/prisma.js';
 import redis from '../../config/redis.js';
 import logger from '../../utils/logger.js';
 import { DOCUMENT_EVENTS } from '../../utils/constants.js';
+import { sanitizeMeetingCode } from '../../validators/meetingValidators.js';
 
 interface DocumentUser {
   userId: string;
@@ -206,8 +207,9 @@ export const registerDocumentHandler = (io: Server, socket: Socket) => {
     const { meetingCodeOrId, documentId, documentTitle } = data || {};
     if (!meetingCodeOrId || !documentId) return;
 
-    io.to(`meeting:${meetingCodeOrId}`).emit(DOCUMENT_EVENTS.MEETING_DOCUMENT_OPENED, {
-      meetingCodeOrId,
+    const cleanCode = sanitizeMeetingCode(meetingCodeOrId);
+    io.to(`meeting:${cleanCode}`).emit(DOCUMENT_EVENTS.MEETING_DOCUMENT_OPENED, {
+      meetingCodeOrId: cleanCode,
       documentId,
       documentTitle,
       openedBy: {
@@ -224,8 +226,9 @@ export const registerDocumentHandler = (io: Server, socket: Socket) => {
     const { meetingCodeOrId, documentId } = data || {};
     if (!meetingCodeOrId || !documentId) return;
 
-    io.to(`meeting:${meetingCodeOrId}`).emit(DOCUMENT_EVENTS.MEETING_DOCUMENT_CLOSED, {
-      meetingCodeOrId,
+    const cleanCode = sanitizeMeetingCode(meetingCodeOrId);
+    io.to(`meeting:${cleanCode}`).emit(DOCUMENT_EVENTS.MEETING_DOCUMENT_CLOSED, {
+      meetingCodeOrId: cleanCode,
       documentId,
       closedBy: {
         id: user?.id || socket.id,

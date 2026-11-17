@@ -11,6 +11,7 @@ import {
   cleanupWhiteboardSession,
 } from '../sockets/handlers/whiteboardHandler.js';
 import logger from '../utils/logger.js';
+import { sanitizeMeetingCode } from '../validators/meetingValidators.js';
 
 export interface OrgPermissionResult {
   role: OrgRole;
@@ -702,9 +703,10 @@ export const deleteWhiteboard = async (userId: string, whiteboardId: string) => 
 };
 
 export const findMeetingByCodeOrId = async (codeOrId: string) => {
+  const cleanCode = sanitizeMeetingCode(codeOrId);
   const meeting = await prisma.meeting.findFirst({
     where: {
-      OR: [{ code: codeOrId }, { id: codeOrId }],
+      OR: [{ code: cleanCode }, { id: codeOrId }, { code: codeOrId }],
     },
     include: {
       organization: {

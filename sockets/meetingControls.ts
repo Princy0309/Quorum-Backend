@@ -28,7 +28,7 @@ export const handleToggleMic = (
   }
 
   const { meetingCode, isMuted } = payload || {};
-  const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+  const normalizedCode = normalizeMeetingCode(meetingCode);
 
   if (!normalizedCode || typeof isMuted !== 'boolean') {
     const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code and isMuted status are required' };
@@ -88,7 +88,7 @@ export const handleMuteParticipant = (
   }
 
   const { meetingCode, targetUserId, allowUnmute, action } = payload || {};
-  const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+  const normalizedCode = normalizeMeetingCode(meetingCode);
 
   if (!normalizedCode || typeof targetUserId !== 'string' || !targetUserId.trim()) {
     const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code and target user ID are required' };
@@ -203,7 +203,7 @@ export const handleToggleCam = (
   }
 
   const { meetingCode, isVideoOff } = payload || {};
-  const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+  const normalizedCode = normalizeMeetingCode(meetingCode);
 
   if (!normalizedCode || typeof isVideoOff !== 'boolean') {
     const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code and isVideoOff status are required' };
@@ -254,7 +254,7 @@ export const handleSendMeetingMessage = (
   }
 
   const { meetingCode, content } = payload || {};
-  const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+  const normalizedCode = normalizeMeetingCode(meetingCode);
   const trimmedContent = typeof content === 'string' ? content.trim() : '';
 
   if (!normalizedCode || !trimmedContent) {

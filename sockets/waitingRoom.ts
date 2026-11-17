@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { meetingRooms, formatParticipants, socketToMeetingsMap, ParticipantDTO, SocketAckResponse } from './meetingPresence.js';
+import { meetingRooms, formatParticipants, socketToMeetingsMap, ParticipantDTO, SocketAckResponse, normalizeMeetingCode } from './meetingPresence.js';
 
 export const handleAdmitParticipant = (
   io: Server,
@@ -16,7 +16,7 @@ export const handleAdmitParticipant = (
   }
 
   const { meetingCode, targetUserId } = payload || {};
-  const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+  const normalizedCode = normalizeMeetingCode(meetingCode);
 
   if (!normalizedCode || typeof targetUserId !== 'string' || !targetUserId.trim()) {
     const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code and target user ID are required' };
@@ -144,7 +144,7 @@ export const handleRejectParticipant = (
   }
 
   const { meetingCode, targetUserId } = payload || {};
-  const normalizedCode = typeof meetingCode === 'string' ? meetingCode.trim() : '';
+  const normalizedCode = normalizeMeetingCode(meetingCode);
 
   if (!normalizedCode || typeof targetUserId !== 'string' || !targetUserId.trim()) {
     const err = { code: 'INVALID_PAYLOAD', message: 'Meeting code and target user ID are required' };
