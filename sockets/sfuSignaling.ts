@@ -7,6 +7,11 @@ import { SrtpSession } from '../sfu/protocols/srtp/srtpPacket.js';
 import logger from '../utils/logger.js';
 import { RoomSharder } from '../sfu/roomSharder.js';
 import { canUserJoinMeeting } from '../services/meetingPermissionService.js';
+import { sanitizeMeetingCode } from '../validators/meetingValidators.js';
+
+const normalizeRoom = (code?: string): string => {
+  return sanitizeMeetingCode(code || '');
+};
 
 
 
@@ -200,7 +205,8 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
   };
 
     socket.on('sfu:join', async ({ roomCode, peerId, name, avatar, profilePicture }: JoinPayload) => {
-      if (!roomCode) {
+      const cleanRoomCode = normalizeRoom(roomCode);
+      if (!cleanRoomCode) {
         socket.emit('sfu:error', { message: 'roomCode is required' });
         return;
       }
@@ -216,9 +222,9 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     const rawAvatar = socket.data.user?.avatar || avatar || profilePicture || socket.handshake.auth?.avatar || socket.handshake.auth?.profilePicture;
     const effectiveAvatar = typeof rawAvatar === 'string' && rawAvatar.trim() ? rawAvatar.trim() : null;
 
-    const permCheck = await canUserJoinMeeting(effectivePeerId, roomCode);
+    const permCheck = await canUserJoinMeeting(effectivePeerId, cleanRoomCode);
     if (!permCheck.allowed) {
-      logger.warn(`[Signaling] Rejecting unauthorized SFU join: user=${effectivePeerId}, room=${roomCode}, reason=${permCheck.reason}`);
+      logger.warn(`[Signaling] Rejecting unauthorized SFU join: user=${effectivePeerId}, room=${cleanRoomCode}, reason=${permCheck.reason}`);
       socket.emit('sfu:error', { message: permCheck.reason || 'Access denied to this meeting' });
       return;
     }
@@ -227,31 +233,32 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         handleLeave();
       }
 
-      const existingRoom = roomBroker.getRoom(roomCode);
+      const existingRoom = roomBroker.getRoom(cleanRoomCode);
       const existingPeer = existingRoom?.peers.get(effectivePeerId);
       if (existingPeer && existingPeer.socketId && existingPeer.socketId !== socket.id) {
         io.to(existingPeer.socketId).emit('sfu:replaced', {
-          roomCode,
+          roomCode: cleanRoomCode,
           peerId: effectivePeerId,
           message: 'Session replaced by another connection',
         });
         existingPeer.socketId = socket.id;
       }
 
-      currentRoom = roomCode;
+      currentRoom = cleanRoomCode;
       currentPeerId = effectivePeerId;
 
       try {
-        const assignedWorker = await RoomSharder.getInstance().getOrAssignWorker(roomCode);
-        logger.info(`[Signaling] Room ${roomCode} coordinated on ${assignedWorker} for peer ${effectivePeerId}`);
+        const assignedWorker = await RoomSharder.getInstance().getOrAssignWorker(cleanRoomCode);
+        logger.info(`[Signaling] Room ${cleanRoomCode} coordinated on ${assignedWorker} for peer ${effectivePeerId}`);
       } catch (shardingErr) {
         logger.warn(`[Signaling] Room sharder coordination warning:`, shardingErr);
       }
 
-      socket.join(roomCode);
-      roomBroker.addPeer(roomCode, effectivePeerId, socket.id, effectiveName, effectiveAvatar);
+      socket.join(cleanRoomCode);
+      socket.join(`sfu:${cleanRoomCode}`);
+      roomBroker.addPeer(cleanRoomCode, effectivePeerId, socket.id, effectiveName, effectiveAvatar);
 
-      const existingTracks = roomBroker.getRoomTracks(roomCode).map((t) => ({
+      const existingTracks = roomBroker.getRoomTracks(cleanRoomCode).map((t) => ({
         trackId: t.trackId,
         kind: t.kind,
         peerId: t.peerId,
@@ -259,11 +266,13 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       }));
 
       socket.emit('sfu:joined', {
+        roomCode: cleanRoomCode,
         existingTracks,
-        activeScreenSharer: roomBroker.getActiveScreenSharer(roomCode),
-        peers: roomBroker.getRoomPeers(roomCode),
+        activeScreenSharer: roomBroker.getActiveScreenSharer(cleanRoomCode),
+        peers: roomBroker.getRoomPeers(cleanRoomCode),
       });
-      socket.to(roomCode).emit('sfu:peer-joined', {
+      socket.to(cleanRoomCode).emit('sfu:peer-joined', {
+        roomCode: cleanRoomCode,
         peerId: effectivePeerId,
         name: effectiveName,
         avatar: effectiveAvatar,
@@ -274,6 +283,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         if (t.peerId !== effectivePeerId) {
           const producerPeer = existingRoom?.peers.get(t.peerId);
           socket.emit('sfu:new-producer', {
+            roomCode: cleanRoomCode,
             peerId: t.peerId,
             name: producerPeer?.name || '',
             avatar: producerPeer?.avatar || null,
@@ -285,7 +295,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         }
       }
 
-      logger.info(`[Signaling] Peer ${effectivePeerId} joined SFU room ${roomCode}`);
+      logger.info(`[Signaling] Peer ${effectivePeerId} joined SFU room ${cleanRoomCode}`);
     });
 
   
@@ -298,7 +308,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     try {
       activeRoom = currentRoom;
       activePeerId = currentPeerId;
-      const rCode = roomCode || activeRoom;
+      const rCode = (roomCode ? normalizeRoom(roomCode) : activeRoom);
       const pId = peerId || activePeerId;
       if (!activeRoom || rCode !== activeRoom || !activePeerId || pId !== activePeerId) {
         logger.warn(`[Signaling] Unauthorized sfu:offer from socket ${socket.id} for room ${rCode} peer ${pId}`);
@@ -480,7 +490,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       if (!candidate) return;
       const activeRoom = currentRoom;
       const activePeerId = currentPeerId;
-      const rCode = roomCode || activeRoom;
+      const rCode = (roomCode ? normalizeRoom(roomCode) : activeRoom);
       const pId = peerId || activePeerId;
       if (!activeRoom || rCode !== activeRoom || !activePeerId || pId !== activePeerId) {
         return;
@@ -563,7 +573,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       if (!candidate || !trackId) return;
       const activeRoom = currentRoom;
       const activePeerId = currentPeerId;
-      const rCode = roomCode || activeRoom;
+      const rCode = (roomCode ? normalizeRoom(roomCode) : activeRoom);
       const pId = peerId || activePeerId;
       if (!activeRoom || rCode !== activeRoom || !activePeerId || pId !== activePeerId) {
         return;
@@ -590,7 +600,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
   socket.on('sfu:request-keyframe', ({ roomCode, publisherPeerId, trackId }: { roomCode: string; publisherPeerId: string; trackId?: string }) => {
     const activeRoom = currentRoom;
     const activePeerId = currentPeerId;
-    const rCode = roomCode || activeRoom;
+    const rCode = (roomCode ? normalizeRoom(roomCode) : activeRoom);
     if (!activeRoom || rCode !== activeRoom || !activePeerId || !publisherPeerId) {
       return;
     }
@@ -603,7 +613,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
     async ({ roomCode, subscriberPeerId, trackId, sdp }: SubscribePayload) => {
       const activeRoom = currentRoom;
       const activePeerId = currentPeerId;
-      const rCode = roomCode || activeRoom;
+      const rCode = (roomCode ? normalizeRoom(roomCode) : activeRoom);
       const subPeerId = subscriberPeerId || activePeerId;
       if (!activeRoom || rCode !== activeRoom || !activePeerId || subPeerId !== activePeerId) {
         logger.warn(`[Signaling] Unauthorized sfu:subscribe from socket ${socket.id} for room ${rCode} peer ${subPeerId}`);
@@ -821,7 +831,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
   socket.on('sfu:unsubscribe', ({ roomCode, subscriberPeerId, trackId }: { roomCode: string; subscriberPeerId: string; trackId: string }) => {
     const activeRoom = currentRoom;
     const activePeerId = currentPeerId;
-    const rCode = roomCode || activeRoom;
+    const rCode = (roomCode ? normalizeRoom(roomCode) : activeRoom);
     const subPeerId = subscriberPeerId || activePeerId;
     if (!activeRoom || rCode !== activeRoom || !activePeerId || subPeerId !== activePeerId || !trackId) {
       return;
@@ -841,7 +851,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
   socket.on('sfu:unpublish', ({ roomCode, peerId, trackId }: { roomCode: string; peerId: string; trackId: string }) => {
     const activeRoom = currentRoom;
     const activePeerId = currentPeerId;
-    const rCode = roomCode || activeRoom;
+    const rCode = (roomCode ? normalizeRoom(roomCode) : activeRoom);
     const pId = peerId || activePeerId;
     if (!activeRoom || rCode !== activeRoom || !activePeerId || pId !== activePeerId || !trackId) {
       return;
@@ -880,7 +890,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
   socket.on('sfu:start-screen-share', ({ roomCode, peerId }: { roomCode?: string; peerId?: string }) => {
     const activeRoom = currentRoom;
     const activePeerId = currentPeerId;
-    const rCode = roomCode || activeRoom;
+    const rCode = (roomCode ? normalizeRoom(roomCode) : activeRoom);
     const pId = peerId || activePeerId;
     if (!activeRoom || rCode !== activeRoom || !activePeerId || pId !== activePeerId) {
       socket.emit('sfu:error', { message: 'Unauthorized screen share request' });
@@ -914,7 +924,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
   socket.on('sfu:stop-screen-share', ({ roomCode, peerId }: { roomCode?: string; peerId?: string }) => {
     const activeRoom = currentRoom;
     const activePeerId = currentPeerId;
-    const rCode = roomCode || activeRoom;
+    const rCode = (roomCode ? normalizeRoom(roomCode) : activeRoom);
     const pId = peerId || activePeerId;
     if (!activeRoom || rCode !== activeRoom || !activePeerId || pId !== activePeerId) {
       return;

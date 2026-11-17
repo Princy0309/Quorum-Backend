@@ -322,7 +322,8 @@ const getPlan = async (planId: string): Promise<StoredWorkflowPlan | null> => {
 };
 
 const getUserOrganizationContext = async (userId: string, targetOrgId?: string, queryPromptOrOrgName?: string) => {
-  if (!targetOrgId && queryPromptOrOrgName) {
+  let resolvedOrgId = targetOrgId;
+  if (queryPromptOrOrgName) {
     const userOrgs = await prisma.organization.findMany({
       where: {
         OR: [
@@ -338,13 +339,13 @@ const getUserOrganizationContext = async (userId: string, targetOrgId?: string, 
       const slugOrg = orgName.replace(/[^a-z0-9]/g, '');
       const cleanQuery = lowerQuery.replace(/[^a-z0-9]/g, '');
       if (lowerQuery.includes(orgName) || (slugOrg.length >= 3 && cleanQuery.includes(slugOrg))) {
-        targetOrgId = org.id;
+        resolvedOrgId = org.id;
         break;
       }
     }
   }
 
-  if (!targetOrgId) {
+  if (!resolvedOrgId) {
     const memberships = await prisma.organizationMember.findMany({
       where: { userId },
       select: { organizationId: true },
@@ -364,14 +365,14 @@ const getUserOrganizationContext = async (userId: string, targetOrgId?: string, 
       return null;
     }
     if (distinctOrgIds.size === 1) {
-      targetOrgId = Array.from(distinctOrgIds)[0];
+      resolvedOrgId = Array.from(distinctOrgIds)[0];
     } else {
       return null;
     }
   }
 
   const membership = await prisma.organizationMember.findFirst({
-    where: { userId, organizationId: targetOrgId },
+    where: { userId, organizationId: resolvedOrgId },
     include: {
       organization: {
         select: {
@@ -428,7 +429,7 @@ const getUserOrganizationContext = async (userId: string, targetOrgId?: string, 
   }
 
   const ownedOrg = await prisma.organization.findFirst({
-    where: { id: targetOrgId, ownerId: userId },
+    where: { id: resolvedOrgId, ownerId: userId },
     select: {
       id: true,
       name: true,
@@ -1567,6 +1568,8 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
           variables.set(`$step${step.step}.teamId`, team.id);
           variables.set(`$step${step.step}.id`, team.id);
           variables.set(`$step${step.step}.name`, team.name);
+          variables.set(`$step${step.step}.organizationId`, targetOrgId);
+          orgId = targetOrgId;
 
           const rawMemberQueries: string[] = [];
           if (Array.isArray(resolvedParams.memberIds)) rawMemberQueries.push(...resolvedParams.memberIds.map(String));
@@ -1703,7 +1706,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
           }
 
           if (plan.organizationId && team.organizationId && team.organizationId !== plan.organizationId) {
-            throw new ApiError(403, 'Cross-organization operation blocked: Target team belongs to another organization');
+            const allowed = await getUserOrganizationContext(userId, team.organizationId);
+            if (!allowed) {
+              throw new ApiError(403, 'Cross-organization operation blocked: Target team belongs to another organization');
+            }
           }
 
           const finalOrgId = String(team.organizationId || targetOrgId || '').trim();
@@ -2680,7 +2686,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
           }
 
           if (plan.organizationId && team.organizationId && team.organizationId !== plan.organizationId) {
-            throw new ApiError(403, 'Cross-organization operation blocked: Target team belongs to another organization');
+            const allowed = await getUserOrganizationContext(userId, team.organizationId);
+            if (!allowed) {
+              throw new ApiError(403, 'Cross-organization operation blocked: Target team belongs to another organization');
+            }
           }
 
           targetOrgId = team.organizationId || targetOrgId;
@@ -2998,7 +3007,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
           }
 
           if (plan.organizationId && team.organizationId && team.organizationId !== plan.organizationId) {
-            throw new ApiError(403, 'Cross-organization operation blocked: Target team belongs to another organization');
+            const allowed = await getUserOrganizationContext(userId, team.organizationId);
+            if (!allowed) {
+              throw new ApiError(403, 'Cross-organization operation blocked: Target team belongs to another organization');
+            }
           }
 
           const finalOrgId = String(team.organizationId || targetOrgId || '').trim();
@@ -4482,7 +4494,10 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
               select: { organizationId: true },
             });
             if (projCheck?.organizationId && projCheck.organizationId !== plan.organizationId) {
-              throw new ApiError(403, 'Cross-organization operation blocked: Target project belongs to another organization');
+              const allowed = await getUserOrganizationContext(userId, projCheck.organizationId);
+              if (!allowed) {
+                throw new ApiError(403, 'Cross-organization operation blocked: Target project belongs to another organization');
+              }
             }
           }
 

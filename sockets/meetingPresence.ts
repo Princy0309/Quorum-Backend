@@ -250,6 +250,7 @@ export const handleJoinMeeting = async (
         socketToMeetingsMap.set(socket.id, socketMeetings);
 
         socket.join(normalizedCode);
+        socket.join(`meeting:${normalizedCode}`);
 
         const waitingPayload = {
             meetingCode: normalizedCode,
@@ -305,6 +306,7 @@ export const handleJoinMeeting = async (
     socketToMeetingsMap.set(socket.id, socketMeetings);
 
     socket.join(normalizedCode);
+    socket.join(`meeting:${normalizedCode}`);
 
     const activeParticipants = formatParticipants(roomState.participants);
     const waitingUsersList = Array.from(roomState.waitingRoom.values()).map((w) => ({
@@ -339,12 +341,12 @@ export const handleJoinMeeting = async (
     ack?.({ success: true, data: joinedData });
 
     if (!existingParticipant) {
-        socket.to(normalizedCode).emit('meeting:participant-joined', {
+        socket.to(normalizedCode).to(`meeting:${normalizedCode}`).emit('meeting:participant-joined', {
             participant: participantSummary,
             participants: activeParticipants,
         });
 
-        io.to(normalizedCode).emit('meeting:presence-update', {
+        io.to(normalizedCode).to(`meeting:${normalizedCode}`).emit('meeting:presence-update', {
             participants: activeParticipants,
         });
     }
