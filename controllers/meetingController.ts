@@ -77,13 +77,13 @@ export const createScopedMeetingController = asyncHandler(
 
 export const getMeetingController = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
-    const parsedCode = meetingCodeParamSchema.safeParse(req.params.code);
+    const rawCode = (req.params.code || req.query.code || req.query.meetingCode) as string;
+    const parsedCode = meetingCodeParamSchema.safeParse(rawCode);
     if (!parsedCode.success) {
       return next(new ApiError(400, parsedCode.error.issues[0]?.message || 'Invalid meeting code'));
     }
 
     const meeting = await getMeeting(parsedCode.data, req.user?.id);
-
 
     return res.status(200).json({
       success: true,
@@ -98,13 +98,13 @@ export const endMeetingController = asyncHandler(
       return next(new ApiError(401, 'Unauthorized, login required'));
     }
 
-    const code = req.params.code as string;
-
-    if (!code) {
-      return next(new ApiError(400, 'Meeting code is required'));
+    const rawCode = (req.params.code || req.body?.meetingCode || req.query.code) as string;
+    const parsedCode = meetingCodeParamSchema.safeParse(rawCode);
+    if (!parsedCode.success) {
+      return next(new ApiError(400, parsedCode.error.issues[0]?.message || 'Meeting code is required'));
     }
 
-    const result = await endMeeting(code, req.user.id, req.body);
+    const result = await endMeeting(parsedCode.data, req.user.id, req.body);
 
     return res.status(200).json({
       success: true,
@@ -119,7 +119,8 @@ export const cancelMeetingController = asyncHandler(
       return next(new ApiError(401, 'Unauthorized, login required'));
     }
 
-    const parsedCode = meetingCodeParamSchema.safeParse(req.params.code);
+    const rawCode = (req.params.code || req.query.code) as string;
+    const parsedCode = meetingCodeParamSchema.safeParse(rawCode);
     if (!parsedCode.success) {
       return next(new ApiError(400, parsedCode.error.issues[0]?.message || 'Invalid meeting code'));
     }

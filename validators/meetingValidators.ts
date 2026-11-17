@@ -21,9 +21,23 @@ export const createScopedMeetingSchema = z
     }
   );
 
-export const meetingCodeParamSchema = z
-  .string()
-  .regex(/^[a-z]{3}-[a-z]{3}-[a-z]{3}$/, 'Invalid meeting code format (expected xxx-xxx-xxx)');
+export const sanitizeMeetingCode = (val: unknown): string => {
+  if (typeof val !== 'string') return '';
+  let decoded = String(val).trim();
+  try {
+    decoded = decodeURIComponent(decoded);
+  } catch {}
+  const match = decoded.match(/([a-z]{3}-[a-z]{3}-[a-z]{3})/i);
+  if (match) {
+    return match[1].toLowerCase();
+  }
+  return decoded.toLowerCase();
+};
+
+export const meetingCodeParamSchema = z.preprocess(
+  sanitizeMeetingCode,
+  z.string().regex(/^[a-z]{3}-[a-z]{3}-[a-z]{3}$/, 'Invalid meeting code format (expected xxx-xxx-xxx)')
+);
 
 export const uuidParamSchema = z
   .string()

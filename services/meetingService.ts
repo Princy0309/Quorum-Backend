@@ -11,6 +11,7 @@ import { getIO } from '../sockets/socketServer.js';
 import { sendPushToOfflineUsers } from './notificationService.js';
 import { scheduleEventReminder, cancelEventReminder } from '../queues/reminderQueue.js';
 import { addScopedMeetingInviteEmailToQueue } from '../queues/emailQueue.js';
+import { sanitizeMeetingCode } from '../validators/meetingValidators.js';
 
 
 const generateCode = (): string => {
@@ -169,7 +170,7 @@ export const createMeeting = async (
     scopeType: meeting.scopeType,
     organizationId: meeting.organizationId,
     teamId: meeting.teamId,
-    link: `${env.CLIENT_URL}/meet/${meeting.code}`,
+    link: `${env.CLIENT_URL}/video-call?code=${meeting.code}`,
   };
 };
 
@@ -228,7 +229,7 @@ const syncMeetingCalendarAndNotifications = async (
 
     if (memberIds.length === 0) return;
 
-    const meetingLink = `${env.CLIENT_URL}/meet/${meeting.code}`;
+    const meetingLink = `${env.CLIENT_URL}/video-call?code=${meeting.code}`;
     const meetingTitle = meeting.title || `${scopeName} Meeting`;
 
     if (meeting.status === MeetingStatus.SCHEDULED && meeting.scheduledStartTime) {
@@ -448,13 +449,14 @@ export const createScopedMeeting = async (
     organization: meeting.organization,
     teamId: meeting.teamId,
     team: meeting.team,
-    link: `${env.CLIENT_URL}/meet/${meeting.code}`,
+    link: `${env.CLIENT_URL}/video-call?code=${meeting.code}`,
   };
 };
 
 export const getMeeting = async (code: string, userId?: string) => {
+  const sanitizedCode = sanitizeMeetingCode(code);
   if (userId) {
-    const permCheck = await canUserJoinMeeting(userId, code);
+    const permCheck = await canUserJoinMeeting(userId, sanitizedCode);
     if (!permCheck.allowed) {
       throw new ApiError(permCheck.statusCode || 403, permCheck.reason || 'Access denied');
     }
@@ -462,7 +464,7 @@ export const getMeeting = async (code: string, userId?: string) => {
 
   const meeting = await prisma.meeting.findFirst({
     where: {
-      code,
+      code: sanitizedCode,
       status: {
         in: [MeetingStatus.ACTIVE, MeetingStatus.SCHEDULED],
       },
@@ -517,8 +519,9 @@ export const getMeeting = async (code: string, userId?: string) => {
 };
 
 export const endMeeting = async (code: string, hostId: string, extraData?: any) => {
+  const sanitizedCode = sanitizeMeetingCode(code);
   const meeting = await prisma.meeting.findFirst({
-    where: { code },
+    where: { code: sanitizedCode },
   });
 
   if (!meeting) {
@@ -534,20 +537,20 @@ export const endMeeting = async (code: string, hostId: string, extraData?: any) 
   }
 
   await prisma.meeting.update({
-    where: { code },
+    where: { code: sanitizedCode },
     data: { status: MeetingStatus.ENDED },
   });
 
-  await cleanupMeetingCalendarEventsAndReminders(code);
+  await cleanupMeetingCalendarEventsAndReminders(sanitizedCode);
 
   try {
-    await stopActiveRecordingForMeeting(code, extraData);
+    await stopActiveRecordingForMeeting(sanitizedCode, extraData);
   } catch (recErr) {
-    logger.warn(`Failed to stop active recording on endMeeting for ${code}:`, recErr);
+    logger.warn(`Failed to stop active recording on endMeeting for ${sanitizedCode}:`, recErr);
   }
 
   try {
-    await closeMeetingRoom(code);
+    await closeMeetingRoom(sanitizedCode);
   } catch (err) {
     console.error('Failed to teardown meeting socket room:', err);
   }
@@ -620,7 +623,7 @@ export const getOrganizationMeetings = async (
     scheduledStartTime: m.scheduledStartTime,
     host: m.host ? { ...m.host, profilePicture: m.host.avatar || null } : m.host,
     team: m.team,
-    link: `${env.CLIENT_URL}/meet/${m.code}`,
+    link: `${env.CLIENT_URL}/video-call?code=${m.code}`,
   }));
 };
 
@@ -713,7 +716,7 @@ export const getTeamMeetings = async (teamId: string, userId: string) => {
     scheduledStartTime: m.scheduledStartTime,
     host: m.host ? { ...m.host, profilePicture: m.host.avatar || null } : m.host,
     team: m.team,
-    link: `${env.CLIENT_URL}/meet/${m.code}`,
+    link: `${env.CLIENT_URL}/video-call?code=${m.code}`,
   }));
 };
 
@@ -820,13 +823,14 @@ export const getUserUpcomingMeetings = async (userId: string) => {
     host: m.host ? { ...m.host, profilePicture: m.host.avatar || null } : m.host,
     organization: m.organization,
     team: m.team,
-    link: `${env.CLIENT_URL}/meet/${m.code}`,
+    link: `${env.CLIENT_URL}/video-call?code=${m.code}`,
   }));
 };
 
 export const cancelMeeting = async (code: string, userId: string) => {
+  const sanitizedCode = sanitizeMeetingCode(code);
   const meeting = await prisma.meeting.findFirst({
-    where: { code },
+    where: { code: sanitizedCode },
     include: {
       organization: {
         select: {
@@ -873,20 +877,20 @@ export const cancelMeeting = async (code: string, userId: string) => {
   }
 
   await prisma.meeting.update({
-    where: { code },
+    where: { code: sanitizedCode },
     data: { status: MeetingStatus.CANCELLED },
   });
 
-  await cleanupMeetingCalendarEventsAndReminders(code);
+  await cleanupMeetingCalendarEventsAndReminders(sanitizedCode);
 
   try {
-    await stopActiveRecordingForMeeting(code);
+    await stopActiveRecordingForMeeting(sanitizedCode);
   } catch (recErr) {
-    logger.warn(`Failed to stop active recording on cancelMeeting for ${code}:`, recErr);
+    logger.warn(`Failed to stop active recording on cancelMeeting for ${sanitizedCode}:`, recErr);
   }
 
   try {
-    await closeMeetingRoom(code);
+    await closeMeetingRoom(sanitizedCode);
   } catch (err) {
     logger.error('[MeetingService] Failed to teardown cancelled meeting socket room:', err);
   }
@@ -896,10 +900,11 @@ export const cancelMeeting = async (code: string, userId: string) => {
 
 const cleanupMeetingCalendarEventsAndReminders = async (meetingCode: string) => {
   try {
-    const meetingLink = `${env.CLIENT_URL}/meet/${meetingCode}`;
+    const meetingLink = `${env.CLIENT_URL}/video-call?code=${meetingCode}`;
+    const legacyMeetingLink = `${env.CLIENT_URL}/meet/${meetingCode}`;
     const events = await prisma.calendarEvent.findMany({
       where: {
-        meetingLink,
+        meetingLink: { in: [meetingLink, legacyMeetingLink] },
         eventType: 'MEETING',
       },
       select: { id: true },
@@ -915,7 +920,7 @@ const cleanupMeetingCalendarEventsAndReminders = async (meetingCode: string) => 
 
     await prisma.calendarEvent.updateMany({
       where: {
-        meetingLink,
+        meetingLink: { in: [meetingLink, legacyMeetingLink] },
         eventType: 'MEETING',
       },
       data: {

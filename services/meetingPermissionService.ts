@@ -1,6 +1,7 @@
 import prisma from '../config/prisma.js';
 import { MeetingScopeType, MeetingStatus, OrgRole } from '@prisma/client';
 import logger from '../utils/logger.js';
+import { sanitizeMeetingCode } from '../validators/meetingValidators.js';
 
 export interface CanCreateMeetingInput {
   scopeType: MeetingScopeType;
@@ -157,8 +158,9 @@ export const canUserJoinMeeting = async (
   meetingCode: string
 ): Promise<PermissionCheckResult> => {
   try {
+    const sanitizedCode = sanitizeMeetingCode(meetingCode);
     const meeting = await prisma.meeting.findUnique({
-      where: { code: meetingCode },
+      where: { code: sanitizedCode },
       select: {
         id: true,
         code: true,

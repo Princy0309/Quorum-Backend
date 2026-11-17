@@ -1907,7 +1907,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             }
           }
 
-          const meetingLink = meeting.link || (env.CLIENT_URL ? `${env.CLIENT_URL}/meet/${meeting.code}` : `/meet/${meeting.code}`);
+          const meetingLink = meeting.link || (env.CLIENT_URL ? `${env.CLIENT_URL}/video-call?code=${meeting.code}` : `/video-call?code=${meeting.code}`);
           const meetingCode = meeting.code || (meeting as any).id;
 
           variables.set(`$step${step.step}.meetingCode`, meetingCode);
@@ -3683,7 +3683,7 @@ export const executeWorkflowPlan = async (userId: string, planId: string, confir
             select: { name: true, email: true },
           });
           const hostName = hostUser?.name || 'A teammate';
-          const meetingLink = meeting.link || (env.CLIENT_URL ? `${env.CLIENT_URL}/meet/${meeting.code}` : `/meet/${meeting.code}`);
+          const meetingLink = meeting.link || (env.CLIENT_URL ? `${env.CLIENT_URL}/video-call?code=${meeting.code}` : `/video-call?code=${meeting.code}`);
 
           for (const extEmail of externalEmails) {
             addScopedMeetingInviteEmailToQueue({

@@ -33,6 +33,7 @@ router.post('/scoped', authMiddleware, createScopedMeetingController);
 router.get('/upcoming', authMiddleware, getUserUpcomingMeetingsController);
 router.get('/organization/:organizationId', authMiddleware, getOrganizationMeetingsController);
 router.get('/team/:teamId', authMiddleware, getTeamMeetingsController);
+router.get('/', optionalAuth, getMeetingController);
 router.get('/:code', optionalAuth, getMeetingController);
 router.post('/:code/end', authMiddleware, endMeetingController);
 router.patch('/:code/cancel', authMiddleware, cancelMeetingController);
